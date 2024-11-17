@@ -22,11 +22,10 @@ namespace core {
         void _Advance();
         bool _IsAtEnd() const;
         void _SkipWhiteSpace();
-        
+        Token _NextToken();        
 
     public:
         Tokenizer(const string& src);
-        Token NextToken();
         vector<Token> Tokenize();
     };
 }
