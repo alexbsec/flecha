@@ -62,13 +62,8 @@ namespace core {
         }
     }
 
-    /* PUBLIC METHODS */
-
-    Tokenizer::Tokenizer(const string& src)
-        : _source(src), _index(0), _line(1), _column(1) {}
-
     // Gets next token
-    Token Tokenizer::NextToken() {
+    Token Tokenizer::_NextToken() {
         _SkipWhiteSpace();
 
         if (_IsAtEnd())
@@ -347,8 +342,23 @@ namespace core {
         return token;
     }
 
-    vector<Token> Tokenize() {
-        return vector<Token>();
+
+
+    /* PUBLIC METHODS */
+
+    Tokenizer::Tokenizer(const string& src)
+        : _source(src), _index(0), _line(1), _column(1) {}
+
+    // Tokenizer
+    vector<Token> Tokenizer::Tokenize() {
+        vector<Token> tokens;
+        while (true) {
+            Token token = _NextToken();
+            tokens.push_back(token);
+            if (token.type == TokenType::EOF_TOKEN) break;
+        }
+
+        return tokens;
     }
 }
 }
