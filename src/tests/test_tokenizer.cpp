@@ -6,12 +6,7 @@ using namespace flecha::core;
 
 std::vector<Token> tokenize(const std::string& source) {
     Tokenizer tokenizer(source);
-    std::vector<Token> tokens;
-    while (true) {
-        Token token = tokenizer.NextToken();
-        tokens.push_back(token);
-        if (token.type == TokenType::EOF_TOKEN) break;
-    }
+    std::vector<Token> tokens = tokenizer.Tokenize(); 
     return tokens;
 }
 
