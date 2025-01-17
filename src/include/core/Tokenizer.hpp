@@ -3,7 +3,6 @@
 
 #include <string>
 #include <vector>
-#include <cctype>
 #include "Token.hpp"
 
 using string = std::string;
