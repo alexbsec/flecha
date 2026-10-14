@@ -1,12 +1,14 @@
-# core/CMakeLists.txt
 add_library(core STATIC
-    Tokenizer.cpp
+    tokenizer.cpp
     core.cpp
 )
 
 target_include_directories(core
-    PUBLIC ${PROJECT_SOURCE_DIR}/include
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/src/include
 )
 
-target_link_libraries(core PRIVATE ${GTEST_LIBRARIES})
-
+target_link_libraries(core
+    PRIVATE
+        flecha_project_options
+)

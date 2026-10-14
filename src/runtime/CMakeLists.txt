@@ -1,5 +1,2 @@
-# src/runtime/CMakeLists.txt
-file(GLOB RUNTIME_SOURCES *.cpp)
-add_library(runtime ${RUNTIME_SOURCES})
-target_include_directories(runtime PRIVATE ${PROJECT_SOURCE_DIR}/include)
-
+add_library(runtime STATIC runtime.cpp)
+target_link_libraries(runtime PRIVATE flecha_project_options)

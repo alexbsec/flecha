@@ -1,4 +1,4 @@
-#include "core/Parser.hpp"
+#include "core/parser.hpp"
 
 #include <stdexcept>
 
@@ -8,8 +8,10 @@ namespace core {
  * @brief Variable token types
  */
 static const uset<TokenType> TYPES = {
-    TokenType::Int,   TokenType::String, TokenType::Char,
-    TokenType::Float, TokenType::Bool,
+    TokenType::I8,    TokenType::I16, TokenType::I32, TokenType::I64,
+    TokenType::ISize, TokenType::U8,  TokenType::U16, TokenType::U32,
+    TokenType::U64,   TokenType::USize, TokenType::F32, TokenType::F64,
+    TokenType::Char,  TokenType::Bool, TokenType::Void,
 };
 
 /* PRIVATE METHODS  */

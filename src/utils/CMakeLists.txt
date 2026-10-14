@@ -1,5 +1,2 @@
-# src/utils/CMakeLists.txt
-file(GLOB UTILS_SOURCES *.cpp)
-add_library(utils ${UTILS_SOURCES})
-target_include_directories(utils PRIVATE ${PROJECT_SOURCE_DIR}/include)
-
+add_library(utils STATIC utils.cpp)
+target_link_libraries(utils PRIVATE flecha_project_options)

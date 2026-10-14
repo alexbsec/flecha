@@ -33,7 +33,6 @@ class Visitor {
     virtual void Visit(class BodyNode& node) = 0;
 
     // Expressions
-    virtual void Visit(class AllocationStatementNode& node) = 0;
     virtual void Visit(class VariableDeclarationNode& node) = 0;
 
     // Initializations
@@ -42,7 +41,6 @@ class Visitor {
     // Memory
     virtual void Visit(class PointerNode& node) = 0;
     virtual void Visit(class MemoryNode& node) = 0;
-    virtual void Visit(class AllocationNode& node) = 0;
 
     // Types
     virtual void Visit(class PrimitiveTypeNode& node) = 0;
@@ -265,54 +263,6 @@ struct ExpressionNode : ASTNode {
     virtual ~ExpressionNode() = default;
 };
 
-/**
- * @brief The allocation mode
- *
- * @example: int! var = allot(int);
- */
-struct AllocationStatementNode : ExpressionNode {
-    ASTNode* location;
-    ASTNode* allocation;
-    ASTNode* initialization;
-
-    /**
-     * @brief The AllocationStatementNode constructor
-     *
-     * @param loc - The location node
-     * @param alloc - The allocation node
-     * @param init -  The initialization node
-     */
-    AllocationStatementNode(ASTNode* loc, ASTNode* alloc, ASTNode* init)
-        : location(loc), allocation(alloc), initialization(init) {}
-
-    /**
-     * @brief Destructs and free memory
-     */
-    ~AllocationStatementNode() {
-        if (location) {
-            delete location;
-            location = nullptr;
-        }
-
-        if (allocation) {
-            delete allocation;
-            allocation = nullptr;
-        }
-
-        if (initialization) {
-            delete initialization;
-            initialization = nullptr;
-        }
-    }
-
-    /**
-     * @brief The Accept visitor for traversal
-     *
-     * @param visitor - The visitor class object
-     */
-    void Accept(Visitor& visitor) { visitor.Visit(*this); }
-};
-
 struct VariableDeclarationNode : ExpressionNode {
     ASTNode* location;
     ASTNode* assignment;
@@ -454,42 +404,6 @@ struct UserDefinedTypeNode : TypeNode {
 };
 
 /* Memory nodes */
-
-struct AllocationNode : ASTNode {
-    ASTNode* location;
-    ASTNode* pointer_node;
-
-    /**
-     * @brief The AllocationNode constructor
-     *
-     * @param loc - The location node
-     * @param ptr - The pointer node
-     */
-    AllocationNode(ASTNode* loc, ASTNode* ptr)
-        : location(loc), pointer_node(ptr) {}
-
-    /**
-     * @brief Destructs and free memory
-     */
-    ~AllocationNode() {
-        if (location) {
-            delete location;
-            location = nullptr;
-        }
-
-        if (pointer_node) {
-            delete pointer_node;
-            pointer_node = nullptr;
-        }
-    }
-
-    /**
-     * @brief The Accept visitor for traversal
-     *
-     * @param visitor - The visitor class object
-     */
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
-};
 
 struct PointerNode : ASTNode {
     ASTNode* location;

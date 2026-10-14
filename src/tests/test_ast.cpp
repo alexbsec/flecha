@@ -3,7 +3,7 @@
 #include <sstream>
 #include <vector>
 
-#include "core/AST.hpp"
+#include "core/ast.hpp"
 
 using namespace flecha::core;
 
@@ -12,7 +12,7 @@ using namespace flecha::core;
 TEST(ASTLocationTests, TestLocationNode) {
     /* :main
      *
-     * int! var = allot(int);
+     * i32 value = 0;
      */
     StartNode* start = new StartNode(1, 5);
     EndNode* end = new EndNode(3, 22);
@@ -223,10 +223,6 @@ TEST(ASTPointerNode, DestructorFreesMemory) {
     // Validate initialization
     ASSERT_NO_THROW(delete ptr);  // Ensure proper cleanup
 }
-
-/*  EXPRESSION NODE */
-
-// TEST(ASTExpressionTests, AllocationNodeConstructor) {}
 
 /* BODY NODE  */
 

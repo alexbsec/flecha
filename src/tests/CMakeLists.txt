@@ -1,10 +1,19 @@
-# src/tests/CMakeLists.txt
-file(GLOB TEST_SOURCES *.cpp)
-message(STATUS "Test sources found: ${TEST_SOURCES}")
-# Only add tests if there are source files in the tests directory
-if(TEST_SOURCES)
-    add_executable(test_flecha ${TEST_SOURCES})
-    target_link_libraries(test_flecha PRIVATE core memory runtime utils std ${GTEST_LIBRARIES})
-    add_test(NAME FlechaTests COMMAND test_flecha)
-endif()
+add_executable(test_flecha
+    test_ast.cpp
+    test_main.cpp
+    test_tokenizer.cpp
+)
 
+target_link_libraries(test_flecha
+    PRIVATE
+        flecha_project_options
+        core
+        memory
+        runtime
+        utils
+        flecha_std
+        GTest::gtest_main
+)
+
+include(GoogleTest)
+gtest_discover_tests(test_flecha)

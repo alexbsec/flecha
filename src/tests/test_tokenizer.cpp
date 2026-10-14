@@ -1,4 +1,4 @@
-#include "core/Tokenizer.hpp"
+#include "core/tokenizer.hpp"
 #include <gtest/gtest.h>
 #include <vector>
 
@@ -12,38 +12,56 @@ std::vector<Token> tokenize(const std::string& source) {
 
 
 TEST(TokenizerTests, RecognizesKeywords) {
-    auto tokens = tokenize("int char bool");
-    ASSERT_EQ(tokens.size(), 4); // 3 keywords + EOF
+    auto tokens = tokenize("i32 u8 f64 char bool void unsafe return none");
+    ASSERT_EQ(tokens.size(), 10);
 
-    EXPECT_EQ(tokens[0].type, TokenType::Int);
-    EXPECT_EQ(tokens[0].value, "int");
+    EXPECT_EQ(tokens[0].type, TokenType::I32);
+    EXPECT_EQ(tokens[0].value, "i32");
 
-    EXPECT_EQ(tokens[1].type, TokenType::Char);
-    EXPECT_EQ(tokens[1].value, "char");
+    EXPECT_EQ(tokens[1].type, TokenType::U8);
+    EXPECT_EQ(tokens[2].type, TokenType::F64);
+    EXPECT_EQ(tokens[3].type, TokenType::Char);
+    EXPECT_EQ(tokens[4].type, TokenType::Bool);
+    EXPECT_EQ(tokens[5].type, TokenType::Void);
+    EXPECT_EQ(tokens[6].type, TokenType::Unsafe);
+    EXPECT_EQ(tokens[7].type, TokenType::Return);
+    EXPECT_EQ(tokens[8].type, TokenType::None);
+    EXPECT_EQ(tokens[9].type, TokenType::EOF_TOKEN);
+}
 
-    EXPECT_EQ(tokens[2].type, TokenType::Bool);
-    EXPECT_EQ(tokens[2].value, "bool");
+TEST(TokenizerTests, RecognizesFunctionModifiersAndReservedWords) {
+    auto tokens = tokenize(
+        "export extern inline comptime yield if else error const volatile as "
+        "null true false");
 
-    EXPECT_EQ(tokens[3].type, TokenType::EOF_TOKEN);
+    const std::vector<TokenType> expected = {
+        TokenType::Export, TokenType::Extern, TokenType::Inline,
+        TokenType::Comptime, TokenType::Yield, TokenType::If,
+        TokenType::Else, TokenType::Error, TokenType::Const,
+        TokenType::Volatile, TokenType::As, TokenType::Null,
+        TokenType::True, TokenType::False, TokenType::EOF_TOKEN,
+    };
+    ASSERT_EQ(tokens.size(), expected.size());
+    for (size_t index = 0; index < expected.size(); ++index) {
+        EXPECT_EQ(tokens[index].type, expected[index]);
+    }
 }
 
 TEST(TokenizerTests, RecognizesMultiCharacterOperators) {
-    auto tokens = tokenize("-> ** == <=");
-    ASSERT_EQ(tokens.size(), 5); // 4 operators + EOF
+    auto tokens = tokenize("= := == != === !== <= >= && ||");
+    ASSERT_EQ(tokens.size(), 11);
 
-    EXPECT_EQ(tokens[0].type, TokenType::AssignVal);
-    EXPECT_EQ(tokens[0].value, "->");
-
-    EXPECT_EQ(tokens[1].type, TokenType::Pow);
-    EXPECT_EQ(tokens[1].value, "**");
-
-    EXPECT_EQ(tokens[2].type, TokenType::Compare);
-    EXPECT_EQ(tokens[2].value, "==");
-
-    EXPECT_EQ(tokens[3].type, TokenType::LessEqual);
-    EXPECT_EQ(tokens[3].value, "<=");
-
-    EXPECT_EQ(tokens[4].type, TokenType::EOF_TOKEN);
+    EXPECT_EQ(tokens[0].type, TokenType::Assign);
+    EXPECT_EQ(tokens[1].type, TokenType::DeclareAssign);
+    EXPECT_EQ(tokens[2].type, TokenType::Equal);
+    EXPECT_EQ(tokens[3].type, TokenType::NotEqual);
+    EXPECT_EQ(tokens[4].type, TokenType::StrictEqual);
+    EXPECT_EQ(tokens[5].type, TokenType::StrictNotEqual);
+    EXPECT_EQ(tokens[6].type, TokenType::LessEqual);
+    EXPECT_EQ(tokens[7].type, TokenType::GreaterEqual);
+    EXPECT_EQ(tokens[8].type, TokenType::And);
+    EXPECT_EQ(tokens[9].type, TokenType::Or);
+    EXPECT_EQ(tokens[10].type, TokenType::EOF_TOKEN);
 }
 
 TEST(TokenizerTests, RecognizesIdentifiers) {
@@ -76,74 +94,66 @@ TEST(TokenizerTests, RecognizesNumbers) {
 }
 
 TEST(TokenizerTests, RecognizesSpecialCharacters) {
-    auto tokens = tokenize("! ? ( ) [ ] { }");
-    ASSERT_EQ(tokens.size(), 9); // 8 characters + EOF
+    auto tokens = tokenize("! ( ) [ ] { } , . : ; *");
+    ASSERT_EQ(tokens.size(), 13);
 
     EXPECT_EQ(tokens[0].type, TokenType::Bang);
     EXPECT_EQ(tokens[0].value, "!");
 
-    EXPECT_EQ(tokens[1].type, TokenType::AddressRef);
-    EXPECT_EQ(tokens[1].value, "?");
-
-    EXPECT_EQ(tokens[2].type, TokenType::LParen);
-    EXPECT_EQ(tokens[2].value, "(");
-
-    EXPECT_EQ(tokens[3].type, TokenType::RParen);
-    EXPECT_EQ(tokens[3].value, ")");
-
-    EXPECT_EQ(tokens[4].type, TokenType::LBracket);
-    EXPECT_EQ(tokens[4].value, "[");
-
-    EXPECT_EQ(tokens[5].type, TokenType::RBracket);
-    EXPECT_EQ(tokens[5].value, "]");
-
-    EXPECT_EQ(tokens[6].type, TokenType::LCurly);
-    EXPECT_EQ(tokens[6].value, "{");
-
-    EXPECT_EQ(tokens[7].type, TokenType::RCurly);
-    EXPECT_EQ(tokens[7].value, "}");
-
-    EXPECT_EQ(tokens[8].type, TokenType::EOF_TOKEN);
+    EXPECT_EQ(tokens[1].type, TokenType::LParen);
+    EXPECT_EQ(tokens[2].type, TokenType::RParen);
+    EXPECT_EQ(tokens[3].type, TokenType::LBracket);
+    EXPECT_EQ(tokens[4].type, TokenType::RBracket);
+    EXPECT_EQ(tokens[5].type, TokenType::LCurly);
+    EXPECT_EQ(tokens[6].type, TokenType::RCurly);
+    EXPECT_EQ(tokens[7].type, TokenType::Comma);
+    EXPECT_EQ(tokens[8].type, TokenType::Dot);
+    EXPECT_EQ(tokens[9].type, TokenType::Colon);
+    EXPECT_EQ(tokens[10].type, TokenType::SemiColon);
+    EXPECT_EQ(tokens[11].type, TokenType::Mul);
+    EXPECT_EQ(tokens[12].type, TokenType::EOF_TOKEN);
 }
 
 TEST(TokenizerTests, RecognizesComplexStatements) {
-    auto tokens = tokenize("int! my_var = allot(int)->42;");
-    ASSERT_EQ(tokens.size(), 12); // Tokens + EOF
+    auto tokens = tokenize("unsafe i32 main() { return none; }");
+    ASSERT_EQ(tokens.size(), 11);
 
-    EXPECT_EQ(tokens[0].type, TokenType::Int);
-    EXPECT_EQ(tokens[0].value, "int");
-
-    EXPECT_EQ(tokens[1].type, TokenType::Bang);
-    EXPECT_EQ(tokens[1].value, "!");
-
+    EXPECT_EQ(tokens[0].type, TokenType::Unsafe);
+    EXPECT_EQ(tokens[1].type, TokenType::I32);
     EXPECT_EQ(tokens[2].type, TokenType::Identifier);
-    EXPECT_EQ(tokens[2].value, "my_var");
+    EXPECT_EQ(tokens[3].type, TokenType::LParen);
+    EXPECT_EQ(tokens[4].type, TokenType::RParen);
+    EXPECT_EQ(tokens[5].type, TokenType::LCurly);
+    EXPECT_EQ(tokens[6].type, TokenType::Return);
+    EXPECT_EQ(tokens[7].type, TokenType::None);
+    EXPECT_EQ(tokens[8].type, TokenType::SemiColon);
+    EXPECT_EQ(tokens[9].type, TokenType::RCurly);
+    EXPECT_EQ(tokens[10].type, TokenType::EOF_TOKEN);
+}
 
-    EXPECT_EQ(tokens[3].type, TokenType::Equal);
-    EXPECT_EQ(tokens[3].value, "=");
+TEST(TokenizerTests, LegacyAllocationWordsAreIdentifiers) {
+    auto tokens = tokenize("allot dellot");
 
-    EXPECT_EQ(tokens[4].type, TokenType::Allot);
-    EXPECT_EQ(tokens[4].value, "allot");
+    ASSERT_EQ(tokens.size(), 3);
+    EXPECT_EQ(tokens[0].type, TokenType::Identifier);
+    EXPECT_EQ(tokens[1].type, TokenType::Identifier);
+}
 
-    EXPECT_EQ(tokens[5].type, TokenType::LParen);
-    EXPECT_EQ(tokens[5].value, "(");
+TEST(TokenizerTests, SkipsLineAndBlockComments) {
+    auto tokens = tokenize(
+        "i32 // result type\n"
+        "main /* no parameters yet */ ()");
 
-    EXPECT_EQ(tokens[6].type, TokenType::Int);
-    EXPECT_EQ(tokens[6].value, "int");
+    ASSERT_EQ(tokens.size(), 5);
+    EXPECT_EQ(tokens[0].type, TokenType::I32);
+    EXPECT_EQ(tokens[1].type, TokenType::Identifier);
+    EXPECT_EQ(tokens[2].type, TokenType::LParen);
+    EXPECT_EQ(tokens[3].type, TokenType::RParen);
+    EXPECT_EQ(tokens[4].type, TokenType::EOF_TOKEN);
+}
 
-    EXPECT_EQ(tokens[7].type, TokenType::RParen);
-    EXPECT_EQ(tokens[7].value, ")");
-
-    EXPECT_EQ(tokens[8].type, TokenType::AssignVal);
-    EXPECT_EQ(tokens[8].value, "->");
-
-    EXPECT_EQ(tokens[9].type, TokenType::NumberLiteral);
-    EXPECT_EQ(tokens[9].value, "42");
-
-    EXPECT_EQ(tokens[10].type, TokenType::SemiColon);
-    EXPECT_EQ(tokens[10].value, ";");
-
-    EXPECT_EQ(tokens[11].type, TokenType::EOF_TOKEN);
+TEST(TokenizerTests, RejectsUnterminatedBlockComment) {
+    EXPECT_THROW(tokenize("i32 /* unfinished"), std::runtime_error);
 }
 
 TEST(TokenizerTests, RecognizesStringLiterals) {
@@ -237,4 +247,3 @@ TEST(TokenizerTests, CharacterWithInvalidEscapeSequence) {
         tokenize("'\\x'");
     }, std::runtime_error);
 }
-

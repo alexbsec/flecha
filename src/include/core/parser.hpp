@@ -5,8 +5,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include "AST.hpp"
-#include "Token.hpp"
+#include "ast.hpp"
+#include "token.hpp"
 
 template <typename... Args>
 using vector = std::vector<Args...>;

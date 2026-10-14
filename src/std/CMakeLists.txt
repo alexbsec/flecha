@@ -1,5 +1,3 @@
-# src/std/CMakeLists.txt
-file(GLOB STD_SOURCES *.cpp)
-add_library(std ${STD_SOURCES})
-target_include_directories(std PRIVATE ${PROJECT_SOURCE_DIR}/include)
-
+# Avoid the target name "std", which can be confused with the C++ namespace.
+add_library(flecha_std STATIC std.cpp)
+target_link_libraries(flecha_std PRIVATE flecha_project_options)

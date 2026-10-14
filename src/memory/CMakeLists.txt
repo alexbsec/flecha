@@ -1,5 +1,2 @@
-# src/memory/CMakeLists.txt
-file(GLOB MEMORY_SOURCES *.cpp)
-add_library(memory ${MEMORY_SOURCES})
-target_include_directories(memory PRIVATE ${PROJECT_SOURCE_DIR}/include)
-
+add_library(memory STATIC memory.cpp)
+target_link_libraries(memory PRIVATE flecha_project_options)

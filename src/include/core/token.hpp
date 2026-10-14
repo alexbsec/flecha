@@ -2,7 +2,7 @@
 #define FLECHA_TOKEN_HPP
 
 #include <string>
-#include "TokenType.hpp"
+#include "token_type.hpp"
 
 using string = std::string;
 

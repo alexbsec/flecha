@@ -3,7 +3,7 @@
 
 #include <string>
 #include <vector>
-#include "Token.hpp"
+#include "token.hpp"
 
 using string = std::string;
 template <typename ...Args> using vector = std::vector<Args...>;
@@ -17,10 +17,11 @@ namespace core {
         int _line;
         int _column;
 
-        char _GetCurrentChar() const;
-        void _Advance();
+        char _Peek(size_t offset = 0) const;
+        char _Advance();
+        bool _Match(char expected);
         bool _IsAtEnd() const;
-        void _SkipWhiteSpace();
+        void _SkipTrivia();
         Token _NextToken();        
 
     public:

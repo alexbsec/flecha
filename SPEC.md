@@ -1,0 +1,579 @@
+# Flecha Language Specification
+
+Status: early design draft  
+File extension: `.fl`  
+Compiler command: `flecha`
+
+## 1. Purpose
+
+Flecha is a low-level, statically typed programming language for software that needs predictable execution, explicit control over memory, and direct access to hardware and operating-system facilities.
+
+The language is intended for systems software such as kernels, embedded programs, runtimes, game engines, databases, command-line tools, and performance-sensitive libraries. It should provide C-like control while reducing accidental undefined behavior and improving type safety, diagnostics, and tooling.
+
+Flecha should make the cost and behavior of code locally visible. Allocation, unsafe memory access, control transfer, and conversions must not be hidden behind surprising language behavior.
+
+## 2. Design goals
+
+Flecha aims to provide:
+
+- deterministic execution without a garbage collector;
+- predictable data representation and calling conventions;
+- zero-cost abstractions where practical;
+- explicit unsafe boundaries;
+- strong static typing without a large or academic-looking syntax;
+- first-class tuples and multiple return values;
+- a zero value for every primitive type;
+- direct comparison with the universal `none` literal;
+- simple interoperability with C;
+- fast compilation and useful diagnostics;
+- a small language core that can eventually compile itself.
+
+Flecha does not initially aim to provide:
+
+- classes or implementation inheritance;
+- exceptions;
+- an implicit garbage-collected runtime;
+- hidden heap allocation;
+- a sophisticated borrow checker in the first implementation;
+- generators, coroutines, or asynchronous functions in the first implementation;
+- a stable binary interface between arbitrary Flecha compiler versions.
+
+## 3. Source files and entry points
+
+Flecha source files use the `.fl` extension.
+
+```text
+main.fl
+```
+
+A hosted executable may use an integer-returning entry point:
+
+```flecha
+i32 main() {
+    return 0;
+}
+```
+
+A freestanding environment may provide its own entry point and permit `void`:
+
+```flecha
+unsafe void main() {
+    return;
+}
+```
+
+The precise hosted and freestanding entry-point rules remain to be specified.
+
+## 4. Lexical conventions
+
+Identifiers begin with a letter or underscore and may subsequently contain letters, digits, or underscores. Flecha is case-sensitive.
+
+```flecha
+value
+source_length
+CopyError
+```
+
+Line and block comments use familiar C-style syntax:
+
+```flecha
+// A line comment
+
+/* A block comment */
+```
+
+Statements are terminated with semicolons. Blocks are enclosed in braces.
+
+## 5. Functions
+
+Flecha function declarations place modifiers first, followed by the return type, function name, parameters, and body:
+
+```text
+[modifiers] ReturnType functionName(parameters) {
+    body
+}
+```
+
+Examples:
+
+```flecha
+void reset() {
+    return;
+}
+
+i32 add(i32 left, i32 right) {
+    return left + right;
+}
+
+unsafe void write_register(*volatile u32 address, u32 value) {
+    *address = value;
+    return;
+}
+```
+
+Tentative function modifiers include:
+
+- `unsafe`
+- `export`
+- `extern`
+- `inline`
+- `comptime`
+
+Modifiers and their exact interactions will be specified as their corresponding features are implemented.
+
+## 6. Return and yield
+
+`return` ends a function and optionally supplies its final result:
+
+```flecha
+i32 identity(i32 value) {
+    return value;
+}
+```
+
+```flecha
+void stop() {
+    return;
+}
+```
+
+`yield` is reserved for a future suspension construct. It will not be an alternative spelling of `return`.
+
+The intended distinction is:
+
+- `return` permanently ends the current function invocation;
+- `yield` produces an intermediate value and suspends a generator or coroutine so it can later resume.
+
+Generators and coroutines are outside the initial language core. Reserving `yield` now prevents incompatible syntax later.
+
+## 7. Primitive types
+
+The initial primitive type set is expected to include:
+
+| Category | Types |
+| --- | --- |
+| Signed integers | `i8`, `i16`, `i32`, `i64`, `isize` |
+| Unsigned integers | `u8`, `u16`, `u32`, `u64`, `usize` |
+| Floating point | `f32`, `f64` |
+| Logical | `bool` |
+| Character | `char` |
+| No value | `void` |
+| Pointer | `*T`, with applicable qualifiers |
+
+Integer sizes are part of their type names. `isize` and `usize` have the native pointer width of the compilation target.
+
+Implicit conversion between distinct primitive types should be avoided. In particular, integers, booleans, and pointers remain differently typed even when their representations or zero values coincide.
+
+## 8. Universal zero and `none`
+
+Every primitive Flecha type has a defined zero value. `none` is a universal, polymorphic zero literal that can be converted to the zero value of a destination or comparison type.
+
+Tentative zero values are:
+
+| Type category | Zero value |
+| --- | --- |
+| Integer | `0` |
+| Floating point | positive zero, `+0.0` |
+| `bool` | `false` |
+| `char` | the null character, `'\0'` |
+| Pointer | `null` |
+| Error type | its designated no-error value |
+
+Examples:
+
+```flecha
+i32 count = none;       // i32(0)
+bool ready = none;      // false
+*u8 address = none;     // null pointer
+```
+
+After conversion, a value does not retain metadata recording that it originated from the `none` literal:
+
+```flecha
+i32 count = none;
+
+count == none;      // true
+count === none;     // false
+count === i32(0);   // true
+```
+
+For primitives, `none` means the zero value rather than a separately representable absence state. Consequently, a primitive integer cannot distinguish “no integer” from integer zero. A future tagged optional type may represent that distinction when required.
+
+### 8.1 Initialization
+
+The intended safe default is for ordinary declarations to receive their type's zero value:
+
+```flecha
+i32 count;       // initialized to i32(0)
+bool ready;      // initialized to false
+```
+
+Explicitly uninitialized storage, if supported, must require an unsafe operation:
+
+```flecha
+unsafe i32 scratch = uninit;
+```
+
+The exact syntax and permitted uses of `uninit` remain open.
+
+## 9. Equality
+
+Flecha distinguishes value equality from strict type-and-value equality.
+
+### 9.1 Value equality
+
+`==` and `!=` compare values. When exactly one operand is the literal `none`, `none` is contextually converted to the zero value of the other operand's type.
+
+```flecha
+0 == none;       // true
+false == none;   // true
+null == none;    // true
+```
+
+This special treatment does not generally make differently typed concrete values comparable:
+
+```flecha
+i32 signed_zero = 0;
+u32 unsigned_zero = 0;
+
+signed_zero == unsigned_zero; // compile-time type error
+0 == false;                   // compile-time type error
+```
+
+The initial equality rule is:
+
+1. If both operands have the same comparable type, compare their values.
+2. If exactly one operand has type `none`, convert it to the other operand's zero value and compare.
+3. Otherwise, report a type error.
+
+### 9.2 Strict equality
+
+`===` and `!==` compare without contextual conversion. Strict equality succeeds only when both operands have the same type and equal values.
+
+```flecha
+0 === none;       // false
+false === none;   // false
+none === none;    // true
+i32(0) === i32(0); // true
+i32(0) === u32(0); // false
+```
+
+Strict equality is semantic type-and-value equality, not necessarily raw byte equality. Padding, floating-point representations, and other representation details must not silently turn `===` into a memory comparison. A separate explicit operation may be provided for comparing raw representations.
+
+The behavior of floating-point NaNs and signed zero under both equality operators remains to be specified.
+
+## 10. Tuples and multiple return values
+
+Tuples are first-class values. A tuple type is written as a comma-separated type list inside parentheses:
+
+```flecha
+(i32, bool)
+(usize, CopyError)
+```
+
+Functions can return tuples directly:
+
+```flecha
+(i32, i32) divide(i32 dividend, i32 divisor) {
+    return (dividend / divisor, dividend % divisor);
+}
+```
+
+Tuple destructuring binds the returned elements:
+
+```flecha
+(quotient, remainder) := divide(10, 3);
+```
+
+An explicitly typed form may also be supported:
+
+```flecha
+(i32 quotient, i32 remainder) = divide(10, 3);
+```
+
+The tuple memory layout, calling convention, element access syntax, and destructuring rules remain to be finalized.
+
+## 11. Errors as values
+
+Flecha does not use exceptions in its core error model. Errors are ordinary typed values and may be returned as tuple elements.
+
+```flecha
+error CopyError {
+    none = 0,
+    InvalidPointer,
+    DestinationTooSmall,
+}
+```
+
+The no-error state is the error type's zero value and therefore compares equal to `none`:
+
+```flecha
+unsafe (usize, CopyError) copy(
+    []u8 destination,
+    []const u8 source
+) {
+    if destination.len < source.len {
+        return (0, CopyError.DestinationTooSmall);
+    }
+
+    memory_copy(destination.ptr, source.ptr, source.len);
+    return (source.len, none);
+}
+```
+
+Callers inspect the error explicitly:
+
+```flecha
+(copied, err) := unsafe copy(destination, source);
+
+if err != none {
+    return (0, err);
+}
+```
+
+The grammar and representation of error declarations are provisional. Error propagation sugar may be considered later, but the underlying tuple-and-value model must remain understandable without it.
+
+## 12. Unsafe code
+
+Unsafe operations include behavior the compiler cannot fully validate, such as dereferencing raw pointers, accessing volatile memory, constructing values from unchecked representations, and calling functions with caller-maintained safety requirements.
+
+An `unsafe` function places safety obligations on its caller:
+
+```flecha
+unsafe void write_register(*volatile u32 address, u32 value) {
+    *address = value;
+    return;
+}
+```
+
+Calling it requires an explicit unsafe context:
+
+```flecha
+void configure_device() {
+    unsafe {
+        write_register(0x40001000 as *volatile u32, 1);
+    }
+}
+```
+
+An ordinary safe function may internally use a small unsafe block while preserving a safe external contract:
+
+```flecha
+u32 read_device(*volatile const u32 address) {
+    unsafe {
+        return *address;
+    }
+}
+```
+
+A function should not be marked `unsafe` merely because its implementation contains an unsafe operation. It should be marked `unsafe` when correct use depends on an invariant the compiler cannot enforce at the call site.
+
+The earlier shorthand `unsafe copy(...)` for unsafe calls is not yet part of the language. The block-based form is the current preferred design.
+
+## 13. Pointers, arrays, and slices
+
+The intended pointer syntax keeps qualifiers inside the type rather than attaching them to individual declarations:
+
+```flecha
+*u8
+*const u8
+*volatile u32
+*volatile const u32
+```
+
+Slices contain a pointer and a length:
+
+```flecha
+[]u8
+[]const u8
+```
+
+Example:
+
+```flecha
+void clear([]u8 buffer) {
+    // Implementation omitted.
+    return;
+}
+```
+
+Pointer arithmetic, provenance, aliasing, slice bounds, mutability, and lifetime rules require a dedicated later specification. Safe slice access should be bounds-checked unless the programmer explicitly enters an unsafe operation.
+
+## 14. Memory and runtime model
+
+Flecha should not require a garbage collector. Stack allocation is the ordinary default. Heap allocation must be explicit and should use caller-selected allocators rather than a mandatory hidden global allocator.
+
+The language should avoid hidden allocation in:
+
+- tuple construction;
+- error returns;
+- string and slice operations;
+- generic specialization;
+- ordinary function calls.
+
+Destruction should be deterministic. The ownership and resource-cleanup model remains open; the first implementation may begin with explicit operations and add scoped cleanup once its semantics are clear.
+
+Flecha should support freestanding programs that do not link a language runtime.
+
+## 15. Data layout and interoperability
+
+Flecha should eventually provide:
+
+- predictable struct, tuple, and enum layouts;
+- explicit size and alignment inspection;
+- packed and explicitly aligned representations;
+- volatile memory access;
+- native function pointers;
+- C-compatible calling conventions;
+- importing and exporting C-compatible symbols.
+
+Layout must not be inferred solely from the behavior of a particular backend. Language-level rules will define which layouts are guaranteed and which remain implementation-defined.
+
+## 16. Compilation model
+
+The reference compiler will initially be implemented in C++23.
+
+The proposed bootstrap pipeline is:
+
+```text
+Flecha source
+    -> lexer
+    -> parser
+    -> abstract syntax tree
+    -> semantic and type analysis
+    -> Flecha intermediate representation
+    -> C or LLVM backend
+    -> object file
+    -> native linker
+    -> executable
+```
+
+The first backend may emit portable C so the frontend and language semantics can be validated quickly. A later LLVM backend can provide native object generation, optimization, debug information, and broad target support.
+
+The compiler should eventually be self-hosted in Flecha, but self-hosting is not an initial milestone.
+
+## 17. Tooling
+
+The intended command-line interface is:
+
+```text
+flecha build main.fl
+flecha run main.fl
+flecha check main.fl
+flecha fmt main.fl
+flecha test
+```
+
+Flecha tooling should eventually include:
+
+- an official formatter;
+- an editor language server;
+- source-level diagnostics;
+- go-to-definition and symbol navigation;
+- completion and hover information;
+- semantic highlighting;
+- documentation generation;
+- a build and package model;
+- cross-compilation support.
+
+Editor support should be developed in layers:
+
+1. a TextMate grammar for immediate highlighting of `.fl` files;
+2. a Tree-sitter grammar for structural parsing and highlighting;
+3. Language Server Protocol semantic tokens driven by the compiler's type information.
+
+Important initial highlighting categories include function modifiers, control-flow keywords, primitive types, type names, function names, parameters, variables, properties, numeric literals, strings, comments, and the built-in constants `none`, `null`, `true`, and `false`.
+
+## 18. Illustrative program
+
+The following example demonstrates the current core direction. It is illustrative; not every construct shown has a finalized grammar or implementation.
+
+```flecha
+error CopyError {
+    none = 0,
+    InvalidPointer,
+    DestinationTooSmall,
+}
+
+unsafe (usize, CopyError) copy(
+    []u8 destination,
+    []const u8 source
+) {
+    if destination.ptr == none || source.ptr == none {
+        return (0, CopyError.InvalidPointer);
+    }
+
+    if destination.len < source.len {
+        return (0, CopyError.DestinationTooSmall);
+    }
+
+    memory_copy(destination.ptr, source.ptr, source.len);
+    return (source.len, none);
+}
+
+i32 main() {
+    u8[128] destination;
+    []const u8 source = "Flecha";
+
+    usize copied;
+    CopyError err;
+
+    unsafe {
+        (copied, err) = copy(destination[:], source);
+    }
+
+    if err != none {
+        return 1;
+    }
+
+    return 0;
+}
+```
+
+## 19. Open design questions
+
+The following decisions are intentionally not finalized:
+
+- module, import, and visibility syntax;
+- declaration syntax and the exact roles of `var` and `const`;
+- string literal representation and encoding;
+- array syntax and array-to-slice conversion;
+- struct, union, enum, and generic syntax;
+- ownership, borrowing, and deterministic cleanup;
+- allocator interfaces;
+- arithmetic overflow behavior;
+- floating-point equality involving NaN and signed zero;
+- compile-time execution and metaprogramming;
+- tuple layout and ABI rules;
+- optional values distinct from primitive zero;
+- error propagation syntax;
+- generator and coroutine syntax using the reserved `yield` keyword;
+- concurrency and memory-model rules;
+- supported platforms and calling conventions;
+- whether `null` remains a separate pointer spelling or is replaced entirely by `none`.
+
+These questions should be resolved by prioritizing predictable behavior, a small implementation surface, useful diagnostics, and compatibility with low-level programming.
+
+## 20. Initial implementation milestones
+
+1. Recognize `.fl` files and produce source-located diagnostics.
+2. Implement tokens, comments, literals, and primitive type names.
+3. Parse functions, blocks, parameters, and `return` statements.
+4. Type-check primitive expressions and local variables.
+5. Implement calls and a minimal C backend.
+6. Implement tuples, tuple returns, and destructuring.
+7. Implement universal `none`, zero initialization, `==`, and `===`.
+8. Implement error types and tuple-based error handling.
+9. Implement pointers, slices, and explicit unsafe blocks.
+10. Introduce a compiler-owned intermediate representation.
+11. Add an LLVM backend and native debug information.
+12. Expand platform support, tooling, and the standard library.
+13. Begin self-hosting once Flecha can express the compiler without special cases.
+
+## 21. Guiding principle
+
+Flecha should make low-level programming direct without making dangerous behavior invisible. Its defining principle is:
+
+> Mechanically predictable code with locally visible costs.
+
+New features should be evaluated against that principle before they are added to the language core.
