@@ -930,7 +930,7 @@ TEST(SemanticTypeTests, NormalizesAliasesAndRetainsEachQualifierLayer) {
     const SemanticType readOnlyPointer(SemanticTypeKind::Pointer, readOnlyByte);
     EXPECT_NE(fixedPointer, readOnlyPointer);
     EXPECT_FALSE(IsAssignable(fixedPointer, readOnlyPointer));
-    EXPECT_FALSE(IsAssignable(readOnlyPointer, fixedPointer));
+    EXPECT_TRUE(IsAssignable(readOnlyPointer, fixedPointer));
     EXPECT_EQ(fixedPointer.WithoutConst().Target()->Name(), "u8");
     EXPECT_EQ(readOnlyPointer.WithoutConst().Target()->Name(), "const u8");
     const SemanticType reference(SemanticTypeKind::Reference, byte);
@@ -1027,9 +1027,10 @@ TEST(SemanticConstTests, CannotBypassInitializationWithJump) {
               DiagnosticCode::UninitializedVariable);
 }
 
-TEST(SemanticCompoundTypeTests, ReportsUnsupportedTypesAtTheirFullRange) {
-    const std::vector<std::string> types{"*const u8", "constptr u8",
-                                         "constref u8", "&const *const u8"};
+TEST(SemanticCompoundTypeTests,
+     ReportsUnsupportedReferenceTypesAtTheirFullRange) {
+    const std::vector<std::string> types{"&const u8", "constref u8",
+                                         "&const *const u8"};
     for (const std::string& type : types) {
         for (const std::string& source :
              {"void f() { " + type + " value; }",
@@ -1054,5 +1055,170 @@ TEST(SemanticCompoundTypeTests, UnsupportedOperationsAreDiagnosed) {
             Analyze("i32 f() { i32 value = 42; return " + operation + "; }");
         EXPECT_NE(FindDiagnostic(analysis, DiagnosticCode::InvalidOperand),
                   nullptr);
+    }
+}
+
+TEST(SemanticUnsafeTests, EnforcesLexicalPermissionAndExactRanges) {
+    const std::string source =
+        "unsafe void touch(*i32 p) { *p = 42; }\n"
+        "void f(*i32 p) {\n"
+        "    touch(p);\n"
+        "    *p;\n"
+        "    *p = 1;\n"
+        "    &raw p;\n"
+        "    unsafe { touch(p); { *p = 2; } }\n"
+        "    touch(p);\n"
+        "}";
+    Analysis analysis = Analyze(source);
+    ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 5);
+    const std::vector<std::size_t> lines{3, 4, 5, 6, 8};
+    const std::vector<std::size_t> lengths{5, 2, 2, 6, 5};
+    for (std::size_t index = 0; index < lines.size(); ++index) {
+        const Diagnostic& diagnostic =
+            analysis.diagnostics.Diagnostics()[index];
+        EXPECT_EQ(DiagnosticCodeName(diagnostic.code), "FLECHA-S0025");
+        EXPECT_EQ(diagnostic.range.start.line, lines[index]);
+        EXPECT_EQ(diagnostic.range.start.column, 5);
+        EXPECT_EQ(diagnostic.range.Length(), lengths[index]);
+    }
+    Analysis callee = Analyze(
+        "void safe(*i32 p) { *p = 1; } unsafe void caller(*i32 p) { safe(p); "
+        "}");
+    ASSERT_EQ(callee.diagnostics.Diagnostics().size(), 1);
+    EXPECT_EQ(callee.diagnostics.Diagnostics()[0].code,
+              DiagnosticCode::UnsafeOperation);
+}
+
+TEST(SemanticUnsafeTests, AllowsUnsafeCallsAndPointerTransportInSafeCode) {
+    Analysis analysis = Analyze(
+        "unsafe i32 read(*const i32 p) { return *p; } "
+        "unsafe i32 forward(*i32 p) { return read(p); } "
+        "*i32 transport(*i32 p) { *i32 copy = p; return copy; } "
+        "i32 main() { i32 value = 42; *i32 p = none; "
+        "unsafe { p = &raw value; } p = transport(p); "
+        "if p != null and none != p { unsafe { return forward(p); } } return "
+        "0; }");
+    EXPECT_FALSE(analysis.diagnostics.HasErrors());
+}
+
+TEST(SemanticUnsafeTests, SeparatesBindingConstnessFromTargetConstness) {
+    Analysis valid = Analyze(
+        "unsafe void f() { i32 x = 1; const i32 y = 2; "
+        "constptr i32 fixed = &raw x; *fixed = 3; "
+        "*const i32 readOnly = &raw y; readOnly = &raw x; "
+        "constptr const i32 both = &raw y; i32 copy = *both; "
+        "**i32 nested = &raw readOnly; }");
+    // A pointer to a read-only pointer target cannot become **i32.
+    ASSERT_EQ(valid.diagnostics.Diagnostics().size(), 1);
+    EXPECT_EQ(valid.diagnostics.Diagnostics()[0].code,
+              DiagnosticCode::IncompatibleType);
+    const std::vector<std::string> invalid{
+        "constptr i32 fixed = none; fixed = none;",
+        "*const i32 p = none; *p = 1;", "constptr const i32 p = none; *p = 1;",
+        "const i32 x = 1; *(&raw x) = 2;", "*const *i32 p = none; *p = none;"};
+    for (const std::string& body : invalid) {
+        SCOPED_TRACE(body);
+        Analysis analysis = Analyze("unsafe void f() { " + body + " }");
+        ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
+        EXPECT_EQ(analysis.diagnostics.Diagnostics()[0].code,
+                  DiagnosticCode::SymbolNotWritable);
+    }
+    Analysis deep = Analyze("unsafe void f(**i32 p) { **const i32 q = p; }");
+    EXPECT_NE(FindDiagnostic(deep, DiagnosticCode::IncompatibleType), nullptr);
+    Analysis missing = Analyze("void f() { constptr i32 p; }");
+    EXPECT_NE(FindDiagnostic(missing, DiagnosticCode::ConstRequiresInitializer),
+              nullptr);
+}
+
+TEST(SemanticUnsafeTests, ChecksInitializedAddressesAndIndirectStoreTargets) {
+    const std::vector<std::string> invalid{
+        "unsafe void f() { i32 x; *i32 p = &raw x; }",
+        "unsafe void f() { *i32 p; *p = 42; }",
+        "unsafe void f() { *i32 p; *p = 42; *p; }",
+        "i32 init(*i32 p) { return 42; } unsafe void f() { *i32 p; *p = init(p "
+        "= none); }",
+        "void f() { i32 x; unsafe { i32 y = x; } }",
+        "void f(bool c) { i32 x; if c { unsafe { x = 1; } } stdoutln(x); }",
+        "void f() { while true { jumpto use; unsafe { *i32 p = none; #use *p = "
+        "1; } } }"};
+    for (const std::string& source : invalid) {
+        SCOPED_TRACE(source);
+        Analysis analysis = Analyze(source);
+        EXPECT_NE(
+            FindDiagnostic(analysis, DiagnosticCode::UninitializedVariable),
+            nullptr);
+    }
+    Analysis valid = Analyze(
+        "i32 f() { i32 x; unsafe { (x) = 42; } { i32 x = 0; x = 1; } return x; "
+        "}");
+    EXPECT_FALSE(valid.diagnostics.HasErrors());
+    Analysis scope =
+        Analyze("void f() { unsafe { i32 x = 42; } stdoutln(x); }");
+    EXPECT_NE(FindDiagnostic(scope, DiagnosticCode::UnknownName), nullptr);
+}
+
+TEST(SemanticUnsafeTests,
+     RejectsUnsupportedAddressTargetsAndPointerOperations) {
+    const std::vector<std::string> invalid{
+        "unsafe void f() { &raw 42; }", "unsafe void f() { &raw (1 + 2); }",
+        "unsafe void f() { &raw f; }", "unsafe void f(*void p) { *p; }"};
+    for (const std::string& source : invalid) {
+        SCOPED_TRACE(source);
+        EXPECT_NE(FindDiagnostic(Analyze(source),
+                                 DiagnosticCode::InvalidPointerAccess),
+                  nullptr);
+    }
+    for (const std::string& body : {"p + 1;", "p - p;", "p < p;", "p as i64;",
+                                    "1 as *i32;", "p as *const i32;"}) {
+        SCOPED_TRACE(body);
+        EXPECT_TRUE(Analyze("unsafe void f(*i32 p) { " + body + " }")
+                        .diagnostics.HasErrors());
+    }
+    EXPECT_NE(FindDiagnostic(Analyze("void f(*&i32 p) {}"),
+                             DiagnosticCode::UnsupportedCompoundType),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { i32 x = 1; &x; }"),
+                             DiagnosticCode::InvalidOperand),
+              nullptr);
+}
+
+TEST(SemanticUnsafeTests, RejectsConstTargetWritesAtTheDereferenceRange) {
+    const std::string source = "unsafe void f(*const i32 p) {\n    *p = 42;\n}";
+    Analysis analysis = Analyze(source);
+    ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
+    const Diagnostic& diagnostic = analysis.diagnostics.Diagnostics()[0];
+    EXPECT_EQ(diagnostic.code, DiagnosticCode::SymbolNotWritable);
+    EXPECT_EQ(diagnostic.range.start.line, 2);
+    EXPECT_EQ(diagnostic.range.start.column, 5);
+    EXPECT_EQ(diagnostic.range.end.column, 7);
+}
+
+TEST(SemanticUnsafeTests,
+     AddressCreationPreservesNestedConstAndRawIsContextual) {
+    Analysis analysis = Analyze(
+        "unsafe void f() { const i32 value = 42; p := &raw value; "
+        "constptr i32 fixed = none; slot := &raw fixed; raw := 1; raw = 2; }");
+    ASSERT_FALSE(analysis.diagnostics.HasErrors());
+    const auto& function = FunctionAt(analysis, 0);
+    EXPECT_EQ(
+        analysis.model.DeclaredSymbol(VariableAt(function, 1))->Type().Name(),
+        "*const i32");
+    EXPECT_EQ(
+        analysis.model.DeclaredSymbol(VariableAt(function, 3))->Type().Name(),
+        "*const *i32");
+    Analysis deep = Analyze("unsafe void f(*const *i32 slot) { **slot = 42; }");
+    EXPECT_FALSE(deep.diagnostics.HasErrors());
+}
+
+TEST(SemanticUnsafeTests,
+     RejectsIncompatibleNullComparisonsBeforeCodeGeneration) {
+    for (const std::string& expression :
+         {"null == 1", "null === 1", "1 !== null", "p == 1", "p === none"}) {
+        SCOPED_TRACE(expression);
+        Analysis analysis =
+            Analyze("bool f(*i32 p) { return " + expression + "; }");
+        ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
+        EXPECT_EQ(analysis.diagnostics.Diagnostics()[0].code,
+                  DiagnosticCode::InvalidOperand);
     }
 }

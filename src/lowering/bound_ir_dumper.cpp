@@ -65,6 +65,7 @@ class Dumper final {
     }
 
     void WriteFunction(const BoundFunction& function) {
+        if (function.Symbol().IsUnsafe()) _stream << "unsafe ";
         _stream << "function " << function.Symbol().Name() << "(";
         for (std::size_t index = 0; index < function.Parameters().size();
              ++index) {
@@ -93,6 +94,9 @@ class Dumper final {
     void WriteStatement(const BoundStatement& statement) {
         Indent();
         switch (statement.Kind()) {
+            case BoundNodeKind::BlockStatement:
+                WriteBlock(static_cast<const BoundBlockStatement&>(statement));
+                break;
             case BoundNodeKind::VariableDeclarationStatement: {
                 const BoundVariableDeclarationStatement& declaration =
                     static_cast<const BoundVariableDeclarationStatement&>(
@@ -171,6 +175,20 @@ class Dumper final {
 
     void WriteExpression(const BoundExpression& expression) {
         switch (expression.Kind()) {
+            case BoundNodeKind::DereferenceExpression:
+                _stream << "(deref ";
+                WriteExpression(
+                    static_cast<const BoundDereferenceExpression&>(expression)
+                        .Pointer());
+                _stream << ")";
+                break;
+            case BoundNodeKind::AddressExpression:
+                _stream << "(address ";
+                WriteExpression(
+                    static_cast<const BoundAddressExpression&>(expression)
+                        .Place());
+                _stream << ")";
+                break;
             case BoundNodeKind::LiteralExpression:
                 _stream << static_cast<const BoundLiteralExpression&>(
                                expression)
@@ -220,7 +238,17 @@ class Dumper final {
             case BoundNodeKind::AssignmentExpression: {
                 const BoundAssignmentExpression& assignment =
                     static_cast<const BoundAssignmentExpression&>(expression);
-                _stream << "(store " << assignment.Target().Name() << " ";
+                _stream << "(store ";
+                if (assignment.Target().Kind() ==
+                    BoundNodeKind::VariableExpression) {
+                    _stream << static_cast<const BoundVariableExpression&>(
+                                   assignment.Target())
+                                   .Symbol()
+                                   .Name();
+                } else {
+                    WriteExpression(assignment.Target());
+                }
+                _stream << " ";
                 WriteExpression(assignment.Value());
                 _stream << ")";
                 break;

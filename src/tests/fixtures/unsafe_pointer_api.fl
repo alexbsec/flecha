@@ -1,0 +1,85 @@
+unsafe i32 increment(*i32 pointer) {
+    *pointer = *pointer + 2;
+    return *pointer;
+}
+
+unsafe i32 read_only(*const i32 pointer) {
+    return *pointer;
+}
+
+unsafe *i32 replace(**i32 slot, *i32 next) {
+    *slot = next;
+    return *slot;
+}
+
+bool is_null(*i32 pointer) {
+    return pointer == null;
+}
+
+unsafe *i32 select_target(**i32 slot, *i32 next, *i32 count) {
+    *count = *count + 1;
+    *slot = next;
+    return next;
+}
+
+i32 exercise_locals() {
+    i32 first = 1;
+    i32 second = 41;
+    i32 calls = 0;
+    unsafe {
+        *i32 pointer = &raw first;
+        // The target is evaluated once, before the right-hand side.
+        *select_target(&raw pointer, &raw second, &raw calls) = *pointer + 1;
+        if first != 1 or second != 42 or calls != 1 { return 1; }
+        const i32 constant = 42;
+        constptr const i32 fixedReadOnly = &raw constant;
+        if *fixedReadOnly != 42 { return 2; }
+        constptr *i32 fixedSlot = &raw pointer;
+        **fixedSlot = 43;
+        if second != 43 { return 3; }
+        (*pointer) = 42;
+        if null != none or null !== null { return 8; }
+        *i32 nullPointer = null;
+        nullPointer = none;
+        if nullPointer != none or null != nullPointer { return 4; }
+        if pointer == null or pointer != &raw second { return 5; }
+        if pointer !== pointer { return 6; }
+        string text = "before";
+        *string textPointer = &raw text;
+        *textPointer = "after";
+        const string copy = *textPointer;
+        if copy != "after" { return 7; }
+        *textPointer = *textPointer;
+    }
+    return second;
+}
+
+i32 exercise_scopes() {
+    i32 step = 0;
+    while step < 3 {
+        unsafe {
+            string outer = "outer";
+            if step == 0 {
+                step = 1;
+                proceed;
+            }
+            {
+                string inner = "inner";
+                if step == 1 {
+                    step = 2;
+                    jumpto finish;
+                }
+            }
+            #finish
+            {
+                string last = "last";
+                step = 3;
+                break;
+            }
+        }
+    }
+    unsafe {
+        string result = "return cleanup";
+        return step + 39;
+    }
+}

@@ -18,6 +18,8 @@ class SemanticAnalyzer final {
     [[nodiscard]] SemanticModel Analyze(const core::CompilationUnit& unit);
 
    private:
+    SemanticType PlaceType(const core::Expression& expression) const;
+    void RequireUnsafe(source::SourceRange range);
     SemanticType ResolveType(const core::TypeNode& type);
     void RegisterBuiltIns();
     void RegisterFunctions(const core::CompilationUnit& unit);
@@ -54,6 +56,7 @@ class SemanticAnalyzer final {
     std::unordered_map<std::string, source::SourceRange> _positions;
     std::unordered_set<const Symbol*> _localStringBorrows;
     std::size_t _loopDepth = 0;
+    bool _inUnsafe = false;
 };
 
 }  // namespace flecha::semantic

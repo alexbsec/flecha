@@ -741,3 +741,42 @@ TEST(ParserTests, RejectsMalformedOrDuplicateQualifiersAndRecovers) {
             "g");
     }
 }
+
+TEST(ParserUnsafeTests, ParsesUnsafeFunctionsBlocksAndRawAddresses) {
+    DiagnosticBag diagnostics;
+    const std::string source =
+        "unsafe void set(*i32 p) { (*p) = 42; } "
+        "i32 main() { i32 value = 0; unsafe { { ptr := &raw value; set(ptr); } "
+        "} return value; }";
+    std::unique_ptr<CompilationUnit> unit = ParseSource(source, diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const auto& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    EXPECT_TRUE(function.IsUnsafe());
+    EXPECT_EQ(function.Range().start.offset, 0);
+    const auto& mainFunction =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[1]);
+    EXPECT_FALSE(mainFunction.IsUnsafe());
+    const auto& block = static_cast<const BlockStatement&>(
+        *mainFunction.Body().Statements()[1]);
+    EXPECT_TRUE(block.IsUnsafe());
+    EXPECT_EQ(block.Range().start.offset, source.find("unsafe {"));
+    const auto& nested =
+        static_cast<const BlockStatement&>(*block.Statements()[0]);
+    EXPECT_FALSE(nested.IsUnsafe());
+    const auto& declaration = static_cast<const VariableDeclarationStatement&>(
+        *nested.Statements()[0]);
+    const auto& address =
+        static_cast<const UnaryExpression&>(*declaration.Initializer());
+    EXPECT_EQ(address.OperatorType(), TokenType::RawAddress);
+    EXPECT_EQ(address.Range().Length(), 10);
+}
+
+TEST(ParserUnsafeTests, RejectsStandaloneUnsafeCallAndDuplicateModifiers) {
+    for (const std::string& source :
+         {"void f() { unsafe g(); }", "unsafe unsafe void f() {}"}) {
+        DiagnosticBag diagnostics;
+        ParseSource(source, diagnostics);
+        EXPECT_TRUE(diagnostics.HasErrors());
+    }
+}

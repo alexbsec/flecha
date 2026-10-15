@@ -319,13 +319,14 @@ shared reference additionally constrains conflicting mutation through other
 safe aliases for the duration of its borrow. No safe operation removes const
 access restrictions.
 
-The lexer already recognizes `const`; the new `constptr` and `constref`
-keywords still need lexical support. Declarations and type qualifiers need
-parser, semantic, lowering, and diagnostic support. Qualifier composition and
-multilevel-pointer shorthand should be specified before extending these aliases. User-defined interior
-mutability, atomic access, and generic const propagation are deferred.
+Const declarations and recursive qualifiers are implemented; see
+[const declarations and types](const_types.md). User-defined interior mutability,
+atomic access, and generic const propagation remain deferred.
 
 ## 6. Raw pointers and unsafe operations
+
+The implemented subset, including explicit `&raw value` address creation, is
+documented in [unsafe contexts and pointers](unsafe_pointers.md).
 
 Retain raw pointer types `*T`, `*const T`, `*volatile T`, and
 `*volatile const T`, and the `const *T` binding qualifier. Prefer `constptr T`
@@ -571,9 +572,9 @@ Next proposals to settle:
 The detailed dependency order and acceptance criteria are maintained in
 [memory_implementation_plan.md](memory_implementation_plan.md). The first
 implementation milestone, const declarations and compound type representation,
-is documented in [const declarations and types](const_types.md). The next stages
-are unsafe pointer operations, checked references, defer, tuple/error support,
-system allocation, and cross-function resource effects.
+is documented in [const declarations and types](const_types.md). Unsafe pointer operations are documented in [unsafe pointers](unsafe_pointers.md).
+The next stages are checked references, defer, tuple/error support, system
+allocation, and cross-function resource effects.
 
 Concurrency, atomics, shared ownership, partial moves, and arbitrary pointer
 arithmetic remain outside the first safe-reference feature.

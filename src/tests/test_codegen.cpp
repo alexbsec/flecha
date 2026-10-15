@@ -465,3 +465,20 @@ TEST(LlvmCodeGeneratorTests, EmitsTypedZeroValuesForConstInitializers) {
     ASSERT_NE(result.module, nullptr) << result.generator->Error();
     EXPECT_TRUE(VerifyModule(*result.module).empty());
 }
+
+TEST(LlvmCodeGeneratorTests,
+     EmitsRawAddressesIndirectAccessAndPointerEquality) {
+    GeneratedSource result = Generate(
+        "unsafe i32 read(*const i32 p) { return *p; } "
+        "i32 main() { i32 value = 40; *i32 p = null; "
+        "unsafe { p = &raw value; (*p) = *p + 2; } "
+        "if p != none and null != p { unsafe { return read(p); } } return 0; "
+        "}");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("define i32 @read(ptr %p)"), std::string::npos);
+    EXPECT_NE(ir.find("icmp ne ptr"), std::string::npos);
+    EXPECT_NE(ir.find("load i32, ptr"), std::string::npos);
+}

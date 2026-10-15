@@ -1,9 +1,10 @@
 # Memory feature implementation order
 
-Status: implementation roadmap; compiler work has not started.
+Status: const types are merged; unsafe pointers are implemented on
+`feat/unsafe-pointers`. Subsequent milestones remain planned.
 
-Based on the agreed rules in [memory_model.md](memory_model.md) and the clean
-`master` checkout at `528ae12`. Each milestone should be a separate feature
+Based on the agreed rules in [memory_model.md](memory_model.md), with the
+const-type milestone merged into `master` at `c9e6ee4`. Each milestone should be a separate feature
 branch and reviewable change, with parser, semantic, lowering/codegen, and
 native coverage appropriate to its behavior. Branch names below are proposed;
 creating this roadmap does not create branches or commits.
@@ -62,7 +63,9 @@ All existing programs and tests retain their behavior.
 
 ## 2. Unsafe contexts, raw pointer operations, and writable expressions
 
-Proposed branch: `feat/unsafe-pointers`. Depends on: 1.
+Implementation branch: `feat/unsafe-pointers`. Depends on: 1.
+
+Implemented behavior and limits: [unsafe contexts and pointers](unsafe_pointers.md).
 
 - Parse unsafe function modifiers and explicit unsafe blocks. Enforce permission
   lexically during semantic analysis; a safe callee does not inherit permission
@@ -78,8 +81,8 @@ Proposed branch: `feat/unsafe-pointers`. Depends on: 1.
   its pointee in dataflow analysis.
 - Make dereference and indirect stores unsafe operations. Writing through
   `*const T` remains an error inside unsafe code.
-- Keep reference-producing `&value` semantics separate from any future explicit
-  raw-address conversion. Do not invent an implicit reference-to-pointer cast.
+- Keep reference-producing `&value` separate from explicit raw address creation
+  using `&raw value`. Do not introduce an implicit reference-to-pointer cast.
 - Defer pointer arithmetic, integer-to-pointer casts, volatile operations, and
   arbitrary reinterpretation until their own contracts are specified.
 

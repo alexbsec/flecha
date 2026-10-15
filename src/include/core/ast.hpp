@@ -174,12 +174,16 @@ enum class FunctionModifier : std::uint8_t {
 class BlockStatement final : public Statement {
    public:
     BlockStatement(source::SourceRange range,
-                   std::vector<std::unique_ptr<Statement>> statements)
-        : Statement(range), _statements(std::move(statements)) {}
+                   std::vector<std::unique_ptr<Statement>> statements,
+                   bool isUnsafe = false)
+        : Statement(range),
+          _statements(std::move(statements)),
+          _isUnsafe(isUnsafe) {}
 
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::BlockStatement;
     }
+    [[nodiscard]] bool IsUnsafe() const { return _isUnsafe; }
     [[nodiscard]] const std::vector<std::unique_ptr<Statement>>& Statements()
         const {
         return _statements;
@@ -187,6 +191,7 @@ class BlockStatement final : public Statement {
 
    private:
     std::vector<std::unique_ptr<Statement>> _statements;
+    bool _isUnsafe;
 };
 
 class FunctionDeclaration final : public Declaration {
@@ -210,6 +215,12 @@ class FunctionDeclaration final : public Declaration {
     }
     [[nodiscard]] const std::vector<FunctionModifier>& Modifiers() const {
         return _modifiers;
+    }
+    [[nodiscard]] bool IsUnsafe() const {
+        for (FunctionModifier modifier : _modifiers) {
+            if (modifier == FunctionModifier::Unsafe) return true;
+        }
+        return false;
     }
     [[nodiscard]] const TypeNode& ReturnType() const { return *_returnType; }
     [[nodiscard]] const std::string& Name() const { return _name; }

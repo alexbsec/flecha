@@ -70,7 +70,10 @@ TEST(LoweringTests, ResolvesDeclarationsNamesAssignmentsAndCalls) {
     const BoundAssignmentExpression& assignment =
         static_cast<const BoundAssignmentExpression&>(
             expressionStatement.Expression());
-    EXPECT_EQ(assignment.Target().Name(), "value");
+    EXPECT_EQ(static_cast<const BoundVariableExpression&>(assignment.Target())
+                  .Symbol()
+                  .Name(),
+              "value");
     EXPECT_EQ(assignment.Value().Type().Kind(), SemanticTypeKind::I32);
 }
 
@@ -253,7 +256,9 @@ TEST(LoweringTests, PreservesDelayedDeclarationsAcrossTerminatingBranches) {
     const auto& declaration =
         static_cast<const BoundVariableDeclarationStatement&>(
             *function.Body().Statements()[0]);
-    EXPECT_EQ(&assignment.Target(), &declaration.Variable());
+    EXPECT_EQ(&static_cast<const BoundVariableExpression&>(assignment.Target())
+                   .Symbol(),
+              &declaration.Variable());
 }
 
 TEST(LoweringTests, PreservesConstDeclarationsButReadsOrdinaryValues) {
@@ -277,8 +282,8 @@ TEST(LoweringTests, PreservesConstDeclarationsButReadsOrdinaryValues) {
 
 TEST(LoweringTests, StopsUnsupportedCompoundTypesBeforeCodeGeneration) {
     for (const std::string& source :
-         {"void f() { constptr u8 p = none; }", "void f(&const u8 r) {}",
-          "*u8 f() {}", "void f() { 42 as &u8; }"}) {
+         {"void f() { constref u8 p; }", "void f(&const u8 r) {}", "&u8 f() {}",
+          "void f() { 42 as &u8; }"}) {
         SCOPED_TRACE(source);
         LoweredSource result = Lower(source);
         EXPECT_TRUE(result.diagnostics.HasErrors());
@@ -307,4 +312,24 @@ TEST(LoweringTests, GivesNoneInitializersTheirDeclaredValueType) {
                  .Initializer());
     EXPECT_FALSE(word.IsZeroValue());
     EXPECT_EQ(word.Value(), "none");
+}
+
+TEST(LoweringTests, RepresentsDirectAndIndirectStorageLocations) {
+    LoweredSource result = Lower(
+        "unsafe void f(*i32 p) { (*p) = 42; *i32 same = &raw *p; } "
+        "void g() { i32 x = 0; unsafe { *i32 p = &raw x; f(p); } }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.program, nullptr);
+    EXPECT_TRUE(result.program->Functions()[0]->Symbol().IsUnsafe());
+    const auto& statement = static_cast<const BoundExpressionStatement&>(
+        *result.program->Functions()[0]->Body().Statements()[0]);
+    const auto& assignment =
+        static_cast<const BoundAssignmentExpression&>(statement.Expression());
+    EXPECT_EQ(assignment.Target().Kind(), BoundNodeKind::DereferenceExpression);
+    EXPECT_EQ(assignment.Target().Type().Kind(), SemanticTypeKind::I32);
+    const std::string dump = DumpBoundProgram(*result.program);
+    EXPECT_NE(dump.find("unsafe function f(*i32 p)"), std::string::npos);
+    EXPECT_NE(dump.find("(store (deref load p) 42:i32)"), std::string::npos);
+    EXPECT_NE(dump.find("(address (deref load p))"), std::string::npos);
+    EXPECT_NE(dump.find("(address load x)"), std::string::npos);
 }

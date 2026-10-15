@@ -1,9 +1,9 @@
 # Const declarations and compound types
 
-This milestone implements const value declarations and the recursive type
-foundation for pointers and references. Compound types are parsed and retained
-in the semantic model, but are rejected before lowering until executable
-pointer/reference support is implemented.
+The first milestone implemented const value declarations and the recursive type
+foundation for pointers and references. Raw pointers are now executable as
+described in [unsafe contexts and pointers](unsafe_pointers.md). Reference types
+remain represented but are rejected before lowering.
 
 ## Const values
 
@@ -67,15 +67,13 @@ by this value-copy normalization.
 
 ## Current boundary
 
-Using a compound type in a local, parameter, return type, or cast emits
-`FLECHA-S0024` at the entire type. The compiler does not generate LLVM for these
-programs. Address-taking and dereferencing remain unsupported and diagnose
-invalid operands (`FLECHA-S0009`); dereferenced assignment also remains an
-invalid assignment target. No pointer/reference conversions or ownership rules
-are enabled by this milestone.
+Reference types, including references nested inside pointers, emit
+`FLECHA-S0024` before lowering. `&value` remains reserved for reference creation.
+Raw pointers use the explicit `&raw value` operation inside unsafe contexts;
+see [unsafe pointers](unsafe_pointers.md) for executable operations and limits.
 
-Unsafe contexts, allocation, free, defer, borrow checking, moves, slices, and
-volatile access remain later work in the [implementation plan](memory_implementation_plan.md).
+Allocation, free, defer, borrow checking, moves, slices, and volatile access
+remain later work in the [implementation plan](memory_implementation_plan.md).
 
 ## Validation
 

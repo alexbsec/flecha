@@ -25,6 +25,8 @@ enum class BoundNodeKind {
     PositionStatement,
     LiteralExpression,
     VariableExpression,
+    DereferenceExpression,
+    AddressExpression,
     FunctionExpression,
     UnaryExpression,
     BinaryExpression,
@@ -93,11 +95,48 @@ class BoundLiteralExpression final : public BoundExpression {
     bool _isZeroValue;
 };
 
-class BoundVariableExpression final : public BoundExpression {
+// A storage location can be loaded, stored, or addressed without evaluating it
+// twice.
+class BoundPlaceExpression : public BoundExpression {
+   public:
+    using BoundExpression::BoundExpression;
+};
+
+class BoundDereferenceExpression final : public BoundPlaceExpression {
+   public:
+    BoundDereferenceExpression(source::SourceRange range,
+                               std::unique_ptr<BoundExpression> pointer)
+        : BoundPlaceExpression(range, pointer->Type().Target()->WithoutConst()),
+          _pointer(std::move(pointer)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::DereferenceExpression;
+    }
+    [[nodiscard]] const BoundExpression& Pointer() const { return *_pointer; }
+
+   private:
+    std::unique_ptr<BoundExpression> _pointer;
+};
+
+class BoundAddressExpression final : public BoundExpression {
+   public:
+    BoundAddressExpression(source::SourceRange range,
+                           semantic::SemanticType type,
+                           std::unique_ptr<BoundPlaceExpression> place)
+        : BoundExpression(range, type), _place(std::move(place)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::AddressExpression;
+    }
+    [[nodiscard]] const BoundPlaceExpression& Place() const { return *_place; }
+
+   private:
+    std::unique_ptr<BoundPlaceExpression> _place;
+};
+
+class BoundVariableExpression final : public BoundPlaceExpression {
    public:
     BoundVariableExpression(source::SourceRange range,
                             const semantic::VariableSymbol& symbol)
-        : BoundExpression(range, symbol.Type().WithoutConst()),
+        : BoundPlaceExpression(range, symbol.Type().WithoutConst()),
           _symbol(symbol) {}
     [[nodiscard]] BoundNodeKind Kind() const override {
         return BoundNodeKind::VariableExpression;
@@ -189,21 +228,21 @@ class BoundBinaryExpression final : public BoundExpression {
 class BoundAssignmentExpression final : public BoundExpression {
    public:
     BoundAssignmentExpression(source::SourceRange range,
-                              const semantic::VariableSymbol& target,
+                              std::unique_ptr<BoundPlaceExpression> target,
                               std::unique_ptr<BoundExpression> value)
-        : BoundExpression(range, target.Type()),
-          _target(target),
+        : BoundExpression(range, target->Type()),
+          _target(std::move(target)),
           _value(std::move(value)) {}
     [[nodiscard]] BoundNodeKind Kind() const override {
         return BoundNodeKind::AssignmentExpression;
     }
-    [[nodiscard]] const semantic::VariableSymbol& Target() const {
-        return _target;
+    [[nodiscard]] const BoundPlaceExpression& Target() const {
+        return *_target;
     }
     [[nodiscard]] const BoundExpression& Value() const { return *_value; }
 
    private:
-    const semantic::VariableSymbol& _target;
+    std::unique_ptr<BoundPlaceExpression> _target;
     std::unique_ptr<BoundExpression> _value;
 };
 

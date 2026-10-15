@@ -58,24 +58,28 @@ class FunctionSymbol final : public Symbol {
     FunctionSymbol(std::string name, SemanticType returnType,
                    std::vector<SemanticType> parameterTypes,
                    source::SourceRange declarationRange,
-                   BuiltInFunction builtIn = BuiltInFunction::None)
+                   BuiltInFunction builtIn = BuiltInFunction::None,
+                   bool isUnsafe = false)
         : Symbol(SymbolKind::Function, std::move(name),
                  SemanticType(SemanticTypeKind::Function), declarationRange,
                  false),
           _returnType(returnType),
           _parameterTypes(std::move(parameterTypes)),
-          _builtIn(builtIn) {}
+          _builtIn(builtIn),
+          _isUnsafe(isUnsafe) {}
 
     [[nodiscard]] SemanticType ReturnType() const { return _returnType; }
     [[nodiscard]] const std::vector<SemanticType>& ParameterTypes() const {
         return _parameterTypes;
     }
+    [[nodiscard]] bool IsUnsafe() const { return _isUnsafe; }
     [[nodiscard]] BuiltInFunction BuiltIn() const { return _builtIn; }
 
    private:
     SemanticType _returnType;
     std::vector<SemanticType> _parameterTypes;
     BuiltInFunction _builtIn;
+    bool _isUnsafe;
 };
 
 }  // namespace flecha::semantic

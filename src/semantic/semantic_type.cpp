@@ -154,6 +154,16 @@ SemanticType SemanticType::FromSyntax(core::PrimitiveType type) {
 bool IsAssignable(SemanticType destination, SemanticType source) {
     if (destination.IsError() || source.IsError()) return true;
     if (destination.WithoutConst() == source.WithoutConst()) return true;
+    if (destination.Kind() == SemanticTypeKind::Pointer) {
+        if (source.Kind() == SemanticTypeKind::Null) return true;
+        if (source.Kind() == SemanticTypeKind::Pointer) {
+            // Only add const at the immediate target; no nested covariance.
+            return destination.Target()->WithoutConst() ==
+                       source.Target()->WithoutConst() &&
+                   (destination.Target()->IsConst() ||
+                    !source.Target()->IsConst());
+        }
+    }
     if (destination.Kind() == SemanticTypeKind::String &&
         source.Kind() == SemanticTypeKind::StringView) {
         return true;

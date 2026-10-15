@@ -346,10 +346,11 @@ unsafe (usize, CopyError) copy(
 Callers inspect the error explicitly:
 
 ```flecha
-(copied, err) := unsafe copy(destination, source);
-
-if err != none {
-    return (0, err);
+unsafe {
+    (copied, err) := copy(destination, source);
+    if err != none {
+        return (0, err);
+    }
 }
 ```
 
@@ -390,7 +391,15 @@ u32 read_device(*volatile const u32 address) {
 
 A function should not be marked `unsafe` merely because its implementation contains an unsafe operation. It should be marked `unsafe` when correct use depends on an invariant the compiler cannot enforce at the call site.
 
-The earlier shorthand `unsafe copy(...)` for unsafe calls is not yet part of the language. The block-based form is the current preferred design.
+Unsafe functions and `unsafe { ... }` blocks are implemented. An unsafe
+function can call another unsafe function directly. Safe callees do not inherit
+permission from unsafe callers. The shorthand `unsafe copy(...)` is rejected;
+use a block instead. Ordinary nested blocks also create lexical scopes.
+
+Raw address creation is explicit: `&raw value` produces a raw pointer and
+requires an unsafe context. `&value` retains its planned reference meaning.
+The volatile and integer-address examples above remain future features.
+See [unsafe contexts and pointers](docs/unsafe_pointers.md).
 
 ## 13. Pointers, arrays, and slices
 
@@ -419,9 +428,16 @@ const qualifiers at each layer:
 Consecutive reference markers need whitespace (`& &u8`) because `&&` is a logical
 operator.
 
-Compound declarations, parameters, returns, and casts currently produce
-`FLECHA-S0024` before lowering. They are represented for future implementation;
-pointer/reference operations, `volatile`, arrays, and slices are not yet enabled.
+Raw pointer declarations, parameters, returns, null initialization, and equality
+are implemented. `&raw value`, dereferences, and indirect assignments require
+an unsafe function or block. Unsafe permission does not override constness.
+Pointer values can be copied in safe code. Raw pointers carry no checked lifetime
+or non-null guarantee. A pointer may add const to its immediate target, but
+cannot remove const or change qualifiers deeper inside a nested target type.
+
+Reference types (including nested references) still produce `FLECHA-S0024`
+before lowering. Pointer casts, arithmetic, ordering, `volatile`, arrays,
+and slices are not yet enabled.
 
 Slices contain a pointer and a length:
 

@@ -48,6 +48,9 @@ call assert_equal('flechaModifier', s:HighlightAt('&const', 1))
 call assert_equal('flechaOperator', s:HighlightAt('&const', 0))
 call assert_notequal('flechaModifier', s:HighlightAt('constval', 0))
 
+call assert_equal('flechaRawAddress', s:HighlightAt('&raw', 1))
+call assert_notequal('flechaRawAddress', s:HighlightAt('raw :=', 0))
+
 if !empty(v:errors)
     for error in v:errors
         echomsg error

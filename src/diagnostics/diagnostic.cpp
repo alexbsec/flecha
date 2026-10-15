@@ -70,6 +70,10 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0023";
         case DiagnosticCode::UnsupportedCompoundType:
             return "FLECHA-S0024";
+        case DiagnosticCode::UnsafeOperation:
+            return "FLECHA-S0025";
+        case DiagnosticCode::InvalidPointerAccess:
+            return "FLECHA-S0026";
         case DiagnosticCode::NativeTargetUnavailable:
             return "FLECHA-C0001";
         case DiagnosticCode::ObjectEmissionFailed:

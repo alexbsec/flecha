@@ -232,6 +232,8 @@ std::unique_ptr<Parameter> Parser::ParseParameter() {
 
 std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
     const source::SourceLocation start = Current().range.start;
+    std::vector<FunctionModifier> modifiers;
+    if (Match(TokenType::Unsafe)) modifiers.push_back(FunctionModifier::Unsafe);
     std::unique_ptr<TypeNode> returnType = ParseType();
     if (returnType == nullptr) {
         return nullptr;
@@ -273,13 +275,13 @@ std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
     const source::SourceLocation end = body->Range().end;
 
     return std::make_unique<FunctionDeclaration>(
-        source::SourceRange{start, end}, std::vector<FunctionModifier>{},
+        source::SourceRange{start, end}, std::move(modifiers),
         std::move(returnType), name->value, std::move(parameters),
         std::move(body), name->range);
 }
 
 std::unique_ptr<Declaration> Parser::ParseDeclaration() {
-    if (StartsType()) {
+    if (StartsType() || Check(TokenType::Unsafe)) {
         return ParseFunctionDeclaration();
     }
 
@@ -287,7 +289,9 @@ std::unique_ptr<Declaration> Parser::ParseDeclaration() {
     return nullptr;
 }
 
-std::unique_ptr<BlockStatement> Parser::ParseBlockStatement() {
+std::unique_ptr<BlockStatement> Parser::ParseBlockStatement(bool isUnsafe) {
+    const source::SourceLocation start = Current().range.start;
+    if (isUnsafe) Advance();
     const Token* openBrace = Consume(TokenType::LCurly, "'{' to start block");
     if (openBrace == nullptr) {
         return nullptr;
@@ -306,12 +310,13 @@ std::unique_ptr<BlockStatement> Parser::ParseBlockStatement() {
     const Token* closeBrace = Consume(TokenType::RCurly, "'}' after block");
     const source::SourceLocation end =
         closeBrace == nullptr ? Current().range.end : closeBrace->range.end;
-    return std::make_unique<BlockStatement>(
-        source::SourceRange{openBrace->range.start, end},
-        std::move(statements));
+    return std::make_unique<BlockStatement>(source::SourceRange{start, end},
+                                            std::move(statements), isUnsafe);
 }
 
 std::unique_ptr<Statement> Parser::ParseStatement() {
+    if (Check(TokenType::LCurly)) return ParseBlockStatement();
+    if (Check(TokenType::Unsafe)) return ParseBlockStatement(true);
     if (Check(TokenType::Return)) {
         return ParseReturnStatement();
     }
@@ -577,7 +582,15 @@ std::unique_ptr<Expression> Parser::ParseAssignmentExpression() {
     }
 
     const source::SourceRange targetRange = target->Range();
-    if (target->Kind() != AstNodeKind::NameExpression) {
+    const Expression* place = target.get();
+    while (place->Kind() == AstNodeKind::ParenthesizedExpression) {
+        place = &static_cast<const ParenthesizedExpression&>(*place).Inner();
+    }
+    const bool dereference =
+        place->Kind() == AstNodeKind::UnaryExpression &&
+        static_cast<const UnaryExpression&>(*place).OperatorType() ==
+            TokenType::Mul;
+    if (place->Kind() != AstNodeKind::NameExpression && !dereference) {
         _diagnostics.Report(
             diagnostics::DiagnosticCode::InvalidAssignmentTarget, targetRange,
             "expression is not a valid assignment target");
@@ -671,6 +684,12 @@ std::unique_ptr<Expression> Parser::ParseUnaryExpression() {
     }
 
     const Token& operatorToken = Advance();
+    TokenType operation = operatorToken.type;
+    if (operation == TokenType::Ampersand && Check(TokenType::Identifier) &&
+        Current().value == "raw") {
+        Advance();
+        operation = TokenType::RawAddress;
+    }
     std::unique_ptr<Expression> operand = ParseUnaryExpression();
     if (operand == nullptr) {
         return nullptr;
@@ -678,7 +697,7 @@ std::unique_ptr<Expression> Parser::ParseUnaryExpression() {
 
     return std::make_unique<UnaryExpression>(
         source::SourceRange{operatorToken.range.start, operand->Range().end},
-        operatorToken.type, std::move(operand));
+        operation, std::move(operand));
 }
 
 std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
@@ -845,7 +864,7 @@ std::unique_ptr<Expression> Parser::ParsePrimaryExpression() {
 
 void Parser::SynchronizeTopLevel() {
     if (!IsAtEnd()) Advance();
-    while (!IsAtEnd() && !StartsType()) {
+    while (!IsAtEnd() && !StartsType() && !Check(TokenType::Unsafe)) {
         Advance();
     }
 }
