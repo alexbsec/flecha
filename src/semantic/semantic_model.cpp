@@ -25,6 +25,12 @@ const std::vector<const Symbol*>& SemanticModel::DeferredCaptures(
     return found == _deferredCaptures.end() ? EMPTY : found->second;
 }
 
+const Symbol* SemanticModel::DestructureTarget(
+    const core::DestructureBinding& binding) const {
+    const auto found = _destructureTargets.find(&binding);
+    return found == _destructureTargets.end() ? nullptr : found->second;
+}
+
 SemanticType SemanticModel::TypeOf(const core::Expression& expression) const {
     const std::unordered_map<const core::Expression*,
                              SemanticType>::const_iterator found =

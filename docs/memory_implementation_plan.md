@@ -2,7 +2,9 @@
 
 Status: const types, unsafe pointers, checked references, fixed arrays, and
 iteration, and checked slices are merged. Deferred calls are implemented on
-`feat/defer`; see [defer.md](defer.md). Allocation and ownership work remains.
+`feat/defer`; see [defer.md](defer.md). Tuples and destructuring are implemented
+on `feat/tuples`; see [tuples.md](tuples.md). Error values, allocation, and
+ownership work remain.
 
 Based on the agreed rules in [memory_model.md](memory_model.md), with the
 const-type milestone merged into `master` at `c9e6ee4`. Each milestone should be a separate feature
@@ -161,7 +163,12 @@ Allocation is not needed to test this feature.
 
 ## 5. Tuple results, error values, and typed destructuring
 
-Proposed branch: `feat/tuple-errors`. Depends on: 1 and 2.
+Tuple implementation branch: `feat/tuples`. Depends on: 1 and 2; based on the
+committed defer implementation to cover aggregate cleanup and deferred captures.
+
+Tuples, multiple results, and typed/mixed destructuring are implemented; see
+[tuples.md](tuples.md). The user split this milestone: error values and generic
+allocator member-call syntax remain for later work.
 
 This is a prerequisite for the agreed allocator API, not an allocator-specific
 parser shortcut.

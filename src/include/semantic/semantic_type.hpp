@@ -4,6 +4,7 @@
 #include <cassert>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "core/ast.hpp"
 
@@ -31,6 +32,7 @@ enum class SemanticTypeKind {
     Reference,
     Array,
     Slice,
+    Tuple,
     Null,
     None,
     Function,
@@ -46,6 +48,16 @@ class SemanticType final {
     SemanticType(SemanticTypeKind kind, SemanticType target,
                  bool isConst = false, std::uint64_t length = 0);
 
+    explicit SemanticType(std::vector<SemanticType> elements,
+                          bool isConst = false)
+        : _kind(SemanticTypeKind::Tuple),
+          _isConst(isConst),
+          _elements(std::make_shared<const std::vector<SemanticType>>(
+              std::move(elements))) {}
+    [[nodiscard]] const std::vector<SemanticType>& Elements() const {
+        return *_elements;
+    }
+    [[nodiscard]] bool OwnsStorage() const;
     [[nodiscard]] SemanticTypeKind Kind() const { return _kind; }
     [[nodiscard]] std::string Name() const;
     [[nodiscard]] bool IsInteger() const;
@@ -69,7 +81,8 @@ class SemanticType final {
         return _kind == SemanticTypeKind::Pointer ||
                _kind == SemanticTypeKind::Reference ||
                _kind == SemanticTypeKind::Array ||
-               _kind == SemanticTypeKind::Slice;
+               _kind == SemanticTypeKind::Slice ||
+               _kind == SemanticTypeKind::Tuple;
     }
     [[nodiscard]] std::uint64_t Length() const { return _length; }
     [[nodiscard]] const SemanticType* Target() const { return _target.get(); }
@@ -89,6 +102,7 @@ class SemanticType final {
     bool _isConst;
     std::uint64_t _length = 0;
     std::shared_ptr<const SemanticType> _target;
+    std::shared_ptr<const std::vector<SemanticType>> _elements;
 };
 
 [[nodiscard]] bool IsAssignable(SemanticType destination, SemanticType source);

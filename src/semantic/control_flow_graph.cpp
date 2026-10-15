@@ -101,6 +101,27 @@ class GraphBuilder final {
                 _graph.nodes[action].declaration = &declaration;
                 return action;
             }
+            case core::AstNodeKind::DestructureStatement: {
+                const auto& destructure =
+                    static_cast<const core::DestructureStatement&>(statement);
+                for (auto binding = destructure.Bindings().rbegin();
+                     binding != destructure.Bindings().rend(); ++binding) {
+                    const Symbol* target = _model.DestructureTarget(**binding);
+                    if (target == nullptr) continue;
+                    const NodeId store = AddNode({next});
+                    _graph.nodes[store].write = target;
+                    if (destructure.IsInferred() ||
+                        (*binding)->ExplicitType() != nullptr) {
+                        _graph.nodes[store].reset = target;
+                        _graph.symbolScopes.emplace(target, _scopes.back());
+                    }
+                    next = store;
+                }
+                const NodeId body = BuildExpression(destructure.Value(), next);
+                const NodeId action = AddNode({body});
+                _graph.nodes[action].destructure = &destructure;
+                return action;
+            }
             case core::AstNodeKind::DeferStatement: {
                 const auto& deferred =
                     static_cast<const core::DeferStatement&>(statement);
@@ -241,6 +262,14 @@ class GraphBuilder final {
                 if (slice.Start() != nullptr)
                     next = BuildExpression(*slice.Start(), next);
                 return BuildExpression(slice.Receiver(), next);
+            }
+            case core::AstNodeKind::TupleExpression: {
+                const auto& tuple =
+                    static_cast<const core::TupleExpression&>(expression);
+                for (auto element = tuple.Elements().rbegin();
+                     element != tuple.Elements().rend(); ++element)
+                    next = BuildExpression(**element, next);
+                return next;
             }
             case core::AstNodeKind::ArrayExpression: {
                 const auto& array =

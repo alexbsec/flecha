@@ -58,6 +58,8 @@ enum class DiagnosticCode {
     ArrayIndexOutOfBounds,
     SliceBounds,
     InvalidDefer,
+    InvalidTuple,
+    InvalidDestructure,
     NativeTargetUnavailable,
     ObjectEmissionFailed,
     RuntimeUnavailable,

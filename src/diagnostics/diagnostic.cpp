@@ -92,6 +92,10 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0034";
         case DiagnosticCode::ArrayInitializerCount:
             return "FLECHA-S0035";
+        case DiagnosticCode::InvalidTuple:
+            return "FLECHA-S0039";
+        case DiagnosticCode::InvalidDestructure:
+            return "FLECHA-S0040";
         case DiagnosticCode::InvalidDefer:
             return "FLECHA-S0038";
         case DiagnosticCode::SliceBounds:

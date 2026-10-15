@@ -24,6 +24,8 @@ enum class BoundNodeKind {
     BreakStatement,
     JumpToStatement,
     PositionStatement,
+    TupleExpression,
+    DestructureStatement,
     ArrayExpression,
     SliceExpression,
     ArrayElementExpression,
@@ -106,6 +108,43 @@ class BoundLiteralExpression final : public BoundExpression {
 class BoundPlaceExpression : public BoundExpression {
    public:
     using BoundExpression::BoundExpression;
+};
+
+class BoundTupleExpression final : public BoundExpression {
+   public:
+    BoundTupleExpression(source::SourceRange range, semantic::SemanticType type,
+                         std::vector<std::unique_ptr<BoundExpression>> elements)
+        : BoundExpression(range, type), _elements(std::move(elements)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::TupleExpression;
+    }
+    [[nodiscard]] const auto& Elements() const { return _elements; }
+
+   private:
+    std::vector<std::unique_ptr<BoundExpression>> _elements;
+};
+
+struct BoundDestructureBinding {
+    const semantic::VariableSymbol* variable;
+    bool declaration;
+};
+class BoundDestructureStatement final : public BoundStatement {
+   public:
+    BoundDestructureStatement(source::SourceRange range,
+                              std::vector<BoundDestructureBinding> bindings,
+                              std::unique_ptr<BoundExpression> value)
+        : BoundStatement(range),
+          _bindings(std::move(bindings)),
+          _value(std::move(value)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::DestructureStatement;
+    }
+    [[nodiscard]] const auto& Bindings() const { return _bindings; }
+    [[nodiscard]] const BoundExpression& Value() const { return *_value; }
+
+   private:
+    std::vector<BoundDestructureBinding> _bindings;
+    std::unique_ptr<BoundExpression> _value;
 };
 
 class BoundArrayExpression final : public BoundExpression {

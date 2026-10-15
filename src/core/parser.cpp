@@ -9,6 +9,14 @@ namespace flecha::core {
 namespace {
 
 std::unique_ptr<TypeNode> CloneType(const TypeNode& type) {
+    if (type.TypeForm() == TypeKind::Tuple) {
+        std::vector<std::unique_ptr<TypeNode>> elements;
+        for (const auto& element : type.Elements())
+            elements.push_back(CloneType(*element));
+        return std::make_unique<TypeNode>(type.Range(), std::move(elements),
+                                          type.IsConst(),
+                                          type.QualifierRange());
+    }
     if (type.TypeForm() == TypeKind::Primitive)
         return std::make_unique<TypeNode>(
             type.Range(), type.Type(), type.IsConst(), type.QualifierRange());
@@ -104,7 +112,7 @@ bool Parser::StartsType() const {
         const TokenType token = Peek(offset).type;
         if (token == TokenType::Mul || token == TokenType::Ampersand ||
             token == TokenType::Const || token == TokenType::ConstPtr ||
-            token == TokenType::ConstRef) {
+            token == TokenType::ConstRef || token == TokenType::LParen) {
             ++offset;
         } else if (token == TokenType::LBracket) {
             // Look through the bracketed count to distinguish [N]T from an
@@ -191,6 +199,24 @@ std::unique_ptr<TypeNode> Parser::ParseType() {
         return std::make_unique<TypeNode>(range, TypeKind::Array,
                                           std::move(target), explicitConst,
                                           qualifierRange, *length);
+    }
+    if (Match(TokenType::LParen)) {
+        std::vector<std::unique_ptr<TypeNode>> elements;
+        do {
+            auto element = ParseType();
+            if (element == nullptr) return nullptr;
+            elements.push_back(std::move(element));
+        } while (Match(TokenType::Comma) && !Check(TokenType::RParen));
+        const Token* close = Consume(TokenType::RParen, "')' after tuple type");
+        if (close == nullptr) return nullptr;
+        if (elements.size() < 2) {
+            ReportUnexpectedToken(
+                "after tuple type: at least two elements are required");
+            return nullptr;
+        }
+        return std::make_unique<TypeNode>(
+            source::SourceRange{start, close->range.end}, std::move(elements),
+            explicitConst, qualifierRange);
     }
     PrimitiveType type;
 
@@ -388,6 +414,7 @@ std::unique_ptr<Statement> Parser::ParseStatement() {
     if (Check(TokenType::Break)) return ParseBreakStatement();
     if (Check(TokenType::JumpTo)) return ParseJumpToStatement();
     if (Check(TokenType::Hash)) return ParsePositionStatement();
+    if (IsDestructureStatement()) return ParseDestructureStatement();
     if (StartsType() || IsInferredVariableDeclaration()) {
         return ParseVariableDeclarationStatement();
     }
@@ -403,6 +430,90 @@ std::unique_ptr<Statement> Parser::ParseStatement() {
         semicolon == nullptr ? expression->Range().end : semicolon->range.end;
     return std::make_unique<ExpressionStatement>(
         source::SourceRange{start, end}, std::move(expression));
+}
+
+bool Parser::HasParenthesizedBindings() const {
+    if (!Check(TokenType::LParen)) return false;
+    std::size_t depth = 0;
+    bool comma = false;
+    for (std::size_t offset = 0;; ++offset) {
+        const TokenType token = Peek(offset).type;
+        if (token == TokenType::EOF_TOKEN || token == TokenType::SemiColon ||
+            token == TokenType::LCurly)
+            return false;
+        if (token == TokenType::Comma && depth == 1) comma = true;
+        if (token == TokenType::LParen) ++depth;
+        if (token == TokenType::RParen && --depth == 0)
+            return comma && (Peek(offset + 1).type == TokenType::Assign ||
+                             Peek(offset + 1).type == TokenType::DeclareAssign);
+    }
+}
+
+bool Parser::IsDestructureStatement() const {
+    if (HasParenthesizedBindings()) return true;
+    std::size_t parentheses = 0;
+    std::size_t brackets = 0;
+    bool comma = false;
+    for (std::size_t offset = 0;; ++offset) {
+        const TokenType token = Peek(offset).type;
+        if (token == TokenType::EOF_TOKEN || token == TokenType::SemiColon ||
+            token == TokenType::LCurly || token == TokenType::RCurly)
+            return false;
+        if (parentheses == 0 && brackets == 0) {
+            if (token == TokenType::Assign || token == TokenType::DeclareAssign)
+                return comma;
+            if (token == TokenType::Comma) comma = true;
+        }
+        if (token == TokenType::LParen) ++parentheses;
+        if (token == TokenType::RParen) {
+            if (parentheses == 0) return false;
+            --parentheses;
+        }
+        if (token == TokenType::LBracket) ++brackets;
+        if (token == TokenType::RBracket) {
+            if (brackets == 0) return false;
+            --brackets;
+        }
+    }
+}
+
+std::unique_ptr<Statement> Parser::ParseDestructureStatement() {
+    const source::SourceLocation start = Current().range.start;
+    const bool parenthesized = HasParenthesizedBindings();
+    if (parenthesized) Advance();
+    std::vector<std::unique_ptr<DestructureBinding>> bindings;
+    std::unique_ptr<TypeNode> sharedType;
+    do {
+        std::unique_ptr<TypeNode> type;
+        if (StartsType()) {
+            type = ParseType();
+            if (type == nullptr) return nullptr;
+            if (!parenthesized) sharedType = CloneType(*type);
+        } else if (!parenthesized && sharedType != nullptr) {
+            type = CloneType(*sharedType);
+        }
+        const Token* name =
+            Consume(TokenType::Identifier, "destructuring binding name or '_'");
+        if (name == nullptr) return nullptr;
+        bindings.push_back(std::make_unique<DestructureBinding>(
+            name->range, name->value, std::move(type)));
+        if (!Match(TokenType::Comma)) break;
+        if (parenthesized && Check(TokenType::RParen)) break;
+    } while (true);
+    if (parenthesized && Consume(TokenType::RParen,
+                                 "')' after destructuring bindings") == nullptr)
+        return nullptr;
+    const bool inferred = Match(TokenType::DeclareAssign);
+    if (!inferred && Consume(TokenType::Assign,
+                             "'=' after destructuring bindings") == nullptr)
+        return nullptr;
+    auto value = ParseExpression();
+    if (value == nullptr) return nullptr;
+    const Token* end = Consume(TokenType::SemiColon, "';' after destructuring");
+    return std::make_unique<DestructureStatement>(
+        source::SourceRange{
+            start, end == nullptr ? value->Range().end : end->range.end},
+        std::move(bindings), std::move(value), inferred);
 }
 
 std::unique_ptr<VariableDeclarationStatement>
@@ -1111,6 +1222,29 @@ std::unique_ptr<Expression> Parser::ParsePrimaryExpression() {
             std::unique_ptr<Expression> expression = ParseExpression();
             if (expression == nullptr) {
                 return nullptr;
+            }
+            if (Match(TokenType::Comma)) {
+                std::vector<std::unique_ptr<Expression>> elements;
+                elements.push_back(std::move(expression));
+                while (!Check(TokenType::RParen)) {
+                    auto element = ParseExpression();
+                    if (element == nullptr) return nullptr;
+                    elements.push_back(std::move(element));
+                    if (!Match(TokenType::Comma)) break;
+                }
+                const Token* close =
+                    Consume(TokenType::RParen, "')' after tuple expression");
+                if (close == nullptr) return nullptr;
+                if (elements.size() < 2) {
+                    ReportUnexpectedToken(
+                        "after tuple expression: at least two elements are "
+                        "required");
+                    return nullptr;
+                }
+                return std::make_unique<TupleExpression>(
+                    source::SourceRange{openParen.range.start,
+                                        close->range.end},
+                    std::move(elements));
             }
             const Token* closeParen =
                 Consume(TokenType::RParen, "')' after expression");

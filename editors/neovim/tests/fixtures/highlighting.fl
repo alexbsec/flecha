@@ -41,3 +41,8 @@ readonly.front();
 fixed.back()++;
 
 void Deferred() { defer stdoutln("done"); }
+
+(i32, bool) TupleResult() { return (42, true); }
+void TupleBindings() { (i32 count, bool ready) = TupleResult(); }
+
+void BareTupleBindings() { i32 quotient, remainder = (3, 2); }

@@ -963,3 +963,119 @@ TEST(ParserDeferTests, RecoversFromMissingCallsAndTerminators) {
         EXPECT_TRUE(diagnostics.HasErrors());
     }
 }
+
+TEST(ParserTupleTests, ParsesNestedTypesValuesAndBindingForms) {
+    const std::string source =
+        "(i32, (bool, u8)) f() { return (42, (true, 3)); } "
+        "void g() { p := (1, 2); (a, b) := p; (i32 c, a) = p; (a, _) = p; }";
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource(source, diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const auto& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    EXPECT_EQ(function.ReturnType().TypeForm(), TypeKind::Tuple);
+    EXPECT_EQ(function.ReturnType().Elements().size(), 2);
+    EXPECT_EQ(function.ReturnType().Elements()[1]->TypeForm(), TypeKind::Tuple);
+    const auto& tuple =
+        static_cast<const TupleExpression&>(ReturnedExpression(*unit));
+    EXPECT_EQ(tuple.Elements().size(), 2);
+    EXPECT_EQ(
+        source.substr(tuple.Range().start.offset,
+                      tuple.Range().end.offset - tuple.Range().start.offset),
+        "(42, (true, 3))");
+    const auto& body =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[1])
+            .Body();
+    const auto& inferred =
+        static_cast<const DestructureStatement&>(*body.Statements()[1]);
+    EXPECT_TRUE(inferred.IsInferred());
+    EXPECT_EQ(inferred.Bindings()[0]->Name(), "a");
+    const auto& mixed =
+        static_cast<const DestructureStatement&>(*body.Statements()[2]);
+    EXPECT_FALSE(mixed.IsInferred());
+    EXPECT_NE(mixed.Bindings()[0]->ExplicitType(), nullptr);
+    EXPECT_EQ(mixed.Bindings()[1]->ExplicitType(), nullptr);
+}
+
+TEST(ParserTupleTests, KeepsGroupingAndRejectsMalformedTuples) {
+    DiagnosticBag valid;
+    ParseSource(
+        "void f() { x := 1; r := &x; (*r) = (2); ((x)); p := (1, 2,); (a, b,) "
+        ":= p; }",
+        valid);
+    EXPECT_FALSE(valid.HasErrors());
+    for (const std::string& source :
+         {"void f() { loop (a, b) := (1, 2); a < 3; a++ {} }",
+          "void f() { t := (); }", "void f() { t := (1,); }",
+          "(i32) f() { return 1; }", "() f() {}",
+          "void f() { (a, b) := (1,); }",
+          "void f() { (i32, bool) t = (1, true; }",
+          "void f() { (a[0], b) = (1, 2); }"}) {
+        SCOPED_TRACE(source);
+        DiagnosticBag diagnostics;
+        ParseSource(source, diagnostics);
+        EXPECT_TRUE(diagnostics.HasErrors());
+    }
+}
+
+TEST(ParserTupleTests, ParsesBareBindingsAndSharedRecursiveTypes) {
+    const std::string source = R"(
+        void f() {
+            q, r := (3, 2);
+            i32 a, i32 b = (3, 2);
+            i32 c, d = (3, 2);
+            bool first, second, i32 number = (true, false, 42);
+            const *u8 p, other = (none, none);
+            (i32, bool) left, right = ((1, true), (2, false));
+            q, r = (r, q);
+            (i32 fresh, q) = (1, 2);
+        }
+    )";
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource(source, diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const auto& body =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0])
+            .Body();
+    const auto& inferred =
+        static_cast<const DestructureStatement&>(*body.Statements()[0]);
+    EXPECT_TRUE(inferred.IsInferred());
+    EXPECT_EQ(inferred.Bindings()[1]->ExplicitType(), nullptr);
+    EXPECT_EQ(source.substr(
+                  inferred.Range().start.offset,
+                  inferred.Range().end.offset - inferred.Range().start.offset),
+              "q, r := (3, 2);");
+    const auto& shared =
+        static_cast<const DestructureStatement&>(*body.Statements()[2]);
+    ASSERT_NE(shared.Bindings()[1]->ExplicitType(), nullptr);
+    EXPECT_EQ(shared.Bindings()[1]->ExplicitType()->Type(), PrimitiveType::I32);
+    const auto& pointer =
+        static_cast<const DestructureStatement&>(*body.Statements()[4]);
+    EXPECT_TRUE(pointer.Bindings()[1]->ExplicitType()->IsConst());
+    EXPECT_EQ(pointer.Bindings()[1]->ExplicitType()->TypeForm(),
+              TypeKind::Pointer);
+    const auto& tuple =
+        static_cast<const DestructureStatement&>(*body.Statements()[5]);
+    EXPECT_EQ(tuple.Bindings()[1]->ExplicitType()->TypeForm(), TypeKind::Tuple);
+    const auto& mixed =
+        static_cast<const DestructureStatement&>(*body.Statements()[7]);
+    EXPECT_EQ(mixed.Bindings()[1]->ExplicitType(), nullptr);
+}
+
+TEST(ParserTupleTests, DistinguishesBareBindingsFromCallsTypesAndGrouping) {
+    DiagnosticBag valid;
+    ParseSource(
+        "void f() { call(1, 2); x := (1, 2); (i32, i32) t = x; a := [1, 2]; "
+        "(a[0]) = 3; }",
+        valid);
+    EXPECT_FALSE(valid.HasErrors());
+    for (const std::string& source :
+         {"void f() { i32 a, = (1, 2); }", "void f() { a, b, := (1, 2); }",
+          "void f() { i32 a, b; }", "void f() { a, b = (1, 2) }",
+          "void f() { a[0], b = (1, 2); }"}) {
+        SCOPED_TRACE(source);
+        DiagnosticBag diagnostics;
+        ParseSource(source, diagnostics);
+        EXPECT_TRUE(diagnostics.HasErrors());
+    }
+}

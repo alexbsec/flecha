@@ -583,7 +583,8 @@ implementation milestone, const declarations and compound type representation,
 is documented in [const declarations and types](const_types.md). Unsafe pointer operations are documented in [unsafe pointers](unsafe_pointers.md).
 Checked scalar and pointer-slot references are documented in
 [checked references](checked_references.md). Deferred calls are also implemented; the next stages are
-tuple/error support, system allocation, and cross-function resource effects.
+error values, system allocation, and cross-function resource effects.
+[Tuples and destructuring](tuples.md) are implemented.
 
 Concurrency, atomics, shared ownership, partial moves, and arbitrary pointer
 arithmetic remain outside the first safe-reference feature.

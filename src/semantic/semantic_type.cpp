@@ -11,7 +11,7 @@ SemanticType::SemanticType(SemanticTypeKind kind, SemanticType target,
       _isConst(isConst),
       _length(length),
       _target(std::make_shared<const SemanticType>(std::move(target))) {
-    assert(IsCompound());
+    assert(IsCompound() && kind != SemanticTypeKind::Tuple);
 }
 
 SemanticType SemanticType::WithoutConst() const {
@@ -26,15 +26,32 @@ SemanticType SemanticType::WithConst() const {
     return result;
 }
 
+bool SemanticType::OwnsStorage() const {
+    if (_kind == SemanticTypeKind::String) return true;
+    if (_kind == SemanticTypeKind::Tuple)
+        for (const auto& element : Elements())
+            if (element.OwnsStorage()) return true;
+    return false;
+}
+
 bool SemanticType::operator==(const SemanticType& other) const {
     return _kind == other._kind && _isConst == other._isConst &&
            _length == other._length &&
+           ((_elements == nullptr && other._elements == nullptr) ||
+            (_elements != nullptr && other._elements != nullptr &&
+             *_elements == *other._elements)) &&
            ((_target == nullptr && other._target == nullptr) ||
             (_target != nullptr && other._target != nullptr &&
              *_target == *other._target));
 }
 
 SemanticType SemanticType::FromSyntax(const core::TypeNode& type) {
+    if (type.TypeForm() == core::TypeKind::Tuple) {
+        std::vector<SemanticType> elements;
+        for (const auto& element : type.Elements())
+            elements.push_back(FromSyntax(*element));
+        return SemanticType(std::move(elements), type.IsConst());
+    }
     if (type.TypeForm() == core::TypeKind::Slice)
         return SemanticType(SemanticTypeKind::Slice, FromSyntax(*type.Target()),
                             type.IsConst());
@@ -89,6 +106,14 @@ std::string SemanticType::Name() const {
             return "string";
         case SemanticTypeKind::StringView:
             return "stringv";
+        case SemanticTypeKind::Tuple: {
+            std::string name = "(";
+            for (const auto& element : Elements()) {
+                if (name.size() > 1) name += ", ";
+                name += element.Name();
+            }
+            return name + ")";
+        }
         case SemanticTypeKind::Slice:
             return "[]" + _target->Name();
         case SemanticTypeKind::Array:
@@ -172,6 +197,15 @@ SemanticType SemanticType::FromSyntax(core::PrimitiveType type) {
 bool IsAssignable(SemanticType destination, SemanticType source) {
     if (destination.IsError() || source.IsError()) return true;
     if (destination.WithoutConst() == source.WithoutConst()) return true;
+    if (destination.Kind() == SemanticTypeKind::Tuple &&
+        source.Kind() == SemanticTypeKind::Tuple) {
+        if (destination.Elements().size() != source.Elements().size())
+            return false;
+        for (std::size_t i = 0; i < destination.Elements().size(); ++i)
+            if (!IsAssignable(destination.Elements()[i], source.Elements()[i]))
+                return false;
+        return true;
+    }
     if (destination.Kind() == SemanticTypeKind::Pointer) {
         if (source.Kind() == SemanticTypeKind::Null) return true;
         if (source.Kind() == SemanticTypeKind::Pointer) {

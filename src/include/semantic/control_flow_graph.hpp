@@ -21,6 +21,7 @@ struct FlowNode final {
     // corresponding ordered events; each pass consumes only its own events.
     const core::Expression* evaluation = nullptr;
     const core::VariableDeclarationStatement* declaration = nullptr;
+    const core::DestructureStatement* destructure = nullptr;
     const core::DeferStatement* deferRegistration = nullptr;
     bool reachable = false;
 };

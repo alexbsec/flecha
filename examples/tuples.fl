@@ -1,0 +1,35 @@
+// Build: build/flecha build examples/tuples.fl -o /tmp/flecha-tuples
+(i32, i32) divide(i32 dividend, i32 divisor) {
+    return (dividend / divisor, dividend % divisor);
+}
+
+(string, (u8, bool)) describe() {
+    return ("Flecha", (42, true));
+}
+
+void report((string, i32) value) {
+    name, number := value;
+    stdoutln(name);
+    stdoutln(number);
+}
+
+i32 main() {
+    quotient, remainder := divide(17, 5);
+    i32 q, r = divide(17, 5); // Shared type: both names are i32.
+    i32 first, i32 second = divide(17, 5); // Explicit type per name.
+    stdoutln(quotient);  // 3
+    stdoutln(remainder); // 2
+
+    // Assignment captures the entire right-hand side before writing either name.
+    quotient, remainder = (remainder, quotient);
+    (i32 next, quotient) = divide(20, 3); // Declare next; assign existing quotient.
+    _, remainder = divide(19, 5);      // Discard the first element.
+
+    name, details := describe();
+    u8 answer, bool ready = details;
+    (string, i32) message = (name, answer as i32);
+    defer report(message);
+    message = ("changed", 0); // The deferred call retains its own copy.
+
+    return answer as i32;
+}
