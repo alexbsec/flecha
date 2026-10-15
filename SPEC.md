@@ -397,7 +397,7 @@ permission from unsafe callers. The shorthand `unsafe copy(...)` is rejected;
 use a block instead. Ordinary nested blocks also create lexical scopes.
 
 Raw address creation is explicit: `&raw value` produces a raw pointer and
-requires an unsafe context. `&value` retains its planned reference meaning.
+requires an unsafe context. `&value` creates a checked reference.
 The volatile and integer-address examples above remain future features.
 See [unsafe contexts and pointers](docs/unsafe_pointers.md).
 
@@ -429,15 +429,32 @@ Consecutive reference markers need whitespace (`& &u8`) because `&&` is a logica
 operator.
 
 Raw pointer declarations, parameters, returns, null initialization, and equality
-are implemented. `&raw value`, dereferences, and indirect assignments require
+are implemented. `&raw value`, raw dereferences, and raw indirect assignments require
 an unsafe function or block. Unsafe permission does not override constness.
 Pointer values can be copied in safe code. Raw pointers carry no checked lifetime
 or non-null guarantee. A pointer may add const to its immediate target, but
 cannot remove const or change qualifiers deeper inside a nested target type.
 
-Reference types (including nested references) still produce `FLECHA-S0024`
-before lowering. Pointer casts, arithmetic, ordering, `volatile`, arrays,
-and slices are not yet enabled.
+Checked `&T` and `&const T` references to initialized scalar and raw-pointer
+storage are implemented. `&value`, `*ref`, and `*ref = value` are safe operations.
+Reference assignment rebinds; mutable handle assignment moves, shared handle
+assignment copies, and reference arguments reborrow for the call. Mutable
+borrows exclude conflicting access; shared borrows exclude mutation. The
+compiler tracks last possible uses, borrow origins, and moved handles through
+control flow. `constref T` fixes the handle without making its target read-only;
+moving a fixed mutable handle is rejected.
+
+References require initializers and cannot contain `none` or `null`. References
+to shorter-lived storage cannot escape into outer bindings. Reference returns,
+raw/reference conversions, reference comparisons, direct references to strings
+or views, and nested reference storage are rejected in this first version.
+`&*T` borrows a raw-pointer slot; accessing the raw pointee still requires unsafe
+permission. See [checked references](docs/checked_references.md) for exact rules,
+limits, and diagnostics. Integer literals gain contextual integer types with
+representability checks; this does not convert already typed values.
+
+Pointer casts, arithmetic, ordering, `volatile`, arrays, and slices remain
+future features.
 
 Slices contain a pointer and a length:
 

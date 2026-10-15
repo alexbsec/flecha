@@ -1,0 +1,80 @@
+void increment_ref(&u8 value) {
+    *value = *value + 1;
+}
+
+u8 read_ref(&const u8 value) {
+    return *value;
+}
+
+u8 sum_refs(&const u8 left, &const u8 right) {
+    return *left + *right;
+}
+
+u8 exercise_references() {
+    u8 value = 3;
+    ref := &value;
+    *ref = *ref * 2;
+    if value != 6 { return 1; }
+
+    constref u8 fixed = &value;
+    increment_ref(fixed);
+    increment_ref(fixed);
+    if read_ref(fixed) != 8 { return 2; }
+    child := &*fixed;
+    *child = 9;
+    *fixed = 10;
+    if sum_refs(fixed, fixed) != 20 { return 3; }
+
+    &const u8 shared = &value;
+    copy := shared;
+    if *shared != 10 or *copy != 10 { return 4; }
+
+    u8 other = 20;
+    mutable := &value;
+    moved := mutable;
+    *moved = 11;
+    mutable = &other;
+    *mutable = 21;
+    if value != 11 or other != 21 { return 5; }
+
+    const u8 immutable = 42;
+    inferred := &immutable;
+    return *inferred;
+}
+
+u8 exercise_reference_flow(bool choice) {
+    u8 left = 0;
+    u8 right = 0;
+    target := &left;
+    if choice { target = &right; }
+    u8 count = 0;
+    while count < 3 {
+        *target = *target + 1;
+        count = count + 1;
+        if count == 1 { proceed; }
+        if count == 2 { jumpto end; }
+        #end
+    }
+    if *target != 3 { return 1; }
+    if choice {
+        if right != 3 or left != 0 { return 2; }
+    } else {
+        if left != 3 or right != 0 { return 3; }
+    }
+    return 42;
+}
+
+void replace_pointer_ref(&*u8 slot, *u8 value) {
+    *slot = value;
+}
+
+unsafe u8 exercise_pointer_ref(*u8 first, *u8 second) {
+    slot := &first;
+    replace_pointer_ref(slot, second);
+    **slot = 42;
+    return **slot;
+}
+
+i8 signed_byte_minimum() { return -128; }
+i64 signed_minimum() { return -9223372036854775808; }
+u64 unsigned_maximum() { return 18446744073709551615; }

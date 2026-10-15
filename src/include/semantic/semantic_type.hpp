@@ -61,6 +61,7 @@ class SemanticType final {
     }
     [[nodiscard]] const SemanticType* Target() const { return _target.get(); }
     [[nodiscard]] SemanticType WithoutConst() const;
+    [[nodiscard]] SemanticType WithConst() const;
     bool operator==(const SemanticType& other) const;
 
     [[nodiscard]] static SemanticType FromSyntax(const core::TypeNode& type);
@@ -77,6 +78,7 @@ class SemanticType final {
 };
 
 [[nodiscard]] bool IsAssignable(SemanticType destination, SemanticType source);
+[[nodiscard]] bool CanReborrow(SemanticType destination, SemanticType source);
 [[nodiscard]] bool CanExplicitlyCast(SemanticType source,
                                      SemanticType destination);
 

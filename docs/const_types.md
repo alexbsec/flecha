@@ -2,8 +2,8 @@
 
 The first milestone implemented const value declarations and the recursive type
 foundation for pointers and references. Raw pointers are now executable as
-described in [unsafe contexts and pointers](unsafe_pointers.md). Reference types
-remain represented but are rejected before lowering.
+described in [unsafe contexts and pointers](unsafe_pointers.md). Checked scalar and pointer-slot references are described in
+[checked references](checked_references.md).
 
 ## Const values
 
@@ -67,12 +67,13 @@ by this value-copy normalization.
 
 ## Current boundary
 
-Reference types, including references nested inside pointers, emit
-`FLECHA-S0024` before lowering. `&value` remains reserved for reference creation.
+Scalar and raw-pointer storage can be borrowed with `&value`; see
+[checked references](checked_references.md) for qualifier, move, and lifetime
+rules. Unsupported reference storage shapes emit `FLECHA-S0024`.
 Raw pointers use the explicit `&raw value` operation inside unsafe contexts;
 see [unsafe pointers](unsafe_pointers.md) for executable operations and limits.
 
-Allocation, free, defer, borrow checking, moves, slices, and volatile access
+Allocation, free, defer, general owner moves, slices, and volatile access
 remain later work in the [implementation plan](memory_implementation_plan.md).
 
 ## Validation

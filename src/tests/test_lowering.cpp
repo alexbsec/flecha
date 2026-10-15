@@ -282,8 +282,8 @@ TEST(LoweringTests, PreservesConstDeclarationsButReadsOrdinaryValues) {
 
 TEST(LoweringTests, StopsUnsupportedCompoundTypesBeforeCodeGeneration) {
     for (const std::string& source :
-         {"void f() { constref u8 p; }", "void f(&const u8 r) {}", "&u8 f() {}",
-          "void f() { 42 as &u8; }"}) {
+         {"void f() { constref u8 p; }", "void f(*&const u8 r) {}", "*&u8 f() {}",
+          "void f() { 42 as *&u8; }"}) {
         SCOPED_TRACE(source);
         LoweredSource result = Lower(source);
         EXPECT_TRUE(result.diagnostics.HasErrors());

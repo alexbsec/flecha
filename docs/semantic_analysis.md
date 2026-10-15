@@ -60,12 +60,15 @@ defaults are:
 
 Parentheses and valid unary, binary, assignment, name, and call expressions
 propagate their resolved types. Distinct numeric types are not implicitly
-coerced. `none` is contextually assignable to non-void value types, matching
+coerced. Integer literals may adopt an expected integer type with a range check;
+unconstrained literals retain the table defaults. `none` is contextually
+assignable to non-void, non-reference value types, matching
 the language specification's universal-zero rule. Arithmetic requires equal
 numeric operand types; comparisons produce `bool`; logical/bitwise operators
-require equal boolean or integer types. Pointer dereference is parsed but is
-not yet semantically supported because pointer syntax types are not in the
-current AST.
+require equal boolean or integer types. Recursive compound types preserve
+qualifiers at each layer. [Raw pointers](unsafe_pointers.md) require unsafe
+permission for dereference; [checked references](checked_references.md) use
+safe dereference and a separate borrow/move pass on the shared control-flow graph.
 
 Calls currently require a directly resolved function symbol. Analysis checks
 callability, argument count, and each known argument type. Function values and
@@ -74,7 +77,8 @@ overloads are not yet part of the language model.
 ## Diagnostics and recovery
 
 Semantic diagnostics use stable codes `FLECHA-S0001` through
-`FLECHA-S0013`. Declaration-name diagnostics use the exact identifier token
+`FLECHA-S0032`. The table below lists the initial binding/type codes; later
+feature documents describe their additional codes. Declaration-name diagnostics use the exact identifier token
 range retained by the AST; expression diagnostics use exact half-open AST
 ranges. The analyzer returns an error type after a failed resolution or type
 check so dependent checks suppress redundant cascades while independent

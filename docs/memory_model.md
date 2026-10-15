@@ -16,7 +16,8 @@ slices, and general resource ownership. Syntax already present in `SPEC.md`
 is retained where possible. New syntax, allocator APIs, and changes to string
 copying remain proposals until accepted. The current compiler behavior is
 recorded in [definite assignment](definite_assignment.md) and
-[strings](string.md), and [const declarations and types](const_types.md).
+[strings](string.md), [const declarations and types](const_types.md), and
+[checked references](checked_references.md).
 
 ## 1. Storage, ownership, and access are separate
 
@@ -562,9 +563,9 @@ Agreed direction:
 
 Next proposals to settle:
 
-1. Borrowed-result contracts and how moving interacts with fixed bindings.
-2. Const scalar bindings and initializer rules.
-3. Conservative lifetime and alias checking for references and slices.
+1. Borrowed-result contracts; fixed mutable-reference moves are currently rejected.
+2. Reference borrowing of strings/views and nested reference storage.
+3. Lifetime and alias checking for slices.
 4. Deferred capture/order rules and ownership-effect contracts on functions.
 5. Any migration of existing string copies to moves. No such migration is
    agreed or implemented by this document.
@@ -573,8 +574,9 @@ The detailed dependency order and acceptance criteria are maintained in
 [memory_implementation_plan.md](memory_implementation_plan.md). The first
 implementation milestone, const declarations and compound type representation,
 is documented in [const declarations and types](const_types.md). Unsafe pointer operations are documented in [unsafe pointers](unsafe_pointers.md).
-The next stages are checked references, defer, tuple/error support, system
-allocation, and cross-function resource effects.
+Checked scalar and pointer-slot references are documented in
+[checked references](checked_references.md). The next stages are defer,
+tuple/error support, system allocation, and cross-function resource effects.
 
 Concurrency, atomics, shared ownership, partial moves, and arbitrary pointer
 arithmetic remain outside the first safe-reference feature.

@@ -1,0 +1,35 @@
+#ifndef FLECHA_SEMANTIC_CONTROL_FLOW_GRAPH_HPP
+#define FLECHA_SEMANTIC_CONTROL_FLOW_GRAPH_HPP
+
+#include <unordered_map>
+#include <vector>
+
+#include "semantic_model.hpp"
+
+namespace flecha::semantic {
+using NodeId = std::size_t;
+struct FlowNode final {
+    std::vector<NodeId> successors;
+    std::vector<NodeId> predecessors;
+    std::vector<const core::BlockStatement*> scopes;
+    // Ordered read/write events used by definite assignment.
+    const core::NameExpression* read = nullptr;
+    const Symbol* write = nullptr;
+    const Symbol* reset = nullptr;
+    // Whole-expression actions for borrow/move analysis. These precede the
+    // corresponding ordered events; each pass consumes only its own events.
+    const core::Expression* evaluation = nullptr;
+    const core::VariableDeclarationStatement* declaration = nullptr;
+    bool reachable = false;
+};
+struct ControlFlowGraph final {
+    std::vector<FlowNode> nodes;
+    std::unordered_map<const Symbol*, const core::BlockStatement*> symbolScopes;
+    std::unordered_map<const core::BlockStatement*, const core::BlockStatement*>
+        scopeParents;
+    NodeId entry = 0;
+};
+[[nodiscard]] ControlFlowGraph BuildControlFlowGraph(
+    const core::FunctionDeclaration& function, const SemanticModel& model);
+}  // namespace flecha::semantic
+#endif

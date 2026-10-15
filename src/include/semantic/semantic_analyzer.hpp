@@ -29,11 +29,17 @@ class SemanticAnalyzer final {
     void AnalyzeBranch(const core::ConditionalBranch& branch);
     void CollectPositions(const core::BlockStatement& block,
                           std::size_t loopDepth);
-    SemanticType AnalyzeExpression(const core::Expression& expression);
-    SemanticType AnalyzeLiteral(const core::LiteralExpression& expression);
+    SemanticType AnalyzeExpression(
+        const core::Expression& expression,
+        SemanticType expected = SemanticType::Error());
+    SemanticType AnalyzeLiteral(const core::LiteralExpression& expression,
+                                SemanticType expected = SemanticType::Error(),
+                                bool negative = false);
     SemanticType AnalyzeName(const core::NameExpression& expression);
-    SemanticType AnalyzeUnary(const core::UnaryExpression& expression);
-    SemanticType AnalyzeBinary(const core::BinaryExpression& expression);
+    SemanticType AnalyzeUnary(const core::UnaryExpression& expression,
+                              SemanticType expected = SemanticType::Error());
+    SemanticType AnalyzeBinary(const core::BinaryExpression& expression,
+                               SemanticType expected = SemanticType::Error());
     SemanticType AnalyzeAssignment(
         const core::AssignmentExpression& expression);
     SemanticType AnalyzeCall(const core::CallExpression& expression);

@@ -110,3 +110,12 @@ control-flow regressions. `make test-sanitizers` also runs the native
 control-flow fixture with an instrumented runtime and leak detection enabled.
 `make native-definite-assignment` preserves the original example's output and
 exit status of 42.
+
+## Shared control-flow representation
+
+Graph construction now lives in `semantic/control_flow_graph.cpp`. The same
+reachable edges and lexical scope metadata feed definite assignment and
+[reference borrow checking](checked_references.md). Definite assignment uses
+ordered name-read/reset/write nodes and its existing must-analysis. Reference
+checking additionally uses expression/declaration actions, backward liveness,
+and a forward may-analysis of origins and moved handles.

@@ -1,0 +1,37 @@
+// Build: build/flecha build examples/checked_references.fl -o build/checked_references
+// Prints 6 and exits with 6.
+
+void double_value(&u8 value) {
+    *value = *value * 2;
+}
+
+u8 read_value(&const u8 value) {
+    return *value;
+}
+
+i32 main() {
+    u8 value = 3;
+    ref := &value;
+    double_value(ref); // A call reborrows; ref remains usable.
+    stdoutln(read_value(ref));
+
+    // The last use of ref has passed, so value is accessible directly.
+    u8 other = 10;
+    moving := &other;
+    moved := moving; // moving cannot be read until reassigned.
+    *moved = 11;
+    moving = &other;
+    *moving = 12;
+
+    constref u8 fixed = &other; // const &u8: fixed binding, writable target.
+    *fixed = 13;
+    &const u8 shared = &other;
+    copy := shared; // Shared handles may be copied.
+    if *copy != *shared { return 1; }
+
+    *u8 pointer = none;
+    slot := &pointer; // &*u8: a checked reference to a raw-pointer variable.
+    *slot = none; // Safe access to the pointer slot; no pointee access.
+
+    return value as i32;
+}

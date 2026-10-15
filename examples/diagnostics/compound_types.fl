@@ -1,26 +1,18 @@
-// Intentionally rejected: reference execution and pointer casts remain unsupported.
+// Intentionally rejected: nested reference storage and compound casts.
 // Check: build/flecha --emit-llvm examples/diagnostics/compound_types.fl
-// For executable pointer examples, see examples/unsafe_pointers.fl.
+// Runnable references: examples/checked_references.fl
 
-// Every reference type below reports FLECHA-S0024.
-void reference_types(
-    &u8 writable,
-    &const u8 readOnly,
-    constref u8 fixedAlias,
-    const &u8 fixedExpanded,
-    constref const u8 fixedReadOnlyAlias,
-    const &const u8 fixedReadOnlyExpanded
-) {}
-
-void nested_references(
-    &*u8 referenceToPointer,
-    &constptr u8 referenceToFixedPointer,
-    *&u8 pointerToReference
+// FLECHA-S0024: these storage shapes need additional lifetime contracts.
+void unsupported_storage(
+    *&u8 pointerToReference,
+    & &u8 referenceToReference,
+    &string stringReference,
+    &stringv viewReference
 ) {}
 
 void unsupported_casts() {
-    0 as *u8;                // FLECHA-S0017: integer-to-pointer cast rejected.
-    0.cast<constref u8>;      // FLECHA-S0024: reference type not yet executable.
+    0 as *u8;               // FLECHA-S0017: integer-to-pointer cast rejected.
+    0.cast<constref u8>;    // FLECHA-S0017: integer-to-reference cast rejected.
 }
 
 // Aliases already include const on their own layer. These cause parser errors:

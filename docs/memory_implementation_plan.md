@@ -1,7 +1,7 @@
 # Memory feature implementation order
 
-Status: const types are merged; unsafe pointers are implemented on
-`feat/unsafe-pointers`. Subsequent milestones remain planned.
+Status: const types and unsafe pointers are merged. Checked stack references
+are implemented on `feat/checked-references`; subsequent milestones remain planned.
 
 Based on the agreed rules in [memory_model.md](memory_model.md), with the
 const-type milestone merged into `master` at `c9e6ee4`. Each milestone should be a separate feature
@@ -93,7 +93,11 @@ need an allocator or a new public foreign-function feature.
 
 ## 3. Checked stack references and reusable flow analysis
 
-Proposed branch: `feat/checked-references`. Depends on: 1 and 2.
+Implementation branch: `feat/checked-references`. Depends on: 1 and 2.
+
+Implemented behavior and conservative limits: [checked references](checked_references.md).
+This stage supports scalar and raw-pointer targets; string/view borrowing and
+nested reference storage require additional lifetime contracts.
 
 - Separate reusable graph construction/control-flow edges from the current
   definite-assignment transfer logic. Retain its tests and use the same edges

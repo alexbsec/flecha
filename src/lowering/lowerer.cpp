@@ -264,7 +264,8 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                 static_cast<const core::UnaryExpression&>(expression);
             if (unary.OperatorType() == TokenType::Mul)
                 return LowerPlace(expression);
-            if (unary.OperatorType() == TokenType::RawAddress) {
+            if (unary.OperatorType() == TokenType::RawAddress ||
+                unary.OperatorType() == TokenType::Ampersand) {
                 return std::make_unique<BoundAddressExpression>(
                     expression.Range(), type, LowerPlace(unary.Operand()));
             }

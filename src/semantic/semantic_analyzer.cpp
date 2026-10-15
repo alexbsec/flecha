@@ -1,11 +1,15 @@
 #include "semantic/semantic_analyzer.hpp"
 
+#include <charconv>
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "core/token_type.hpp"
+#include "semantic/borrow_checker.hpp"
 #include "semantic/definite_assignment.hpp"
 
 namespace flecha::semantic {
@@ -45,12 +49,22 @@ const Symbol* SemanticAnalyzer::AddSymbol(std::unique_ptr<Symbol> symbol,
 SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type) {
     const SemanticType result = SemanticType::FromSyntax(type);
     const SemanticType* layer = &result;
+    if (layer->Kind() == SemanticTypeKind::Reference) {
+        layer = layer->Target();
+        if (layer->Kind() == SemanticTypeKind::Void ||
+            layer->Kind() == SemanticTypeKind::String ||
+            layer->Kind() == SemanticTypeKind::StringView) {
+            Report(
+                diagnostics::DiagnosticCode::UnsupportedCompoundType,
+                type.Range(),
+                "references currently require scalar or raw-pointer storage");
+        }
+    }
     while (layer->Kind() == SemanticTypeKind::Pointer) layer = layer->Target();
     if (layer->Kind() == SemanticTypeKind::Reference) {
         Report(diagnostics::DiagnosticCode::UnsupportedCompoundType,
                type.Range(),
-               "reference types are not yet supported "
-               "in executable code: '" +
+               "nested reference storage is not yet supported: '" +
                    result.Name() + "'");
     }
     return result;
@@ -87,10 +101,17 @@ void SemanticAnalyzer::RegisterFunctions(const core::CompilationUnit& unit) {
              function.Parameters()) {
             parameterTypes.push_back(ResolveType(parameter->Type()));
         }
+        const SemanticType returnType = ResolveType(function.ReturnType());
+        if (returnType.Kind() == SemanticTypeKind::Reference) {
+            Report(diagnostics::DiagnosticCode::ReferenceEscape,
+                   function.ReturnType().Range(),
+                   "reference returns require a lifetime contract and are not "
+                   "yet supported");
+        }
         AddSymbol(std::make_unique<FunctionSymbol>(
-                      function.Name(), ResolveType(function.ReturnType()),
-                      std::move(parameterTypes), function.NameRange(),
-                      BuiltInFunction::None, function.IsUnsafe()),
+                      function.Name(), returnType, std::move(parameterTypes),
+                      function.NameRange(), BuiltInFunction::None,
+                      function.IsUnsafe()),
                   function);
     }
 }
@@ -114,6 +135,7 @@ SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
 
 void SemanticAnalyzer::AnalyzeFunction(
     const core::FunctionDeclaration& function) {
+    const std::size_t diagnosticsBefore = _diagnostics.Diagnostics().size();
     const Symbol* functionBase = _model.DeclaredSymbol(function);
     if (functionBase != nullptr &&
         functionBase->Kind() == SymbolKind::Function) {
@@ -139,7 +161,10 @@ void SemanticAnalyzer::AnalyzeFunction(
                   *parameter);
     }
     AnalyzeBlock(function.Body(), false);
-    AnalyzeDefiniteAssignment(function, _model, _diagnostics);
+    const ControlFlowGraph graph = BuildControlFlowGraph(function, _model);
+    AnalyzeDefiniteAssignment(function, _model, _diagnostics, graph);
+    if (_diagnostics.Diagnostics().size() == diagnosticsBefore)
+        AnalyzeBorrows(function, _model, _diagnostics, graph);
     _currentScope = previousScope;
     _currentFunction = nullptr;
     _inUnsafe = false;
@@ -163,7 +188,8 @@ void SemanticAnalyzer::CollectPositions(const core::BlockStatement& block,
                        position.Range(),
                        "positions are only valid inside a loop");
             }
-            if (!_positions.emplace(position.Name(), position.NameRange()).second) {
+            if (!_positions.emplace(position.Name(), position.NameRange())
+                     .second) {
                 Report(diagnostics::DiagnosticCode::DuplicatePosition,
                        position.NameRange(),
                        "duplicate position '" + position.Name() + "'");
@@ -247,13 +273,18 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             const core::VariableDeclarationStatement& variable =
                 static_cast<const core::VariableDeclarationStatement&>(
                     statement);
+            const SemanticType declaredType =
+                variable.HasExplicitType()
+                    ? ResolveType(*variable.ExplicitType())
+                    : SemanticType::Error();
             SemanticType initializerType = SemanticType::Error();
             if (variable.Initializer() != nullptr) {
-                initializerType = AnalyzeExpression(*variable.Initializer());
+                initializerType =
+                    AnalyzeExpression(*variable.Initializer(), declaredType);
             }
             SemanticType variableType = initializerType.WithoutConst();
             if (variable.HasExplicitType()) {
-                variableType = ResolveType(*variable.ExplicitType());
+                variableType = declaredType;
                 if (variableType.Kind() == SemanticTypeKind::Void) {
                     Report(diagnostics::DiagnosticCode::InvalidVariableType,
                            variable.ExplicitType()->Range(),
@@ -273,6 +304,13 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                            "'");
                 variableType = SemanticType::Error();
             }
+            if (variableType.Kind() == SemanticTypeKind::Reference &&
+                variable.Initializer() == nullptr) {
+                Report(
+                    diagnostics::DiagnosticCode::ReferenceRequiresInitializer,
+                    variable.NameRange(),
+                    "a reference requires an initializer");
+            }
             if (variableType.IsConst() && variable.Initializer() == nullptr &&
                 variableType.Kind() != SemanticTypeKind::Reference) {
                 Report(diagnostics::DiagnosticCode::ConstRequiresInitializer,
@@ -291,9 +329,10 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             }
             if (symbol != nullptr && variable.Initializer() == nullptr &&
                 variableType.Kind() == SemanticTypeKind::StringView) {
-                Report(diagnostics::DiagnosticCode::BorrowRequiresInitializer,
-                       variable.NameRange(),
-                       "a borrowed 'stringv' declaration requires an initializer");
+                Report(
+                    diagnostics::DiagnosticCode::BorrowRequiresInitializer,
+                    variable.NameRange(),
+                    "a borrowed 'stringv' declaration requires an initializer");
             }
             break;
         }
@@ -311,7 +350,7 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             const SemanticType actual =
                 returnStatement.Value() == nullptr
                     ? SemanticType(SemanticTypeKind::Void)
-                    : AnalyzeExpression(*returnStatement.Value());
+                    : AnalyzeExpression(*returnStatement.Value(), expected);
             if (!IsAssignable(expected, actual)) {
                 const source::SourceRange range =
                     returnStatement.Value() == nullptr
@@ -401,12 +440,13 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
 }
 
 SemanticType SemanticAnalyzer::AnalyzeExpression(
-    const core::Expression& expression) {
+    const core::Expression& expression, SemanticType expected) {
     SemanticType type = SemanticType::Error();
     switch (expression.Kind()) {
         case core::AstNodeKind::LiteralExpression:
             type = AnalyzeLiteral(
-                static_cast<const core::LiteralExpression&>(expression));
+                static_cast<const core::LiteralExpression&>(expression),
+                expected);
             break;
         case core::AstNodeKind::NameExpression:
             type = AnalyzeName(
@@ -415,15 +455,18 @@ SemanticType SemanticAnalyzer::AnalyzeExpression(
         case core::AstNodeKind::ParenthesizedExpression:
             type = AnalyzeExpression(
                 static_cast<const core::ParenthesizedExpression&>(expression)
-                    .Inner());
+                    .Inner(),
+                expected);
             break;
         case core::AstNodeKind::UnaryExpression:
             type = AnalyzeUnary(
-                static_cast<const core::UnaryExpression&>(expression));
+                static_cast<const core::UnaryExpression&>(expression),
+                expected);
             break;
         case core::AstNodeKind::BinaryExpression:
             type = AnalyzeBinary(
-                static_cast<const core::BinaryExpression&>(expression));
+                static_cast<const core::BinaryExpression&>(expression),
+                expected);
             break;
         case core::AstNodeKind::AssignmentExpression:
             type = AnalyzeAssignment(
@@ -453,7 +496,40 @@ SemanticType SemanticAnalyzer::AnalyzeExpression(
 }
 
 SemanticType SemanticAnalyzer::AnalyzeLiteral(
-    const core::LiteralExpression& expression) {
+    const core::LiteralExpression& expression, SemanticType expected,
+    bool negative) {
+    if (expression.LiteralType() == TokenType::NumberLiteral &&
+        expected.IsInteger()) {
+        const SemanticTypeKind kind = expected.Kind();
+        const bool isSigned = kind <= SemanticTypeKind::ISize;
+        unsigned bits = 64;
+        if (kind == SemanticTypeKind::I8 || kind == SemanticTypeKind::U8)
+            bits = 8;
+        if (kind == SemanticTypeKind::I16 || kind == SemanticTypeKind::U16)
+            bits = 16;
+        if (kind == SemanticTypeKind::I32 || kind == SemanticTypeKind::U32)
+            bits = 32;
+        if (kind == SemanticTypeKind::ISize || kind == SemanticTypeKind::USize)
+            bits = sizeof(void*) * 8;
+        std::uint64_t limit = std::numeric_limits<std::uint64_t>::max();
+        if (isSigned)
+            limit = (std::uint64_t{1} << (bits - 1)) - (negative ? 0 : 1);
+        else if (bits < 64)
+            limit = (std::uint64_t{1} << bits) - 1;
+        std::uint64_t value = 0;
+        const std::string& text = expression.Value();
+        const auto parsed =
+            std::from_chars(text.data(), text.data() + text.size(), value);
+        if (parsed.ec != std::errc{} ||
+            parsed.ptr != text.data() + text.size() || value > limit ||
+            (negative && !isSigned && value != 0)) {
+            Report(diagnostics::DiagnosticCode::IntegerLiteralOutOfRange,
+                   expression.Range(),
+                   "integer literal is not representable as '" +
+                       expected.Name() + "'");
+        }
+        return expected.WithoutConst();
+    }
     switch (expression.LiteralType()) {
         case TokenType::NumberLiteral:
             return SemanticType(SemanticTypeKind::I32);
@@ -480,8 +556,6 @@ SemanticType SemanticAnalyzer::AnalyzeCast(
     const SemanticType source = AnalyzeExpression(expression.Value());
     const SemanticType target = ResolveType(expression.TargetType());
     if (source.IsError() || target.IsError()) return SemanticType::Error();
-    if (target.Kind() == SemanticTypeKind::Reference)
-        return SemanticType::Error();
     if (!CanExplicitlyCast(source, target)) {
         Report(diagnostics::DiagnosticCode::InvalidCast, expression.Range(),
                "cannot cast '" + std::string(source.Name()) + "' to '" +
@@ -527,17 +601,70 @@ SemanticType SemanticAnalyzer::PlaceType(
             static_cast<const core::UnaryExpression&>(expression);
         const SemanticType pointer = _model.TypeOf(unary.Operand());
         if (unary.OperatorType() == TokenType::Mul &&
-            pointer.Kind() == SemanticTypeKind::Pointer)
+            (pointer.Kind() == SemanticTypeKind::Pointer ||
+             pointer.Kind() == SemanticTypeKind::Reference))
             return *pointer.Target();
     }
     return SemanticType::Error();
 }
 
 SemanticType SemanticAnalyzer::AnalyzeUnary(
-    const core::UnaryExpression& expression) {
-    const SemanticType operand = AnalyzeExpression(expression.Operand());
-    if (operand.IsError()) return operand;
+    const core::UnaryExpression& expression, SemanticType expected) {
     const TokenType operation = expression.OperatorType();
+    SemanticType operand = SemanticType::Error();
+    const core::Expression* literal = &expression.Operand();
+    while (literal->Kind() == core::AstNodeKind::ParenthesizedExpression)
+        literal = &static_cast<const core::ParenthesizedExpression&>(*literal)
+                       .Inner();
+    if ((operation == TokenType::Sub || operation == TokenType::Add) &&
+        expected.IsInteger() &&
+        literal->Kind() == core::AstNodeKind::LiteralExpression) {
+        operand = AnalyzeLiteral(
+            static_cast<const core::LiteralExpression&>(*literal), expected,
+            operation == TokenType::Sub);
+        const core::Expression* layer = &expression.Operand();
+        for (;;) {
+            _model._types.insert_or_assign(layer, operand);
+            if (layer == literal) break;
+            layer = &static_cast<const core::ParenthesizedExpression&>(*layer)
+                         .Inner();
+        }
+    } else {
+        operand = AnalyzeExpression(
+            expression.Operand(),
+            operation == TokenType::Sub || operation == TokenType::Add
+                ? expected
+                : SemanticType::Error());
+    }
+    if (operand.IsError()) return operand;
+    if (operation == TokenType::Ampersand) {
+        SemanticType target = PlaceType(expression.Operand());
+        const core::Expression* place = &expression.Operand();
+        while (place->Kind() == core::AstNodeKind::ParenthesizedExpression)
+            place = &static_cast<const core::ParenthesizedExpression&>(*place)
+                         .Inner();
+        const bool referencePlace =
+            place->Kind() == core::AstNodeKind::UnaryExpression &&
+            _model.TypeOf(static_cast<const core::UnaryExpression&>(*place)
+                              .Operand())
+                    .Kind() == SemanticTypeKind::Reference;
+        if (target.IsError() ||
+            !(target.IsNumeric() || target.Kind() == SemanticTypeKind::Bool ||
+              target.Kind() == SemanticTypeKind::Char ||
+              target.Kind() == SemanticTypeKind::Pointer) ||
+            (place->Kind() != core::AstNodeKind::NameExpression &&
+             !referencePlace)) {
+            Report(diagnostics::DiagnosticCode::InvalidReference,
+                   expression.Range(),
+                   "safe borrowing requires scalar or raw-pointer storage "
+                   "owned by a variable or reference");
+            return SemanticType::Error();
+        }
+        if (expected.Kind() == SemanticTypeKind::Reference &&
+            expected.Target()->IsConst())
+            target = target.WithConst();
+        return SemanticType(SemanticTypeKind::Reference, target);
+    }
     if (operation == TokenType::RawAddress) {
         RequireUnsafe(expression.Range());
         const SemanticType target = PlaceType(expression.Operand());
@@ -549,11 +676,28 @@ SemanticType SemanticAnalyzer::AnalyzeUnary(
                    "location");
             return SemanticType::Error();
         }
+        const core::Expression* place = &expression.Operand();
+        while (place->Kind() == core::AstNodeKind::ParenthesizedExpression)
+            place = &static_cast<const core::ParenthesizedExpression&>(*place)
+                         .Inner();
+        if (target.Kind() == SemanticTypeKind::Reference ||
+            (place->Kind() == core::AstNodeKind::UnaryExpression &&
+             _model.TypeOf(static_cast<const core::UnaryExpression&>(*place)
+                               .Operand())
+                     .Kind() == SemanticTypeKind::Reference)) {
+            Report(
+                diagnostics::DiagnosticCode::ReferenceEscape,
+                expression.Range(),
+                "raw address conversion of reference storage is not supported");
+            return SemanticType::Error();
+        }
         return SemanticType(SemanticTypeKind::Pointer, target);
     }
     if (operation == TokenType::Mul &&
-        operand.Kind() == SemanticTypeKind::Pointer) {
-        RequireUnsafe(expression.Range());
+        (operand.Kind() == SemanticTypeKind::Pointer ||
+         operand.Kind() == SemanticTypeKind::Reference)) {
+        if (operand.Kind() == SemanticTypeKind::Pointer)
+            RequireUnsafe(expression.Range());
         if (operand.Target()->Kind() == SemanticTypeKind::Void) {
             Report(diagnostics::DiagnosticCode::InvalidPointerAccess,
                    expression.Range(), "cannot dereference a void pointer");
@@ -576,9 +720,22 @@ SemanticType SemanticAnalyzer::AnalyzeUnary(
 }
 
 SemanticType SemanticAnalyzer::AnalyzeBinary(
-    const core::BinaryExpression& expression) {
-    const SemanticType left = AnalyzeExpression(expression.Left());
-    const SemanticType right = AnalyzeExpression(expression.Right());
+    const core::BinaryExpression& expression, SemanticType expected) {
+    SemanticType left = AnalyzeExpression(
+        expression.Left(),
+        expected.IsInteger() ? expected : SemanticType::Error());
+    const SemanticType right = AnalyzeExpression(
+        expression.Right(), left.IsInteger() ? left : SemanticType::Error());
+    if (right.IsInteger() && !expected.IsInteger() &&
+        expression.Left().Kind() == core::AstNodeKind::LiteralExpression)
+        left = AnalyzeExpression(expression.Left(), right);
+    if (left.Kind() == SemanticTypeKind::Reference ||
+        right.Kind() == SemanticTypeKind::Reference) {
+        Report(diagnostics::DiagnosticCode::InvalidOperand, expression.Range(),
+               "reference handles do not support binary operators; dereference "
+               "the value first");
+        return SemanticType::Error();
+    }
     if (left.IsError() || right.IsError()) return SemanticType::Error();
     const TokenType operation = expression.OperatorType();
     const bool hasPointer = left.Kind() == SemanticTypeKind::Pointer ||
@@ -655,8 +812,8 @@ SemanticType SemanticAnalyzer::AnalyzeBinary(
 SemanticType SemanticAnalyzer::AnalyzeAssignment(
     const core::AssignmentExpression& expression) {
     const SemanticType targetValue = AnalyzeExpression(expression.Target());
-    const SemanticType value = AnalyzeExpression(expression.Value());
     const SemanticType target = PlaceType(expression.Target());
+    const SemanticType value = AnalyzeExpression(expression.Value(), target);
     if (targetValue.IsError()) return SemanticType::Error();
     if (target.IsError()) {
         Report(diagnostics::DiagnosticCode::SemanticInvalidAssignmentTarget,
@@ -736,14 +893,6 @@ bool SemanticAnalyzer::BorrowsLocalString(
 SemanticType SemanticAnalyzer::AnalyzeCall(
     const core::CallExpression& expression) {
     const SemanticType calleeType = AnalyzeExpression(expression.Callee());
-    std::vector<SemanticType> argumentTypes;
-    argumentTypes.reserve(expression.Arguments().size());
-    for (const std::unique_ptr<core::Expression>& argument :
-         expression.Arguments()) {
-        argumentTypes.push_back(AnalyzeExpression(*argument));
-    }
-    if (calleeType.IsError()) return SemanticType::Error();
-
     const FunctionSymbol* function = nullptr;
     if (expression.Callee().Kind() == core::AstNodeKind::NameExpression) {
         const Symbol* symbol = _model.SymbolFor(
@@ -752,6 +901,19 @@ SemanticType SemanticAnalyzer::AnalyzeCall(
             function = static_cast<const FunctionSymbol*>(symbol);
         }
     }
+    std::vector<SemanticType> argumentTypes;
+    for (std::size_t index = 0; index < expression.Arguments().size();
+         ++index) {
+        const SemanticType expected =
+            function != nullptr &&
+                    function->BuiltIn() == BuiltInFunction::None &&
+                    index < function->ParameterTypes().size()
+                ? function->ParameterTypes()[index]
+                : SemanticType::Error();
+        argumentTypes.push_back(
+            AnalyzeExpression(*expression.Arguments()[index], expected));
+    }
+    if (calleeType.IsError()) return SemanticType::Error();
     if (function == nullptr) {
         Report(diagnostics::DiagnosticCode::NotCallable,
                expression.Callee().Range(), "expression is not callable");
@@ -789,7 +951,9 @@ SemanticType SemanticAnalyzer::AnalyzeCall(
             : function->ParameterTypes().size();
     for (std::size_t index = 0; index < count; ++index) {
         if (!IsAssignable(function->ParameterTypes()[index],
-                          argumentTypes[index])) {
+                          argumentTypes[index]) &&
+            !CanReborrow(function->ParameterTypes()[index],
+                         argumentTypes[index])) {
             Report(diagnostics::DiagnosticCode::IncompatibleArgument,
                    expression.Arguments()[index]->Range(),
                    "argument " + std::to_string(index + 1) + ": " +
@@ -821,15 +985,15 @@ SemanticType SemanticAnalyzer::AnalyzeMemberCall(
     if (receiver.IsError()) return SemanticType::Error();
     const bool isView = receiver.Kind() == SemanticTypeKind::StringView;
     const bool isString = receiver.Kind() == SemanticTypeKind::String;
-    const bool scalarToString =
-        receiver.IsNumeric() || receiver.Kind() == SemanticTypeKind::Bool ||
-        receiver.Kind() == SemanticTypeKind::Char;
+    const bool scalarToString = receiver.IsNumeric() ||
+                                receiver.Kind() == SemanticTypeKind::Bool ||
+                                receiver.Kind() == SemanticTypeKind::Char;
     if (!isView && !isString &&
         !(scalarToString && expression.Member() == "string")) {
         Report(diagnostics::DiagnosticCode::InvalidMember,
                expression.MemberRange(),
-               "type '" + std::string(receiver.Name()) +
-                   "' has no member '" + expression.Member() + "'");
+               "type '" + std::string(receiver.Name()) + "' has no member '" +
+                   expression.Member() + "'");
         return SemanticType::Error();
     }
 
@@ -852,8 +1016,8 @@ SemanticType SemanticAnalyzer::AnalyzeMemberCall(
     } else {
         Report(diagnostics::DiagnosticCode::InvalidMember,
                expression.MemberRange(),
-               "type '" + std::string(receiver.Name()) +
-                   "' has no member '" + expression.Member() + "'");
+               "type '" + std::string(receiver.Name()) + "' has no member '" +
+                   expression.Member() + "'");
         return SemanticType::Error();
     }
 
@@ -886,8 +1050,7 @@ SemanticType SemanticAnalyzer::AnalyzeIndex(
         receiver.Kind() != SemanticTypeKind::String) {
         Report(diagnostics::DiagnosticCode::NotIndexable,
                expression.Receiver().Range(),
-               "type '" + std::string(receiver.Name()) +
-                   "' cannot be indexed");
+               "type '" + std::string(receiver.Name()) + "' cannot be indexed");
         return SemanticType::Error();
     }
     if (!index.IsError() && !IsStringViewIndex(index)) {
