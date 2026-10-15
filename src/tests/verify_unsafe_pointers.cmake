@@ -11,7 +11,7 @@ if(FLECHA_SANITIZERS)
 endif()
 execute_process(
     COMMAND "${FLECHA_LINKER}" "${FLECHA_HARNESS}" "${FLECHA_OUTPUT}.o"
-        "${FLECHA_RUNTIME}" ${sanitizerFlags} -o "${FLECHA_OUTPUT}"
+        "${FLECHA_RUNTIME}" ${sanitizerFlags} ${FLECHA_LINK_OPTIONS} -o "${FLECHA_OUTPUT}"
     RESULT_VARIABLE linkResult ERROR_VARIABLE linkError TIMEOUT 30
 )
 if(NOT linkResult EQUAL 0)

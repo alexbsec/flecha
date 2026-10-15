@@ -921,15 +921,20 @@ class CallExpression final : public Expression {
    public:
     CallExpression(source::SourceRange range,
                    std::unique_ptr<Expression> callee,
-                   std::vector<std::unique_ptr<Expression>> arguments)
+                   std::vector<std::unique_ptr<Expression>> arguments,
+                   std::unique_ptr<TypeNode> typeArgument = nullptr)
         : Expression(range),
           _callee(std::move(callee)),
-          _arguments(std::move(arguments)) {}
+          _arguments(std::move(arguments)),
+          _typeArgument(std::move(typeArgument)) {}
 
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::CallExpression;
     }
     [[nodiscard]] const Expression& Callee() const { return *_callee; }
+    [[nodiscard]] const TypeNode* TypeArgument() const {
+        return _typeArgument.get();
+    }
     [[nodiscard]] const std::vector<std::unique_ptr<Expression>>& Arguments()
         const {
         return _arguments;
@@ -938,6 +943,7 @@ class CallExpression final : public Expression {
    private:
     std::unique_ptr<Expression> _callee;
     std::vector<std::unique_ptr<Expression>> _arguments;
+    std::unique_ptr<TypeNode> _typeArgument;
 };
 
 class MemberCallExpression final : public Expression {

@@ -416,16 +416,16 @@ conceptually related to `[]const u8`, but type identity, conversions, and ABI
 compatibility must be decided separately. Existing string lengths and methods
 are not silently changed by the proposed `usize` slice length.
 
-## 8. Allocation and failure — agreed direction
+## 8. Allocation and failure
 
-The planned `new<T>(value)` and `free(ptr)` built-ins use the process-wide
+The implemented `new<T>(value)` and `free(ptr)` built-ins use the process-wide
 system allocation service. They replace the earlier `Allocator` handle and
 `system_allocator()` proposal. `new<T>` returns `(*T, error)`, supporting both
 `(*u8 ptr, error err) = new<u8>(10);` and `ptr, err := new<u8>(10);`.
-Custom allocator interfaces remain future work. These built-ins are not yet
-implemented.
+Custom allocator interfaces remain future work. See [raw_allocation.md](raw_allocation.md)
+for the supported types, evaluation rules, and current limits.
 
-The raw API under discussion uses typed tuple bindings and explicit failure:
+The raw API uses typed tuple bindings and explicit failure:
 
 ```flecha
 unsafe {
@@ -441,9 +441,9 @@ unsafe {
 `new<T>(value)` allocates one element and initializes it with `value`.
 `new<T>(none)` initializes to T's defined zero value, when one exists; it
 does not mean uninitialized storage. Success produces a live allocation and
-no error; failure assigns null and an error. Tuple/error values are implemented;
-generic allocation calls require implementation work. Array allocation spelling
-is still provisional.
+no error; failure assigns null and `AllocationError.OutOfMemory`, without
+evaluating the initializer. Fixed arrays use `new<[N]T>(value)`; dynamic array
+allocation remains future work. `free(null)` is a no-op.
 
 Raw allocation and free require an unsafe function or block. Allocations are
 not implicitly freed at the end of an unsafe block: allocation lifetime is
@@ -457,14 +457,15 @@ It can be passed across unsafe function calls. A function that frees the
 allocation consumes ownership; an ordinary borrowing function must preserve it.
 `*const T` restricts target writes but does not itself encode either contract.
 
-Compiler analysis should track allocation identity, aliases, and possible states
-across CFG edges and calls. Counting free statements is insufficient. Available
-function bodies may supply inferred ownership-effect summaries; external
-functions need declared contracts. At minimum, diagnose established double
-frees, use-after-free, lost allocations, and outstanding obligations on function
-exit. The severity of uncertain resource diagnostics and unsupported escapes
-remains to be chosen. Arbitrary raw-pointer manipulation is still the programmer's
-responsibility inside unsafe code; complete static leak detection is not promised.
+Mandatory compiler analysis now tracks allocation identity, aliases, and possible
+states across CFG edges and visible nonrecursive calls. Counting free statements
+is insufficient. Leaks, double frees, use-after-free, known invalid frees, null
+paths, and unsupported ownership escapes are compile-time errors. Bounded call
+interpretation handles local helpers and factories; recursive summaries and
+external contracts remain future work. See [raw_allocation.md](raw_allocation.md)
+for exact limits. Arbitrary raw-pointer manipulation and the validity of external
+input pointers remain programmer obligations inside unsafe code; complete static
+memory safety is not promised.
 
 A null-aware operation such as the proposed
 `ptr->safe_set(value)` can allocate and initialize when ptr is null,
@@ -476,9 +477,9 @@ The special pointer-operation syntax and naming remain to be finalized.
 
 ### 8.1 Deferred cleanup
 
-The direct-call implementation is documented in [defer.md](defer.md). The
-allocation example and allocation-effect rules below remain design
-contracts for future milestones.
+The direct-call implementation is documented in [defer.md](defer.md). Deferred
+`free` and bounded static allocation-effect checks are implemented; explicit
+external ownership contracts remain future work.
 
 A deferred call registers when execution reaches it and executes when its
 current enclosing scope exits. It is not hoisted to scope entry. Register

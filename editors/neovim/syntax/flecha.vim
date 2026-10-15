@@ -6,7 +6,7 @@ syntax case match
 
 syntax keyword flechaType i8 i16 i32 i64 isize
 syntax keyword flechaType u8 u16 u32 u64 usize
-syntax keyword flechaType f32 f64 bool char void string stringv error
+syntax keyword flechaType f32 f64 bool char void string stringv error AllocationError
 
 syntax keyword flechaModifier unsafe export extern inline comptime const constptr constref volatile private override
 syntax keyword flechaConditional if else also
@@ -21,6 +21,7 @@ syntax keyword flechaWordOperator and or
 syntax match flechaOperator /::\|->\|:=\|===\|!==\|==\|!=\|<=\|>=\|&&\|||\|[&=+*\/%^!<>-]/
 syntax match flechaRawAddress /\%(&\s*\)\@<=raw\>/
 syntax match flechaFunction /\<[A-Za-z_][A-Za-z0-9_]*\>\ze\s*(/
+syntax match flechaAllocation /\<new\>\ze\s*</
 syntax match flechaCastMethod /\.cast\>\ze\s*</
 syntax match flechaLabel /#\s*[A-Za-z_][A-Za-z0-9_]*/
 syntax match flechaJumpTarget /\<[A-Za-z_][A-Za-z0-9_]*\>/ contained
@@ -51,6 +52,7 @@ highlight default link flechaOperator Operator
 highlight default link flechaRawAddress Keyword
 highlight default link flechaFunction Function
 highlight default link flechaCastMethod Function
+highlight default link flechaAllocation Function
 highlight default link flechaLabel Label
 highlight default link flechaJumpTarget Label
 highlight default link flechaNumber Number

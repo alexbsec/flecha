@@ -1,4 +1,4 @@
-add_library(runtime STATIC runtime.cpp)
+add_library(runtime STATIC runtime.cpp allocation.cpp)
 target_include_directories(runtime PUBLIC ${PROJECT_SOURCE_DIR}/src/include)
 target_link_libraries(runtime PRIVATE flecha_project_options)
 

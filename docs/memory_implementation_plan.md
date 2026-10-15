@@ -4,7 +4,9 @@ Status: const types, unsafe pointers, checked references, fixed arrays, and
 iteration, checked slices, deferred calls, and tuples/destructuring are merged.
 Named and generic error values are merged; see [error_values.md](error_values.md).
 Structures are implemented on `feat/structures`; see [structures.md](structures.md).
-Allocation and general ownership work remain.
+Raw allocation is implemented on `feat/raw-allocation`; see [raw_allocation.md](raw_allocation.md).
+Mandatory allocation identity diagnostics and bounded visible-call analysis are
+also implemented on that branch. General ownership contracts remain.
 
 Based on the agreed rules in [memory_model.md](memory_model.md), with the
 const-type milestone merged into `master` at `c9e6ee4`. Each milestone should be a separate feature
@@ -168,7 +170,7 @@ committed defer implementation to cover aggregate cleanup and deferred captures.
 
 Tuples, multiple results, and typed/mixed destructuring are implemented; see
 [tuples.md](tuples.md). Named and generic error values are implemented on
-`feat/error-values`; see [error_values.md](error_values.md). Generic `new<T>` syntax remains for the allocation milestone.
+`feat/error-values`; see [error_values.md](error_values.md). Typed `new<T>` calls are implemented in the allocation milestone.
 
 This is a prerequisite for the agreed allocator API, not an allocator-specific
 parser shortcut.
@@ -200,7 +202,13 @@ stored-borrow lifetimes remain separate work.
 
 ## 6. System allocation and intraprocedural resource diagnostics
 
-Proposed branch: `feat/raw-allocation`. Depends on: 2, 4, 5, and structures.
+Implementation branch: `feat/raw-allocation`. Depends on: 2, 4, 5, and structures.
+
+The built-ins, typed destruction, native failure injection, and sanitizer coverage
+are implemented, together with mandatory CFG resource identities, local aliases,
+leak/double-free/use-after-free errors, null-path checks, and deferred cleanup.
+See [raw_allocation.md](raw_allocation.md) for supported paths and conservative
+rejections. This is not a guarantee for arbitrary unsafe input pointers.
 
 - Use the system allocation service through compiler built-ins; no public
   `Allocator` handle or `system_allocator()` is planned.
@@ -211,7 +219,7 @@ Proposed branch: `feat/raw-allocation`. Depends on: 2, 4, 5, and structures.
   initialization, and release semantics are implemented. Do not accept owning
   elements or borrowed references without their construction/destruction rules.
 - Define the runtime ABI for size, alignment, failure, and deallocation metadata.
-  Define whether free(null) is a no-op before tests rely on it. Do not assume
+  `free(null)` is a no-op. Do not assume
   malloc's default alignment supports every future type.
 - Extend the CFG analysis with allocation identities, pointer aliases, pending
   cleanup, and freed/escaped states. Track live resources separately from
@@ -231,7 +239,12 @@ null, uninitialized, possibly freed, and outstanding allocations where provable.
 
 ## 7. Ownership effects across function calls
 
-Proposed branch: `feat/resource-call-effects`. Depends on: 6.
+Proposed branch for the remaining work: `feat/resource-call-effects`. Depends on: 6.
+
+Bounded interpretation of visible nonrecursive callees is already implemented
+in `feat/raw-allocation`, including consuming helpers, conditional consumption,
+returned allocations, deferred cleanup, and caller aliases. Recursive summaries,
+external contracts, and general stored ownership remain below.
 
 - Infer borrow/consume/escape summaries for visible functions. Include deferred
   effects on all returning paths and compute summaries to a fixed point for

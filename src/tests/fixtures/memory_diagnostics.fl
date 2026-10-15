@@ -1,0 +1,16 @@
+// Intentionally invalid: the compiler must reject this before object emission.
+unsafe void leaking(bool early) {
+    p, err := new<u8>(42);
+    if err != none { return; }
+    if early { return; }
+    free(p);
+}
+
+unsafe void invalid_alias() {
+    p, err := new<u8>(42);
+    if err != none { return; }
+    alias := p;
+    free(p);
+    *alias = 7;
+    free(alias);
+}

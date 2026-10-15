@@ -92,6 +92,7 @@ class GraphBuilder final {
                     _graph.symbolScopes.emplace(symbol, _scopes.back());
                 const NodeId store = AddNode({next});
                 _graph.nodes[store].reset = symbol;
+                _graph.nodes[store].memoryDeclaration = &declaration;
                 NodeId entry = store;
                 if (declaration.Initializer() != nullptr) {
                     _graph.nodes[store].write = symbol;
@@ -117,7 +118,10 @@ class GraphBuilder final {
                     }
                     next = store;
                 }
-                const NodeId body = BuildExpression(destructure.Value(), next);
+                const NodeId memoryStore = AddNode({next});
+                _graph.nodes[memoryStore].memoryDestructure = &destructure;
+                const NodeId body =
+                    BuildExpression(destructure.Value(), memoryStore);
                 const NodeId action = AddNode({body});
                 _graph.nodes[action].destructure = &destructure;
                 return action;
@@ -131,20 +135,27 @@ class GraphBuilder final {
                     _graph.symbolScopes.emplace(capture, _scopes.back());
                     _graph.deferredCaptures.insert(capture);
                 }
-                const NodeId body = BuildExpression(deferred.Call(), next);
+                const NodeId registration = AddNode({next});
+                _graph.nodes[registration].memoryDefer = &deferred;
+                const NodeId body =
+                    BuildExpressionBody(deferred.Call(), registration);
                 const NodeId action = AddNode({body});
                 _graph.nodes[action].deferRegistration = &deferred;
                 return action;
             }
-            case core::AstNodeKind::ExpressionStatement:
-                return BuildEvaluation(
+            case core::AstNodeKind::ExpressionStatement: {
+                const auto& value =
                     static_cast<const core::ExpressionStatement&>(statement)
-                        .Value(),
-                    next);
+                        .Value();
+                const NodeId discard = AddNode({next});
+                _graph.nodes[discard].memoryDiscard = &value;
+                return BuildEvaluation(value, discard);
+            }
             case core::AstNodeKind::ReturnStatement: {
                 const auto& result =
                     static_cast<const core::ReturnStatement&>(statement);
                 const NodeId exit = AddNode({});
+                _graph.nodes[exit].memoryReturn = &result;
                 return result.Value() == nullptr
                            ? exit
                            : BuildEvaluation(*result.Value(), exit);
@@ -241,6 +252,7 @@ class GraphBuilder final {
         // Deliberately keep both outcomes, including literal conditions. This
         // is definite assignment, not constant folding or value-range analysis.
         const NodeId branch = AddNode({yes, no});
+        _graph.nodes[branch].condition = &expression;
         return trackBorrows ? BuildEvaluation(expression, branch)
                             : BuildExpression(expression, branch);
     }
@@ -253,6 +265,13 @@ class GraphBuilder final {
     }
 
     NodeId BuildExpression(const core::Expression& expression, NodeId next) {
+        const NodeId result = AddNode({next});
+        _graph.nodes[result].memoryExpression = &expression;
+        return BuildExpressionBody(expression, result);
+    }
+
+    NodeId BuildExpressionBody(const core::Expression& expression,
+                               NodeId next) {
         switch (expression.Kind()) {
             case core::AstNodeKind::BuildExpression: {
                 const auto& build =
@@ -266,7 +285,21 @@ class GraphBuilder final {
                 const NodeId start = AddNode({body});
                 _graph.nodes[start].reset = self;
                 _graph.nodes[start].write = self;
-                return start;
+                NodeId defaults = start;
+                const StructureType* structure =
+                    _model.TypeOf(expression).Structure();
+                if (structure) {
+                    for (auto field = structure->fields.rbegin();
+                         field != structure->fields.rend(); ++field) {
+                        if (!field->syntax->Initializer()) continue;
+                        const NodeId store = AddNode({defaults});
+                        _graph.nodes[store].memoryUntrackedStore =
+                            field->syntax->Initializer();
+                        defaults = BuildExpression(
+                            *field->syntax->Initializer(), store);
+                    }
+                }
+                return defaults;
             }
             case core::AstNodeKind::MemberAccessExpression: {
                 const auto& field =
@@ -330,7 +363,12 @@ class GraphBuilder final {
                         SemanticTypeKind::Bool &&
                     (binary.OperatorType() == TokenType::And ||
                      binary.OperatorType() == TokenType::Or)) {
-                    return BuildCondition(expression, next, next, false);
+                    const NodeId yes = AddNode({next});
+                    _graph.nodes[yes].memoryBoolean = &expression;
+                    _graph.nodes[yes].booleanValue = true;
+                    const NodeId no = AddNode({next});
+                    _graph.nodes[no].memoryBoolean = &expression;
+                    return BuildCondition(expression, yes, no, false);
                 }
                 const NodeId right = BuildExpression(binary.Right(), next);
                 return BuildExpression(binary.Left(), right);
@@ -359,9 +397,14 @@ class GraphBuilder final {
             case core::AstNodeKind::CallExpression: {
                 const auto& call =
                     static_cast<const core::CallExpression&>(expression);
+                const NodeId failure = next;
                 for (auto argument = call.Arguments().rbegin();
                      argument != call.Arguments().rend(); ++argument) {
                     next = BuildExpression(**argument, next);
+                }
+                if (call.TypeArgument()) {
+                    next = AddNode({next, failure});
+                    _graph.nodes[next].allocation = &call;
                 }
                 return BuildExpression(call.Callee(), next);
             }

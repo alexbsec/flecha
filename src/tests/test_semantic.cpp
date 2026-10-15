@@ -2706,3 +2706,428 @@ TEST(SemanticStructureTests,
                   DiagnosticCode::InvalidStructure),
               nullptr);
 }
+
+TEST(SemanticAllocationTests, TypesNewFreeAndAllocationErrors) {
+    Analysis result = Analyze(
+        "unsafe void f() { (*u8 p, error err) = new<u8>(42); "
+        "if err == AllocationError.OutOfMemory { return; } defer free(p); "
+        "free(null); free(none); (fixed, failure) := new<const i32>(none); "
+        "free(fixed); }");
+    EXPECT_FALSE(result.diagnostics.HasErrors());
+    for (const std::string& body :
+         {"p, e := new<u8>(42);", "free(p);", "defer free(p);"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(Analyze("void f(*u8 p) { " + body + " }"),
+                                 DiagnosticCode::UnsafeOperation),
+                  nullptr);
+    }
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("unsafe void f() { (*u8 p, error e) = new<u8>(true); }"),
+            DiagnosticCode::IncompatibleArgument),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(
+                  Analyze("unsafe void f() { p := new<u8>(42); free(p); }"),
+                  DiagnosticCode::InvalidAllocation),
+              nullptr);
+}
+
+TEST(SemanticAllocationTests, RejectsUnsupportedStorageAndInvalidCalls) {
+    for (const std::string& body :
+         {"new(42);", "new<void>(none);", "new<stringv>(\"view\");",
+          "new<&i32>(none);", "new<[]i32>(none);", "free(42);",
+          "*void p = null; free(p);"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { " + body + " }"),
+                                 DiagnosticCode::InvalidAllocation),
+                  nullptr);
+    }
+    for (const std::string& body :
+         {"new<u8>();", "new<u8>(1, 2);", "free();", "free(null, null);"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { " + body + " }"),
+                                 DiagnosticCode::WrongArgumentCount),
+                  nullptr);
+    }
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { defer new<u8>(1); }"),
+                             DiagnosticCode::InvalidDefer),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("void free() {}"),
+                             DiagnosticCode::DuplicateDeclaration),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("error AllocationError { Other }"),
+                             DiagnosticCode::DuplicateDeclaration),
+              nullptr);
+    const std::string source = "unsafe void f() { new<stringv>(\"view\"); }";
+    Analysis result = Analyze(source);
+    const Diagnostic* diagnostic =
+        FindDiagnostic(result, DiagnosticCode::InvalidAllocation);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(diagnostic->range.start.offset, source.find("stringv"));
+    EXPECT_EQ(diagnostic->range.Length(), 7);
+}
+
+TEST(SemanticAllocationTests,
+     PreservesConstructionAndConditionalInitializationRules) {
+    const std::string prefix =
+        "structure Box { i32 x; }; unsafe void Box::tear(&self) override {} ";
+    EXPECT_FALSE(
+        Analyze(
+            prefix +
+            "unsafe void f() { p, e := new<Box>(Box::init()); defer free(p); }")
+            .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze(prefix +
+                    "unsafe void f() { Box b = Box::init(); new<Box>(b); }"),
+            DiagnosticCode::NonCopyableValue),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze(prefix + "unsafe void f() { new<Box>(none); }"),
+                       DiagnosticCode::IncompatibleArgument),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe i32 f() { i32 x; p, e := "
+                                     "new<i32>(x = 42); free(p); return x; }"),
+                             DiagnosticCode::UninitializedVariable),
+              nullptr);
+    EXPECT_FALSE(Analyze("unsafe i32 f() { i32 x = 0; p, e := new<i32>(x = "
+                         "42); free(p); return x; }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("unsafe void f() { const i32 x = 42; new<i32>(x = 1); }"),
+            DiagnosticCode::SymbolNotWritable),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { p, e := new<const "
+                                     "i32>(42); *p = 1; free(p); }"),
+                             DiagnosticCode::SymbolNotWritable),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(
+                  Analyze("unsafe void f() { i32 x = 1; i32 y = 2; r := &x; "
+                          "q := &y; p, e := new<i32>(*(r = q)); free(p); *q = 42; }"),
+                  DiagnosticCode::MovedReference),
+              nullptr);
+    EXPECT_FALSE(Analyze("unsafe void f() { i32 x = 1; q := &x; "
+                         "p, e := new<i32>(*q); *q = 42; free(p); }")
+                     .diagnostics.HasErrors());
+
+}
+
+TEST(SemanticMemoryTests, DiagnosesLeaksWithAllocationAndLossLocations) {
+    const std::string source =
+        "unsafe void f() { p, e := new<u8>(42); p = null; }";
+    const Analysis result = Analyze(source);
+    const Diagnostic* leak = FindDiagnostic(result, DiagnosticCode::MemoryLeak);
+    ASSERT_NE(leak, nullptr);
+    EXPECT_EQ(leak->severity, DiagnosticSeverity::Error);
+    EXPECT_EQ(leak->range.start.offset, source.find("p = null"));
+    bool origin = false;
+    for (const Diagnostic& diagnostic : result.diagnostics.Diagnostics())
+        if (diagnostic.severity == DiagnosticSeverity::Note &&
+            diagnostic.range.start.offset == source.find("new<u8>"))
+            origin = true;
+    EXPECT_TRUE(origin);
+    for (const std::string& body :
+         {"new<u8>(42);", "p, e := new<u8>(42);",
+          "p, e := new<u8>(42); if e != none { return; } return;",
+          "p, e := new<u8>(42); if flag { free(p); }",
+          "{ p, e := new<u8>(42); }"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(
+            FindDiagnostic(Analyze("unsafe void f(bool flag) { " + body + " }"),
+                           DiagnosticCode::MemoryLeak),
+            nullptr);
+    }
+}
+
+TEST(SemanticMemoryTests, CorrelatesFailureAndChecksNullDereferences) {
+    for (const std::string& guard :
+         {"e != none", "p == null", "e == AllocationError.OutOfMemory",
+          "e != none or p == null"}) {
+        SCOPED_TRACE(guard);
+        EXPECT_FALSE(Analyze("unsafe void f() { p, e := new<u8>(42); if " +
+                             guard + " { return; } defer free(p); *p = 1; }")
+                         .diagnostics.HasErrors());
+    }
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { p, e := new<u8>(42); "
+                                     "defer free(p); *p = 1; }"),
+                             DiagnosticCode::NullDereference),
+              nullptr);
+    EXPECT_FALSE(
+        Analyze("unsafe void f() { p, e := new<u8>(42); defer free(p); "
+                "if e == none { *p = 1; } }")
+            .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("unsafe void f() { p, e := new<u8>(42); "
+                         "if e == none and p != null { *p = 1; } free(p); }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(
+        Analyze("unsafe void f() { p, e := new<u8>(42); "
+                "ok := e == none and p != null; if ok { *p = 1; } free(p); }")
+            .diagnostics.HasErrors());
+}
+
+TEST(SemanticMemoryTests, AliasesShareAllocationIdentity) {
+    EXPECT_FALSE(Analyze("unsafe void f() { p, e := new<u8>(42); q := p; p = "
+                         "null; free(q); }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { p, e := new<u8>(42); q "
+                                     ":= p; free(p); free(q); }"),
+                             DiagnosticCode::DoubleFree),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { p, e := new<u8>(42); "
+                                     "if e != none { return; } "
+                                     "q := p; free(p); *q = 1; }"),
+                             DiagnosticCode::UseAfterFree),
+              nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze("unsafe void f(bool c) { p, e := new<u8>(42); "
+                               "if c { free(p); } free(p); }"),
+                       DiagnosticCode::DoubleFree),
+        nullptr);
+    EXPECT_FALSE(Analyze("unsafe void f(bool c) { p, e := new<u8>(42); "
+                         "if c { free(p); } else { free(p); } }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticMemoryTests, DefersCaptureValuesAndRunOnAllExits) {
+    EXPECT_FALSE(
+        Analyze(
+            "unsafe void f() { p, e := new<u8>(42); defer free(p); p = null; }")
+            .diagnostics.HasErrors());
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { p, e := new<u8>(42); "
+                                     "defer free(p); free(p); }"),
+                             DiagnosticCode::DoubleFree),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { p, e := new<u8>(42); "
+                                     "defer free(p); defer free(p); }"),
+                             DiagnosticCode::DoubleFree),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { p, e := new<u8>(42); "
+                                     "if e != none { return; } "
+                                     "{ defer free(p); } *p = 1; }"),
+                             DiagnosticCode::UseAfterFree),
+              nullptr);
+    for (const std::string& exit :
+         {"return;", "break;", "proceed;", "jumpto done;"}) {
+        SCOPED_TRACE(exit);
+        EXPECT_FALSE(
+            Analyze("unsafe void f(bool c) { while c { p, e := new<u8>(42); "
+                    "defer free(p); " +
+                    exit + " #done break; } }")
+                .diagnostics.HasErrors());
+    }
+}
+
+TEST(SemanticMemoryTests, UsesRealControlFlowAndFreshLoopInstances) {
+    EXPECT_FALSE(Analyze("unsafe void f(bool c) { while c { p, e := "
+                         "new<u8>(42); free(p); } }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f(bool c) { while c { p, e "
+                                     ":= new<u8>(42); break; } }"),
+                             DiagnosticCode::MemoryLeak),
+              nullptr);
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze(
+                "unsafe void f(bool c) { loop ;; { #again p, e := new<u8>(42); "
+                "defer free(p); if c { jumpto again; } break; } }"),
+            DiagnosticCode::UnverifiedOwnership),
+        nullptr);
+    EXPECT_FALSE(
+        Analyze(
+            "unsafe void f(bool c) { loop ;; { #again { p, e := new<u8>(42); "
+            "defer free(p); if c { jumpto again; } } break; } }")
+            .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("unsafe void f() { loop ;; { jumpto done; "
+                         "new<u8>(42); #done break; } }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("unsafe void f() { if false { new<u8>(42); } }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticMemoryTests, FollowsConsumingBorrowingAndFactoryCalls) {
+    const std::string prefix =
+        "unsafe void release(*u8 p) { defer free(p); } "
+        "unsafe void borrow(*u8 p) { *p = 1; } "
+        "unsafe (*u8, error) make() { return new<u8>(42); } ";
+    EXPECT_FALSE(
+        Analyze(prefix +
+                "unsafe void f() { p, e := make(); if e != none { return; } "
+                "borrow(p); release(p); }")
+            .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze(prefix +
+                    "unsafe void f() { p, e := make(); release(p); free(p); }"),
+            DiagnosticCode::DoubleFree),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze(
+                prefix +
+                "unsafe void f() { p, e := make(); if e != none { return; } "
+                "release(p); borrow(p); }"),
+            DiagnosticCode::UseAfterFree),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze(prefix + "unsafe void f() { make(); }"),
+                             DiagnosticCode::MemoryLeak),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe *u8 f() { p, e := new<u8>(42); "
+                                     "defer free(p); return p; }"),
+                             DiagnosticCode::UseAfterFree),
+              nullptr);
+}
+
+TEST(SemanticMemoryTests, RejectsForeignFreesAndUnverifiedStorage) {
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("unsafe void f() { u8 value = 1; free(&raw value); }"),
+            DiagnosticCode::InvalidFree),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("structure Box { u8 value; }; unsafe void f() { "
+                    "p, e := new<Box>(Box::init()); if e != none { return; } "
+                    "free(&raw p->value); free(p); }"),
+            DiagnosticCode::InvalidFree),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze("structure Box { *u8 p; }; unsafe void f() { "
+                               "Box box = Box::init(); "
+                               "p, e := new<u8>(42); box.p = p; free(p); }"),
+                       DiagnosticCode::UnverifiedOwnership),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze("unsafe void recurse(*u8 p) { recurse(p); } "
+                               "unsafe void f() { p, e := new<u8>(42); "
+                               "recurse(p); free(p); }"),
+                       DiagnosticCode::UnverifiedOwnership),
+        nullptr);
+}
+
+TEST(SemanticMemoryTests, PreservesTupleAndIndirectBindingAliases) {
+    EXPECT_FALSE(Analyze("unsafe void f() { result := new<u8>(42); p, e := "
+                         "result; free(p); }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("unsafe void f() { p, e := new<u8>(42); q := p; r := "
+                         "&p; *r = null; free(q); }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze(
+                "unsafe void f() { p, e := new<u8>(42); r := &p; *r = null; }"),
+            DiagnosticCode::MemoryLeak),
+        nullptr);
+}
+
+TEST(SemanticMemoryTests, FollowsConditionalConsumptionAndDeferredCallOrder) {
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("unsafe void release(*u8 p, bool c) { if c { free(p); } } "
+                    "unsafe void f(bool c) { p, e := new<u8>(1); release(p, "
+                    "c); free(p); }"),
+            DiagnosticCode::DoubleFree),
+        nullptr);
+    const std::string prefix =
+        "unsafe void read(*u8 p) { *p = 1; } unsafe void f() { "
+        "p, e := new<u8>(1); if e != none { return; } ";
+    EXPECT_FALSE(Analyze(prefix + "defer free(p); defer read(p); }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(Analyze(prefix + "defer read(p); defer free(p); }"),
+                       DiagnosticCode::UseAfterFree),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(
+                  Analyze("unsafe void clear(&*u8 p) { *p = null; } "
+                          "unsafe void f() { p, e := new<u8>(1); clear(&p); }"),
+                  DiagnosticCode::MemoryLeak),
+              nullptr);
+}
+
+TEST(SemanticMemoryTests,
+     DoesNotResurrectStaleAliasesWhenAllocationSiteRepeats) {
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("unsafe void f(bool c) { *u8 old = null; loop ;; { p, e := "
+                    "new<u8>(1); "
+                    "if e != none { return; } if old != null { *old = 3; } "
+                    "old = p; free(p); if c { break; } } }"),
+            DiagnosticCode::UseAfterFree),
+        nullptr);
+}
+
+TEST(SemanticMemoryTests,
+     TracksAggregateAliasesAndRejectsHiddenFieldOwnership) {
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { p, e := new<u8>(1); a "
+                                     ":= [p, p]; free(a[0]); free(a[1]); }"),
+                             DiagnosticCode::DoubleFree),
+              nullptr);
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("*u8 make() { unsafe { p, e := new<u8>(1); return p; } } "
+                    "structure Box { *u8 p = make(); }; void f() { Box b = "
+                    "Box::init(); }"),
+            DiagnosticCode::UnverifiedOwnership),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { p, e := new<u8>(1); q, "
+                                     "err := new<*u8>(p); free(q); free(p); }"),
+                             DiagnosticCode::UnverifiedOwnership),
+              nullptr);
+}
+
+TEST(SemanticMemoryTests,
+     PreservesCleanupAcrossRebindingShadowingAndUnsafeScopes) {
+    EXPECT_FALSE(Analyze("unsafe void f() { p, e := new<u8>(1); defer free(p); "
+                         "(p, e) = new<u8>(2); free(p); }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("unsafe void f() { p, e := new<u8>(1); { p, e := "
+                         "new<u8>(2); free(p); } free(p); }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("void f() { *u8 p = null; unsafe { (p, error e) = "
+                         "new<u8>(1); } unsafe { free(p); } }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("unsafe void f(bool c) { loop ;; { p, e := new<u8>(1); "
+                    "if c { jumpto end; } defer free(p); #end break; } }"),
+            DiagnosticCode::MemoryLeak),
+        nullptr);
+}
+
+TEST(SemanticMemoryTests,
+     ChecksNullableArgumentsAndRejectsUntrackedContainerAliases) {
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze(
+                "unsafe void write(*u8 p) { *p = 1; } "
+                "unsafe void f() { p, e := new<u8>(1); write(p); free(p); }"),
+            DiagnosticCode::NullDereference),
+        nullptr);
+    for (const std::string& operation :
+         {"a[0] = null;", "s := a[0:2];", "r := &raw a[0];",
+          "r := a.front();"}) {
+        SCOPED_TRACE(operation);
+        EXPECT_NE(
+            FindDiagnostic(
+                Analyze("unsafe void f() { p, e := new<u8>(1); a := [p, p]; " +
+                        operation + " free(p); }"),
+                DiagnosticCode::UnverifiedOwnership),
+            nullptr);
+    }
+}
+
+TEST(SemanticMemoryTests,
+     InteriorAddressesDoNotTransferTheAllocationObligation) {
+    EXPECT_NE(
+        FindDiagnostic(Analyze("unsafe *u8 f() { p, e := new<[1]u8>([42]); if "
+                               "e != none { return null; } "
+                               "return &raw (*p)[0]; }"),
+                       DiagnosticCode::MemoryLeak),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze("unsafe void f() { p, e := new<[1]u8>([42]); if "
+                               "e != none { return; } "
+                               "q := &raw (*p)[0]; p = null; *q = 1; }"),
+                       DiagnosticCode::MemoryLeak),
+        nullptr);
+}

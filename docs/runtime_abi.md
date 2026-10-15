@@ -66,3 +66,21 @@ owned fields on entry and cleans up that copy on exit. Noncopyable parameters
 must use references or raw pointers. Compiler-generated calls invoke tear with
 an address, then recursively destroy fields in reverse order. Existing scalar,
 string runtime, and structure-free tuple conventions are unchanged.
+
+## Raw allocation storage ABI
+
+`flecha_runtime_v1_alloc(size_t size, size_t alignment)` returns a pointer to
+zeroed storage or null. Alignment must be a nonzero power of two. Size arithmetic
+is overflow-checked. Zero-sized requests reserve at least one byte. The runtime
+supports over-alignment by retaining the original malloc allocation in a hidden
+header before the aligned result; this header is private to the runtime.
+
+`flecha_runtime_v1_free(void* pointer)` releases that storage and accepts null.
+Only exact live pointers returned by the matching allocator may be passed to it.
+The runtime performs no Flecha teardown: generated code runs typed teardown
+before calling free. `new<T>` supplies T's size and alignment from the native
+LLVM DataLayout, branches on null, constructs only on success, and packages the
+result into `(*T, error)`. Allocation errors use the existing generic error ABI.
+
+The allocation-failure test harness wraps the allocation symbol at link time;
+production code has no failure-injection setting or test-only global state.

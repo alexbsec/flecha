@@ -16,6 +16,12 @@ typedef struct FlechaRuntimeString {
     size_t capacity;
 } FlechaRuntimeString;
 
+// Allocates zeroed aligned storage; returns null on failure. Free accepts null.
+// Only pointers returned by this allocator may be released. The compiler tears
+// down the object before releasing storage.
+void* flecha_runtime_v1_alloc(size_t size, size_t alignment);
+void flecha_runtime_v1_free(void* data);
+
 void flecha_runtime_v1_stdout_string_view(const char* data, size_t length);
 void flecha_runtime_v1_stdout_i8(int8_t value);
 void flecha_runtime_v1_stdout_i16(int16_t value);

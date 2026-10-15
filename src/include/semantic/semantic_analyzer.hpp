@@ -67,6 +67,8 @@ class SemanticAnalyzer final {
                                SemanticType expected = SemanticType::Error());
     SemanticType AnalyzeAssignment(
         const core::AssignmentExpression& expression);
+    SemanticType AnalyzeAllocationCall(const core::CallExpression& expression,
+                                       BuiltInFunction intrinsic);
     SemanticType AnalyzeCall(const core::CallExpression& expression);
     SemanticType AnalyzeMemberCall(
         const core::MemberCallExpression& expression);

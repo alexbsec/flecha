@@ -89,8 +89,10 @@ class LlvmCodeGenerator final {
         const lowering::BoundExpression& expression);
     [[nodiscard]] llvm::Value* EmitAddress(
         const lowering::BoundPlaceExpression& place);
-    [[nodiscard]] llvm::Value* EmitExpression(
-        const lowering::BoundExpression& expression);
+    llvm::Value* EmitAllocation(
+        const lowering::BoundAllocationExpression& expression);
+    llvm::Value* EmitFree(llvm::Value* pointer, semantic::SemanticType target);
+    llvm::Value* EmitExpression(const lowering::BoundExpression& expression);
     [[nodiscard]] llvm::Value* EmitLiteral(
         const lowering::BoundLiteralExpression& expression);
     [[nodiscard]] llvm::Value* EmitUnary(

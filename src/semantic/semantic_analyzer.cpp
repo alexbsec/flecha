@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "core/token_type.hpp"
+#include "semantic/allocation_checker.hpp"
 #include "semantic/borrow_checker.hpp"
 #include "semantic/definite_assignment.hpp"
 
@@ -404,6 +405,24 @@ void SemanticAnalyzer::RegisterBuiltIns() {
     };
     registerOutput("stdout", BuiltInFunction::Stdout);
     registerOutput("stdoutln", BuiltInFunction::StdoutLine);
+    for (const auto& [name, intrinsic] :
+         {std::pair{"new", BuiltInFunction::New},
+          std::pair{"free", BuiltInFunction::Free}}) {
+        auto function = std::make_unique<FunctionSymbol>(
+            name, SemanticType(SemanticTypeKind::Void),
+            std::vector<SemanticType>{}, source::SourceRange{}, intrinsic,
+            true);
+        (void)_currentScope->Declare(*function);
+        _model._symbols.push_back(std::move(function));
+    }
+    auto family = std::make_shared<ErrorFamily>();
+    family->name = "AllocationError";
+    family->variants = {"OutOfMemory"};
+    auto error = std::make_unique<Symbol>(SymbolKind::ErrorType, family->name,
+                                          SemanticType(family),
+                                          source::SourceRange{}, false);
+    (void)_currentScope->Declare(*error);
+    _model._symbols.push_back(std::move(error));
 }
 
 void SemanticAnalyzer::RegisterErrorTypes(const core::CompilationUnit& unit) {
@@ -551,6 +570,8 @@ SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
                 static_cast<const core::FunctionDeclaration&>(*declaration));
         }
     }
+    if (!_diagnostics.HasErrors())
+        AnalyzeAllocations(unit, _model, _diagnostics);
     _currentScope = nullptr;
     _currentFunction = nullptr;
     return std::move(_model);
@@ -814,6 +835,13 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             if (symbol == nullptr || symbol->Kind() != SymbolKind::Function)
                 break;
             const auto& function = static_cast<const FunctionSymbol&>(*symbol);
+            if (function.BuiltIn() == BuiltInFunction::New) {
+                Report(diagnostics::DiagnosticCode::InvalidDefer,
+                       expression->Range(),
+                       "defer new would discard an allocation; defer free(ptr) "
+                       "instead");
+                break;
+            }
             std::vector<const Symbol*>& captures =
                 _model._deferredCaptures[&deferred];
             for (std::size_t index = 0; index < call.Arguments().size();
@@ -1754,6 +1782,72 @@ bool SemanticAnalyzer::BorrowsLocalString(
     }
 }
 
+SemanticType SemanticAnalyzer::AnalyzeAllocationCall(
+    const core::CallExpression& expression, BuiltInFunction intrinsic) {
+    RequireUnsafe(expression.Range());
+    const bool allocate = intrinsic == BuiltInFunction::New;
+    SemanticType element = SemanticType::Error();
+    if (allocate) {
+        if (!expression.TypeArgument())
+            Report(diagnostics::DiagnosticCode::InvalidAllocation,
+                   expression.Range(), "allocation requires new<T>(value)");
+        else {
+            element = ResolveType(*expression.TypeArgument());
+            if (!element.IsError() && !StorageSize(element))
+                Report(
+                    diagnostics::DiagnosticCode::InvalidAllocation,
+                    expression.TypeArgument()->Range(),
+                    "allocation requires a sized owned value type; references, "
+                    "slices, stringv, and void cannot be allocated");
+        }
+    }
+    if (expression.Arguments().size() != 1)
+        Report(diagnostics::DiagnosticCode::WrongArgumentCount,
+               expression.Range(),
+               allocate ? "new<T> requires exactly one initializer"
+                        : "free requires exactly one raw pointer");
+    SemanticType argument = SemanticType::Error();
+    for (const auto& value : expression.Arguments()) {
+        argument = AnalyzeExpression(
+            *value, allocate ? element : SemanticType::Error());
+        if (allocate) {
+            CheckCopy(*value, element);
+            if (!IsAssignable(element, argument))
+                Report(diagnostics::DiagnosticCode::IncompatibleArgument,
+                       value->Range(), TypeMismatch(element, argument));
+        }
+    }
+    SemanticType parameter = element;
+    SemanticType result(SemanticTypeKind::Void);
+    if (allocate) {
+        result = SemanticType(std::vector<SemanticType>{
+            SemanticType(SemanticTypeKind::Pointer, element),
+            SemanticType(SemanticTypeKind::ErrorValue)});
+    } else {
+        if (argument.Kind() == SemanticTypeKind::Null ||
+            argument.Kind() == SemanticTypeKind::None)
+            parameter = SemanticType(SemanticTypeKind::Pointer,
+                                     SemanticType(SemanticTypeKind::U8));
+        else if (argument.Kind() == SemanticTypeKind::Pointer &&
+                 StorageSize(*argument.Target()))
+            parameter = argument;
+        else if (!argument.IsError())
+            Report(diagnostics::DiagnosticCode::InvalidAllocation,
+                   expression.Range(),
+                   "free requires a raw pointer to a sized owned value type, "
+                   "or null");
+    }
+    // Each call has a concrete typed signature, also used for deferred free.
+    const auto& callee =
+        static_cast<const core::NameExpression&>(expression.Callee());
+    auto specialized = std::make_unique<FunctionSymbol>(
+        callee.Name(), result, std::vector<SemanticType>{parameter},
+        callee.Range(), intrinsic, true);
+    _model._bindings[&callee] = specialized.get();
+    _model._symbols.push_back(std::move(specialized));
+    return result;
+}
+
 SemanticType SemanticAnalyzer::AnalyzeCall(
     const core::CallExpression& expression) {
     const SemanticType calleeType = AnalyzeExpression(expression.Callee());
@@ -1765,6 +1859,13 @@ SemanticType SemanticAnalyzer::AnalyzeCall(
             function = static_cast<const FunctionSymbol*>(symbol);
         }
     }
+    if (function && (function->BuiltIn() == BuiltInFunction::New ||
+                     function->BuiltIn() == BuiltInFunction::Free))
+        return AnalyzeAllocationCall(expression, function->BuiltIn());
+    if (expression.TypeArgument())
+        Report(diagnostics::DiagnosticCode::InvalidAllocation,
+               expression.Range(),
+               "new<T> must resolve to the allocation built-in");
     std::vector<SemanticType> argumentTypes;
     for (std::size_t index = 0; index < expression.Arguments().size();
          ++index) {

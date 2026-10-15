@@ -43,6 +43,7 @@ enum class BoundNodeKind {
     BinaryExpression,
     AssignmentExpression,
     CallExpression,
+    AllocationExpression,
     StringViewOperationExpression,
     CastExpression,
 };
@@ -424,6 +425,30 @@ class BoundAssignmentExpression final : public BoundExpression {
    private:
     std::unique_ptr<BoundPlaceExpression> _target;
     std::unique_ptr<BoundExpression> _value;
+};
+
+class BoundAllocationExpression final : public BoundExpression {
+   public:
+    BoundAllocationExpression(source::SourceRange range,
+                              semantic::SemanticType result,
+                              semantic::SemanticType element,
+                              semantic::SemanticType failure,
+                              std::unique_ptr<BoundExpression> initializer)
+        : BoundExpression(range, result),
+          _element(element),
+          _failure(failure),
+          _initializer(std::move(initializer)) {}
+    BoundNodeKind Kind() const override {
+        return BoundNodeKind::AllocationExpression;
+    }
+    semantic::SemanticType ElementType() const { return _element; }
+    semantic::SemanticType FailureType() const { return _failure; }
+    const BoundExpression& Initializer() const { return *_initializer; }
+
+   private:
+    semantic::SemanticType _element;
+    semantic::SemanticType _failure;
+    std::unique_ptr<BoundExpression> _initializer;
 };
 
 class BoundCallExpression final : public BoundExpression {

@@ -1185,6 +1185,21 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
     }
 
     while (true) {
+        if (expression->Kind() == AstNodeKind::NameExpression &&
+            static_cast<const NameExpression&>(*expression).Name() == "new" &&
+            Match(TokenType::Less)) {
+            auto type = ParseType();
+            if (!type ||
+                !Consume(TokenType::Greater, "'>' after allocation type") ||
+                !Consume(TokenType::LParen, "'(' after new<T>"))
+                return expression;
+            source::SourceLocation end = expression->Range().end;
+            auto arguments = ParseArgumentList(end);
+            expression = std::make_unique<CallExpression>(
+                source::SourceRange{expression->Range().start, end},
+                std::move(expression), std::move(arguments), std::move(type));
+            continue;
+        }
         if (Check(TokenType::Increment)) {
             const Token& operation = Advance();
             expression = std::make_unique<UnaryExpression>(
