@@ -1,6 +1,7 @@
 add_executable(test_flecha
     test_ast.cpp
     test_diagnostics.cpp
+    test_lowering.cpp
     test_main.cpp
     test_parser.cpp
     test_semantic.cpp
@@ -13,6 +14,7 @@ target_link_libraries(test_flecha
         diagnostics
         core
         semantic
+        lowering
         memory
         runtime
         utils

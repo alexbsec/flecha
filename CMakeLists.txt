@@ -33,6 +33,7 @@ endif()
 add_subdirectory(src/diagnostics)
 add_subdirectory(src/core)
 add_subdirectory(src/semantic)
+add_subdirectory(src/lowering)
 add_subdirectory(src/memory)
 add_subdirectory(src/runtime)
 add_subdirectory(src/utils)
@@ -45,6 +46,7 @@ target_link_libraries(flecha
         diagnostics
         core
         semantic
+        lowering
         memory
         runtime
         utils
