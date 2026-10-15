@@ -6,9 +6,10 @@
 namespace flecha::semantic {
 
 SemanticType::SemanticType(SemanticTypeKind kind, SemanticType target,
-                           bool isConst)
+                           bool isConst, std::uint64_t length)
     : _kind(kind),
       _isConst(isConst),
+      _length(length),
       _target(std::make_shared<const SemanticType>(std::move(target))) {
     assert(IsCompound());
 }
@@ -27,12 +28,16 @@ SemanticType SemanticType::WithConst() const {
 
 bool SemanticType::operator==(const SemanticType& other) const {
     return _kind == other._kind && _isConst == other._isConst &&
+           _length == other._length &&
            ((_target == nullptr && other._target == nullptr) ||
             (_target != nullptr && other._target != nullptr &&
              *_target == *other._target));
 }
 
 SemanticType SemanticType::FromSyntax(const core::TypeNode& type) {
+    if (type.TypeForm() == core::TypeKind::Array)
+        return SemanticType(SemanticTypeKind::Array, FromSyntax(*type.Target()),
+                            type.IsConst(), type.Length());
     if (type.TypeForm() != core::TypeKind::Primitive) {
         return SemanticType(type.TypeForm() == core::TypeKind::Pointer
                                 ? SemanticTypeKind::Pointer
@@ -81,6 +86,8 @@ std::string SemanticType::Name() const {
             return "string";
         case SemanticTypeKind::StringView:
             return "stringv";
+        case SemanticTypeKind::Array:
+            return "[" + std::to_string(_length) + "]" + _target->Name();
         case SemanticTypeKind::Pointer:
             return "*" + _target->Name();
         case SemanticTypeKind::Reference: {

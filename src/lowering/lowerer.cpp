@@ -70,6 +70,10 @@ std::unique_ptr<BoundBlockStatement> Lowerer::LowerBlock(
 std::unique_ptr<BoundStatement> Lowerer::LowerStatement(
     const core::Statement& statement) {
     switch (statement.Kind()) {
+        case core::AstNodeKind::RangeStatement:
+            return LowerBlock(
+                static_cast<const core::RangeStatement&>(statement)
+                    .Expansion());
         case core::AstNodeKind::BlockStatement:
             return LowerBlock(
                 static_cast<const core::BlockStatement&>(statement));
@@ -194,7 +198,9 @@ std::unique_ptr<BoundStatement> Lowerer::LowerWhile(
             std::move(bodyStatements));
     return std::make_unique<BoundWhileStatement>(
         statement.Range(), LowerExpression(statement.Condition()),
-        std::move(body));
+        std::move(body),
+        statement.Update() == nullptr ? nullptr
+                                      : LowerExpression(*statement.Update()));
 }
 
 std::unique_ptr<BoundPlaceExpression> Lowerer::LowerPlace(
@@ -210,6 +216,13 @@ std::unique_ptr<BoundPlaceExpression> Lowerer::LowerPlace(
             expression.Range(), static_cast<const semantic::VariableSymbol&>(
                                     *_semanticModel->SymbolFor(name)));
     }
+    if (expression.Kind() == core::AstNodeKind::IndexExpression) {
+        const auto& index =
+            static_cast<const core::IndexExpression&>(expression);
+        return std::make_unique<BoundArrayElementExpression>(
+            expression.Range(), LowerExpression(index.Receiver()),
+            LowerExpression(index.Index()));
+    }
     const auto& dereference =
         static_cast<const core::UnaryExpression&>(expression);
     return std::make_unique<BoundDereferenceExpression>(
@@ -220,6 +233,16 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
     const core::Expression& expression, semantic::SemanticType expected) {
     const semantic::SemanticType type = _semanticModel->TypeOf(expression);
     switch (expression.Kind()) {
+        case core::AstNodeKind::ArrayExpression: {
+            const auto& array =
+                static_cast<const core::ArrayExpression&>(expression);
+            std::vector<std::unique_ptr<BoundExpression>> elements;
+            for (const auto& element : array.Elements())
+                elements.push_back(LowerExpression(*element, *type.Target()));
+            return std::make_unique<BoundArrayExpression>(
+                expression.Range(), type, std::move(elements),
+                array.IsRepeat());
+        }
         case core::AstNodeKind::LiteralExpression: {
             const core::LiteralExpression& literal =
                 static_cast<const core::LiteralExpression&>(expression);
@@ -262,6 +285,9 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
         case core::AstNodeKind::UnaryExpression: {
             const core::UnaryExpression& unary =
                 static_cast<const core::UnaryExpression&>(expression);
+            if (unary.OperatorType() == TokenType::Increment)
+                return std::make_unique<BoundIncrementExpression>(
+                    expression.Range(), LowerPlace(unary.Operand()));
             if (unary.OperatorType() == TokenType::Mul)
                 return LowerPlace(expression);
             if (unary.OperatorType() == TokenType::RawAddress ||
@@ -332,6 +358,10 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
         case core::AstNodeKind::MemberCallExpression: {
             const core::MemberCallExpression& member =
                 static_cast<const core::MemberCallExpression&>(expression);
+            if (_semanticModel->TypeOf(member.Receiver()).Kind() ==
+                semantic::SemanticTypeKind::Array)
+                return std::make_unique<BoundArrayLengthExpression>(
+                    expression.Range(), LowerExpression(member.Receiver()));
             StringViewOperation operation = StringViewOperation::Length;
             if (member.Member() == "at") {
                 operation = StringViewOperation::At;
@@ -357,6 +387,9 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
         case core::AstNodeKind::IndexExpression: {
             const core::IndexExpression& index =
                 static_cast<const core::IndexExpression&>(expression);
+            if (_semanticModel->TypeOf(index.Receiver()).Kind() ==
+                semantic::SemanticTypeKind::Array)
+                return LowerPlace(expression);
             std::vector<std::unique_ptr<BoundExpression>> arguments;
             arguments.push_back(LowerExpression(index.Index()));
             return std::make_unique<BoundStringViewOperationExpression>(

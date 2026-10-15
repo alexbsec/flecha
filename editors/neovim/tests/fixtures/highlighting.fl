@@ -27,3 +27,10 @@ constval := 42;
 
 unsafe { pointer := &raw value; }
 raw := 1;
+
+[5]i32 values = [7; 5];
+cell := &values[1];
+count := values.len();
+
+for (i, value) := range values { value++; }
+loop usize i = 0; i < values.len(); i++ {}

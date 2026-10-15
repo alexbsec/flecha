@@ -1,0 +1,26 @@
+// This file intentionally fails semantic analysis.
+void wrong_source() {
+    for i := range 10 {} // range currently requires a fixed array
+}
+void wrong_binding() {
+    a := [1, 2];
+    for (u32 i, u8 value) = range a {} // elements are i32
+}
+void narrow_index() {
+    a := [0; 257];
+    for (u8 i, i32 value) = range a {} // index 256 does not fit u8
+}
+void binding_scope() {
+    loop i := 0; i < 3; i++ {}
+    i++; // i is outside its scope
+}
+void update_requires_initialization() {
+    i32 value;
+    loop i := 0; i < 3; value++ {
+        proceed; // update can read an uninitialized value
+    }
+}
+void const_increment() {
+    const i32 fixed = 1;
+    fixed++;
+}

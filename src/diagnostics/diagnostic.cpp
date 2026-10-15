@@ -86,6 +86,14 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0031";
         case DiagnosticCode::IntegerLiteralOutOfRange:
             return "FLECHA-S0032";
+        case DiagnosticCode::InvalidArrayLength:
+            return "FLECHA-S0033";
+        case DiagnosticCode::InvalidArrayElement:
+            return "FLECHA-S0034";
+        case DiagnosticCode::ArrayInitializerCount:
+            return "FLECHA-S0035";
+        case DiagnosticCode::ArrayIndexOutOfBounds:
+            return "FLECHA-S0036";
         case DiagnosticCode::NativeTargetUnavailable:
             return "FLECHA-C0001";
         case DiagnosticCode::ObjectEmissionFailed:

@@ -387,8 +387,9 @@ inside a safe function does not establish that contract.
 ## 7. Arrays and slices
 
 Fixed-size arrays have inline contiguous storage and a compile-time length;
-constructing one does not implicitly allocate a backing buffer. Array type
-and literal syntax remain to be finalized.
+constructing one does not implicitly allocate a backing buffer. Fixed arrays now use `[N]T` types, `[a, b]` list initializers, and `[value; N]`
+repeat initializers. Implemented rules and limits are documented in
+[fixed arrays](fixed_arrays.md). Slices remain planned.
 
 A slice has a pointer and a `usize` element count. It owns neither the elements
 nor their allocation. `[]const T` exposes read-only elements and `[]T` exposes

@@ -75,6 +75,11 @@ class GraphBuilder final {
 
     NodeId BuildStatement(const core::Statement& statement, NodeId next) {
         switch (statement.Kind()) {
+            case core::AstNodeKind::RangeStatement:
+                return BuildBlock(
+                    static_cast<const core::RangeStatement&>(statement)
+                        .Expansion(),
+                    next);
             case core::AstNodeKind::BlockStatement:
                 return BuildBlock(
                     static_cast<const core::BlockStatement&>(statement), next);
@@ -127,9 +132,13 @@ class GraphBuilder final {
                 const auto& loop =
                     static_cast<const core::WhileStatement&>(statement);
                 const NodeId header = AddNode({});
-                _loops.push_back({header, next});
+                const NodeId update =
+                    loop.Update() == nullptr
+                        ? header
+                        : BuildEvaluation(*loop.Update(), header);
+                _loops.push_back({update, next});
                 const NodeId body =
-                    BuildBlock(loop.Body(), header, loop.Also());
+                    BuildBlock(loop.Body(), update, loop.Also());
                 _loops.pop_back();
                 const NodeId condition =
                     BuildCondition(loop.Condition(), body, next);
@@ -210,6 +219,14 @@ class GraphBuilder final {
 
     NodeId BuildExpression(const core::Expression& expression, NodeId next) {
         switch (expression.Kind()) {
+            case core::AstNodeKind::ArrayExpression: {
+                const auto& array =
+                    static_cast<const core::ArrayExpression&>(expression);
+                for (auto element = array.Elements().rbegin();
+                     element != array.Elements().rend(); ++element)
+                    next = BuildExpression(**element, next);
+                return next;
+            }
             case core::AstNodeKind::NameExpression: {
                 const NodeId read = AddNode({next});
                 _graph.nodes[read].read =

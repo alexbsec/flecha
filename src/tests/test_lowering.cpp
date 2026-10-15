@@ -333,3 +333,44 @@ TEST(LoweringTests, RepresentsDirectAndIndirectStorageLocations) {
     EXPECT_NE(dump.find("(address (deref load p))"), std::string::npos);
     EXPECT_NE(dump.find("(address load x)"), std::string::npos);
 }
+
+TEST(LoweringTests, RepresentsArrayCopiesCheckedPlacesAndRepeatInitializers) {
+    LoweredSource result = Lower(
+        "[2]u8 f() { [2]u8 a = [3; 2]; a[0] = 4; r := &a[1]; *r = 5; "
+        "usize count = a.len(); return a; }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.program, nullptr);
+    const std::string dump = DumpBoundProgram(*result.program);
+    EXPECT_NE(dump.find("(repeat [2]u8 3:u8)"), std::string::npos);
+    EXPECT_NE(dump.find("(checked-index load a 0:usize)"), std::string::npos);
+    EXPECT_NE(dump.find("(address (checked-index load a 1:usize))"),
+              std::string::npos);
+    EXPECT_NE(dump.find("(array-len load a)"), std::string::npos);
+}
+
+TEST(LoweringTests, StopsInvalidArrayPlacesAndShapesBeforeCodeGeneration) {
+    for (const std::string& source :
+         {"void f() { [1]string a = none; }", "void f() { [2]u8 a = [1]; }",
+          "void f() { [2]u8 a = [1, 2]; a[2] = 3; }",
+          "void f() { [1, 2][0] = 3; }"}) {
+        SCOPED_TRACE(source);
+        LoweredSource result = Lower(source);
+        EXPECT_TRUE(result.diagnostics.HasErrors());
+        EXPECT_EQ(result.program, nullptr);
+    }
+}
+
+TEST(LoweringTests, PreservesLoopUpdateAndSnapshotsRangeSources) {
+    LoweredSource result = Lower(
+        "[2]i32 values() { return [1, 2]; } "
+        "void f() { for (i, v) := range values() { proceed; } "
+        "loop i := 0; i < 2; i++ { proceed; } }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.program, nullptr);
+    const std::string dump = DumpBoundProgram(*result.program);
+    EXPECT_NE(dump.find("update (post-increment load i)"), std::string::npos);
+    EXPECT_NE(dump.find("update (post-increment load $cursor0)"),
+              std::string::npos);
+    EXPECT_NE(dump.find("(checked-index load $range0 load $cursor0)"),
+              std::string::npos);
+}

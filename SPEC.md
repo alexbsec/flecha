@@ -453,8 +453,51 @@ permission. See [checked references](docs/checked_references.md) for exact rules
 limits, and diagnostics. Integer literals gain contextual integer types with
 representability checks; this does not convert already typed values.
 
-Pointer casts, arithmetic, ordering, `volatile`, arrays, and slices remain
-future features.
+Pointer casts, arithmetic, ordering, and `volatile` remain future features.
+
+### 13.1 Fixed arrays
+
+Fixed arrays are implemented as inline, contiguous values with length in the type:
+
+```flecha
+[3]i32 values = [10, 20, 30];
+zeros := [0; 3];
+[3]i32 empty_values = none;
+values[0] = 42;
+const [2]u8 fixed = [1, 2];
+element := &values[1];
+```
+
+`[N]T` requires a nonnegative integer literal length. List initializers must match
+it; repeat initializers evaluate their element once. Arrays copy on assignment,
+argument passing, and return. Supported elements are scalars, raw pointers, and
+nested arrays. Reference handles and string/view elements remain unsupported.
+
+`.len()` returns `usize`. Indices must be `usize`; integer literals are contextual.
+Statically known invalid indices are rejected and other indices have runtime
+bounds checks, including inside unsafe blocks. `const [N]T` prevents mutation.
+Whole-array and element references use the existing checked borrowing rules;
+an element borrow conservatively borrows the entire array. See
+[fixed arrays](docs/fixed_arrays.md) for full rules and limitations.
+
+### 13.2 Iteration
+
+```flecha
+for index := range values {}
+for (index, value) := range values {}
+for (u32 index, i32 value) = range values {}
+loop usize index = 0; index < values.len(); index++ {}
+```
+
+Range evaluates and copies a fixed-array value once, then yields ascending indices
+and optional element copies. Inferred indices use `usize`; explicit integer index
+types must represent every index. `_` discards a binding. Bindings are local to
+iteration. Counted loops execute their initializer once and their update after
+each body execution, including `proceed`; `break` skips the update. Postfix `++`
+works on writable integer locations, evaluates the location once, and yields its
+previous value. See [iteration](docs/iteration.md).
+
+### 13.3 Slices (planned)
 
 Slices contain a pointer and a length:
 
@@ -612,7 +655,7 @@ The following decisions are intentionally not finalized:
 - module, import, and visibility syntax;
 - additional declaration forms, including whether to introduce `var`;
 - string literal representation and encoding;
-- array syntax and array-to-slice conversion;
+- slice syntax and array-to-slice conversion;
 - struct, union, enum, and generic syntax;
 - ownership, borrowing, and deterministic cleanup;
 - allocator interfaces;

@@ -38,6 +38,9 @@ const KeywordMap KEYWORDS = {
     {"else", TokenType::Else},
     {"also", TokenType::Also},
     {"while", TokenType::While},
+    {"for", TokenType::For},
+    {"loop", TokenType::Loop},
+    {"range", TokenType::Range},
     {"proceed", TokenType::Proceed},
     {"break", TokenType::Break},
     {"jumpto", TokenType::JumpTo},
@@ -179,7 +182,8 @@ Token Tokenizer::NextToken() {
         case '}':
             return makeToken(TokenType::RCurly);
         case '+':
-            return makeToken(TokenType::Add);
+            return makeToken(Match('+') ? TokenType::Increment
+                                        : TokenType::Add);
         case '-':
             return makeToken(TokenType::Sub);
         case '*':

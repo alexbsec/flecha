@@ -1,0 +1,142 @@
+[3]i32 make_values(&i32 calls) {
+    (*calls)++;
+    return [10, 20, 30];
+}
+[0]i32 make_empty(&i32 calls) {
+    (*calls)++;
+    return [];
+}
+usize next_index(&usize calls) {
+    previous := *calls;
+    (*calls)++;
+    return previous;
+}
+
+i32 range_test() {
+    i32 calls = 0;
+    i32 sum = 0;
+    for (u32 i, i32 value) = range make_values(&calls) {
+        sum = sum + value + (i as i32);
+        value = 999;
+        i = 100;
+    }
+    if calls != 1 or sum != 63 { return 1; }
+    a := [10, 20, 30];
+    sum = 0;
+    for (i, value) := range a {
+        sum = sum + value;
+        a[2] = 1000;
+        if i == 1 { proceed; }
+    }
+    if sum != 60 or a[2] != 1000 { return 2; }
+    usize indices = 0;
+    for i := range a { indices = indices + i; }
+    if indices != 3 { return 3; }
+    for (_, value) := range make_empty(&calls) { return 4; }
+    if calls != 2 { return 5; }
+    for i := range make_empty(&calls) { return 6; }
+    if calls != 3 { return 7; }
+    i32 visits = 0;
+    for (_, _) := range [3, 4] { visits++; }
+    if visits != 2 { return 8; }
+    sum = 0;
+    for (_, row) := range [[1, 2], [3, 4]] {
+        for (_, value) := range row { sum = sum + value; }
+        row[0] = 100;
+    }
+    if sum != 10 { return 9; }
+    usize count = 0;
+    for (u8 i, i32 value) = range [0; 256] { count++; }
+    if count != 256 { return 10; }
+    return 42;
+}
+
+i32 counted_test() {
+    i32 updates = 0;
+    i32 sum = 0;
+    loop u32 x = 1; x <= 5; x++ {
+        if x == 2 { proceed; }
+        if x == 5 { break; }
+        sum = sum + (x as i32);
+    }
+    if sum != 8 { return 1; }
+    loop i := 0; i < 4; updates++ {
+        i++;
+        string cleanup = "iteration";
+        if i == 2 { proceed; }
+        if i == 4 { break; }
+    }
+    if updates != 3 { return 2; }
+    i32 i = 0;
+    loop ; i < 3; { i++; }
+    if i != 3 { return 3; }
+    loop i = 1; i < 3; i++ {}
+    if i != 3 { return 4; }
+    loop ;; { break; }
+    sum = 0;
+    loop outer := 0; outer < 2; outer++ {
+        for (_, value) := range [1, 2, 3] {
+            if value == 1 { proceed; }
+            sum = sum + value;
+            if value == 2 { break; }
+        }
+    }
+    if sum != 4 { return 5; }
+    i = 0;
+    loop string header = "owner"; i < 4; i++ {
+        string local = "cleanup";
+        if i == 1 { proceed; }
+        if i == 2 { break; }
+    }
+    if i != 2 { return 6; }
+    return 42;
+}
+
+i32 increment_test() {
+    a := [10, 20];
+    usize calls = 0;
+    old := a[next_index(&calls)]++;
+    if calls != 1 or old != 10 or a[0] != 11 or a[1] != 20 { return 1; }
+    r := &a[1];
+    old = (*r)++;
+    if old != 20 or *r != 21 { return 2; }
+    unsafe {
+        p := &raw a[0];
+        old = (*p)++;
+    }
+    if old != 11 or a[0] != 12 { return 3; }
+    u8 wrap = 255;
+    previous := wrap++;
+    if previous != 255 or wrap != 0 { return 4; }
+    i8 signed_wrap = 127;
+    signed_wrap++;
+    if signed_wrap != -128 { return 5; }
+    return 42;
+}
+
+i32 early_return_test() {
+    loop string header = "header"; true; header = "updated" {
+        string local = "body";
+        for (_, value) := range [42] {
+            string inner = "inner";
+            return value;
+        }
+    }
+    return 0;
+}
+
+i32 jump_test() {
+    i32 count = 0;
+    loop i := 0; i < 2; i++ {
+        #again
+        count++;
+        if count < 2 { jumpto again; }
+        for (_, value) := range [1, 2] {
+            string temporary = "jump cleanup";
+            if value == 1 { jumpto leave; }
+        }
+        #leave
+    }
+    if count != 3 { return 1; }
+    return 42;
+}

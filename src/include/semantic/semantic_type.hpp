@@ -29,6 +29,7 @@ enum class SemanticTypeKind {
     StringView,
     Pointer,
     Reference,
+    Array,
     Null,
     None,
     Function,
@@ -42,7 +43,7 @@ class SemanticType final {
         assert(!IsCompound());
     }
     SemanticType(SemanticTypeKind kind, SemanticType target,
-                 bool isConst = false);
+                 bool isConst = false, std::uint64_t length = 0);
 
     [[nodiscard]] SemanticTypeKind Kind() const { return _kind; }
     [[nodiscard]] std::string Name() const;
@@ -57,8 +58,10 @@ class SemanticType final {
     [[nodiscard]] bool IsConst() const { return _isConst; }
     [[nodiscard]] bool IsCompound() const {
         return _kind == SemanticTypeKind::Pointer ||
-               _kind == SemanticTypeKind::Reference;
+               _kind == SemanticTypeKind::Reference ||
+               _kind == SemanticTypeKind::Array;
     }
+    [[nodiscard]] std::uint64_t Length() const { return _length; }
     [[nodiscard]] const SemanticType* Target() const { return _target.get(); }
     [[nodiscard]] SemanticType WithoutConst() const;
     [[nodiscard]] SemanticType WithConst() const;
@@ -74,6 +77,7 @@ class SemanticType final {
    private:
     SemanticTypeKind _kind;
     bool _isConst;
+    std::uint64_t _length = 0;
     std::shared_ptr<const SemanticType> _target;
 };
 

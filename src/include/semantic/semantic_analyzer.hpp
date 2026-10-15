@@ -18,6 +18,11 @@ class SemanticAnalyzer final {
     [[nodiscard]] SemanticModel Analyze(const core::CompilationUnit& unit);
 
    private:
+    bool IsSafePlace(const core::Expression& expression) const;
+    bool IsReferencePlace(const core::Expression& expression) const;
+    SemanticType AnalyzeArray(const core::ArrayExpression& expression,
+                              SemanticType expected);
+    void ValidateArrayType(SemanticType type, source::SourceRange range);
     SemanticType PlaceType(const core::Expression& expression) const;
     void RequireUnsafe(source::SourceRange range);
     SemanticType ResolveType(const core::TypeNode& type);

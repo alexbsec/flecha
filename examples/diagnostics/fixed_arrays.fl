@@ -1,0 +1,36 @@
+// Intentionally rejected examples; each function illustrates a separate rule.
+// Check: build/flecha --emit-llvm examples/diagnostics/fixed_arrays.fl
+
+void wrong_length() {
+    [3]u8 values = [1, 2]; // FLECHA-S0035
+}
+
+void invalid_element() {
+    [2]string values = none; // FLECHA-S0034: owning elements are not supported yet.
+}
+
+u8 bad_index() {
+    [2]u8 values = [1, 2];
+    return values[2]; // FLECHA-S0036
+}
+
+void incomplete_initialization() {
+    [2]u8 values;
+    values[0] = 1; // FLECHA-S0021: whole-array initialization is required first.
+}
+
+void read_only() {
+    const [2]u8 values = [1, 2];
+    values[0] = 3; // FLECHA-S0005
+}
+
+u8 overlapping_borrows() {
+    [2]u8 values = [1, 2];
+    first := &values[0];
+    values[1] = 3; // FLECHA-S0029: the first borrow protects the whole array.
+    return *first;
+}
+
+void invalid_layout() {
+    [18446744073709551615]u64 values = none; // FLECHA-S0033
+}

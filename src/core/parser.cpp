@@ -1,11 +1,21 @@
 #include "core/parser.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <string>
 #include <utility>
 
 namespace flecha::core {
 namespace {
+
+std::unique_ptr<TypeNode> CloneType(const TypeNode& type) {
+    if (type.TypeForm() == TypeKind::Primitive)
+        return std::make_unique<TypeNode>(
+            type.Range(), type.Type(), type.IsConst(), type.QualifierRange());
+    return std::make_unique<TypeNode>(type.Range(), type.TypeForm(),
+                                      CloneType(*type.Target()), type.IsConst(),
+                                      type.QualifierRange(), type.Length());
+}
 
 source::SourceRange EndOfInputRange(const std::vector<Token>& tokens) {
     if (tokens.empty()) {
@@ -90,12 +100,27 @@ bool Parser::StartsType() const {
         Check(TokenType::ConstRef))
         return true;
     std::size_t offset = 0;
-    while (Peek(offset).type == TokenType::Mul ||
-           Peek(offset).type == TokenType::Ampersand ||
-           Peek(offset).type == TokenType::Const ||
-           Peek(offset).type == TokenType::ConstPtr ||
-           Peek(offset).type == TokenType::ConstRef) {
-        ++offset;
+    for (;;) {
+        const TokenType token = Peek(offset).type;
+        if (token == TokenType::Mul || token == TokenType::Ampersand ||
+            token == TokenType::Const || token == TokenType::ConstPtr ||
+            token == TokenType::ConstRef) {
+            ++offset;
+        } else if (token == TokenType::LBracket) {
+            // Look through the bracketed count to distinguish [N]T from an
+            // array literal expression, including malformed count syntax.
+            ++offset;
+            while (Peek(offset).type != TokenType::RBracket) {
+                const TokenType next = Peek(offset).type;
+                if (next == TokenType::EOF_TOKEN ||
+                    next == TokenType::SemiColon || next == TokenType::LCurly ||
+                    next == TokenType::RCurly)
+                    return false;
+                ++offset;
+            }
+            ++offset;
+        } else
+            break;
     }
     return IsTypeToken(Peek(offset).type);
 }
@@ -146,6 +171,18 @@ std::unique_ptr<TypeNode> Parser::ParseType() {
         return std::make_unique<TypeNode>(range, kind, std::move(target),
                                           explicitConst || alias,
                                           alias ? token.range : qualifierRange);
+    }
+    if (Match(TokenType::LBracket)) {
+        const std::optional<std::uint64_t> length = ParseArrayLength();
+        if (!length.has_value() ||
+            Consume(TokenType::RBracket, "']' after array length") == nullptr)
+            return nullptr;
+        std::unique_ptr<TypeNode> target = ParseType();
+        if (target == nullptr) return nullptr;
+        const source::SourceRange range{start, target->Range().end};
+        return std::make_unique<TypeNode>(range, TypeKind::Array,
+                                          std::move(target), explicitConst,
+                                          qualifierRange, *length);
     }
     PrimitiveType type;
 
@@ -326,6 +363,8 @@ std::unique_ptr<Statement> Parser::ParseStatement() {
     if (Check(TokenType::While)) {
         return ParseWhileStatement();
     }
+    if (Check(TokenType::Loop)) return ParseLoopStatement();
+    if (Check(TokenType::For)) return ParseRangeStatement();
     if (Check(TokenType::Proceed)) return ParseProceedStatement();
     if (Check(TokenType::Break)) return ParseBreakStatement();
     if (Check(TokenType::JumpTo)) return ParseJumpToStatement();
@@ -515,9 +554,145 @@ std::unique_ptr<WhileStatement> Parser::ParseWhileStatement() {
         std::move(body), std::move(alsoClause));
 }
 
+std::unique_ptr<Statement> Parser::ParseLoopStatement() {
+    const Token& keyword = Advance();
+    std::vector<std::unique_ptr<Statement>> statements;
+    if (!Match(TokenType::SemiColon)) {
+        if (StartsType() || IsInferredVariableDeclaration()) {
+            auto initializer = ParseVariableDeclarationStatement();
+            if (initializer == nullptr) return nullptr;
+            statements.push_back(std::move(initializer));
+        } else {
+            auto initializer = ParseExpression();
+            if (initializer == nullptr) return nullptr;
+            const source::SourceRange range = initializer->Range();
+            statements.push_back(std::make_unique<ExpressionStatement>(
+                range, std::move(initializer)));
+            if (Consume(TokenType::SemiColon, "';' after loop initializer") ==
+                nullptr)
+                return nullptr;
+        }
+    }
+    std::unique_ptr<Expression> condition;
+    if (Check(TokenType::SemiColon))
+        condition = std::make_unique<LiteralExpression>(
+            Current().range, TokenType::True, "true");
+    else
+        condition = ParseExpression();
+    if (condition == nullptr ||
+        Consume(TokenType::SemiColon, "';' after loop condition") == nullptr)
+        return nullptr;
+    std::unique_ptr<Expression> update;
+    if (!Check(TokenType::LCurly)) {
+        update = ParseExpression();
+        if (update == nullptr) return nullptr;
+    }
+    auto body = ParseBlockStatement();
+    if (body == nullptr) return nullptr;
+    const source::SourceRange range{keyword.range.start, body->Range().end};
+    statements.push_back(std::make_unique<WhileStatement>(
+        range, std::move(condition), std::move(body), nullptr,
+        std::move(update)));
+    return std::make_unique<BlockStatement>(range, std::move(statements));
+}
+
+std::unique_ptr<RangeStatement> Parser::ParseRangeStatement() {
+    const Token& keyword = Advance();
+    const bool pair = Match(TokenType::LParen);
+    const bool typed = StartsType();
+    std::vector<std::unique_ptr<TypeNode>> types;
+    std::vector<const Token*> names;
+    for (std::size_t binding = 0; binding < (pair ? 2u : 1u); ++binding) {
+        types.push_back(typed ? ParseType() : nullptr);
+        if (typed && types.back() == nullptr) return nullptr;
+        const Token* name =
+            Consume(TokenType::Identifier, "range binding name");
+        if (name == nullptr) return nullptr;
+        names.push_back(name);
+        if (pair && binding == 0 &&
+            Consume(TokenType::Comma, "',' between range bindings") == nullptr)
+            return nullptr;
+    }
+    if (pair &&
+        Consume(TokenType::RParen, "')' after range bindings") == nullptr)
+        return nullptr;
+    if (Consume(typed ? TokenType::Assign : TokenType::DeclareAssign,
+                typed ? "'=' after typed range bindings"
+                      : "':=' after inferred range bindings") == nullptr)
+        return nullptr;
+    if (Consume(TokenType::Range, "'range' before array expression") == nullptr)
+        return nullptr;
+    auto source = ParseExpression();
+    if (source == nullptr) return nullptr;
+    const source::SourceRange sourceRange = source->Range();
+    auto body = ParseBlockStatement();
+    if (body == nullptr) return nullptr;
+    const source::SourceRange range{keyword.range.start, body->Range().end};
+    // '$' cannot occur in source identifiers, so these names cannot collide.
+    const std::string suffix = std::to_string(_rangeId++);
+    const std::string sourceName = "$range" + suffix;
+    const std::string cursorName = "$cursor" + suffix;
+    const auto Name = [&](const std::string& name) {
+        return std::make_unique<NameExpression>(sourceRange, name);
+    };
+    std::vector<std::unique_ptr<Statement>> outer;
+    auto snapshot = std::make_unique<VariableDeclarationStatement>(
+        sourceRange, nullptr, sourceName, std::move(source), sourceRange);
+    const VariableDeclarationStatement* sourceDeclaration = snapshot.get();
+    outer.push_back(std::move(snapshot));
+    outer.push_back(std::make_unique<VariableDeclarationStatement>(
+        range, std::make_unique<TypeNode>(range, PrimitiveType::USize),
+        cursorName,
+        std::make_unique<LiteralExpression>(range, TokenType::NumberLiteral,
+                                            "0"),
+        range));
+    std::vector<std::unique_ptr<Statement>> iteration;
+    const VariableDeclarationStatement* indexBinding = nullptr;
+    for (std::size_t binding = 0; binding < names.size(); ++binding) {
+        std::unique_ptr<Expression> value;
+        if (binding == 0) {
+            value = Name(cursorName);
+            // A typed index uses a checked-at-analysis conversion. The cursor
+            // itself remains usize even when the exposed index is narrower.
+            if (types[binding] != nullptr) {
+                value = std::make_unique<CastExpression>(
+                    names[binding]->range, std::move(value),
+                    CloneType(*types[binding]));
+            }
+        } else {
+            value = std::make_unique<IndexExpression>(
+                sourceRange, Name(sourceName), Name(cursorName), true);
+        }
+        auto declaration = std::make_unique<VariableDeclarationStatement>(
+            names[binding]->range, std::move(types[binding]),
+            names[binding]->value == "_"
+                ? "$discard" + suffix + "." + std::to_string(binding)
+                : names[binding]->value,
+            std::move(value), names[binding]->range);
+        if (binding == 0) indexBinding = declaration.get();
+        iteration.push_back(std::move(declaration));
+    }
+    iteration.push_back(std::move(body));
+    auto condition = std::make_unique<BinaryExpression>(
+        range, Name(cursorName), TokenType::Less,
+        std::make_unique<MemberCallExpression>(
+            sourceRange, Name(sourceName), "len", sourceRange,
+            std::vector<std::unique_ptr<Expression>>{}));
+    auto update = std::make_unique<UnaryExpression>(range, TokenType::Increment,
+                                                    Name(cursorName));
+    outer.push_back(std::make_unique<WhileStatement>(
+        range, std::move(condition),
+        std::make_unique<BlockStatement>(range, std::move(iteration)), nullptr,
+        std::move(update)));
+    return std::make_unique<RangeStatement>(
+        range, std::make_unique<BlockStatement>(range, std::move(outer)),
+        sourceDeclaration, indexBinding);
+}
+
 std::unique_ptr<ProceedStatement> Parser::ParseProceedStatement() {
     const Token& keyword = Advance();
-    const Token* semicolon = Consume(TokenType::SemiColon, "';' after 'proceed'");
+    const Token* semicolon =
+        Consume(TokenType::SemiColon, "';' after 'proceed'");
     const source::SourceLocation end =
         semicolon == nullptr ? keyword.range.end : semicolon->range.end;
     return std::make_unique<ProceedStatement>(
@@ -548,7 +723,8 @@ std::unique_ptr<JumpToStatement> Parser::ParseJumpToStatement() {
 
 std::unique_ptr<PositionStatement> Parser::ParsePositionStatement() {
     const Token& hash = Advance();
-    const Token* name = Consume(TokenType::Identifier, "position name after '#'");
+    const Token* name =
+        Consume(TokenType::Identifier, "position name after '#'");
     if (name == nullptr) return nullptr;
     return std::make_unique<PositionStatement>(
         source::SourceRange{hash.range.start, name->range.end}, name->value,
@@ -590,7 +766,8 @@ std::unique_ptr<Expression> Parser::ParseAssignmentExpression() {
         place->Kind() == AstNodeKind::UnaryExpression &&
         static_cast<const UnaryExpression&>(*place).OperatorType() ==
             TokenType::Mul;
-    if (place->Kind() != AstNodeKind::NameExpression && !dereference) {
+    if (place->Kind() != AstNodeKind::NameExpression &&
+        place->Kind() != AstNodeKind::IndexExpression && !dereference) {
         _diagnostics.Report(
             diagnostics::DiagnosticCode::InvalidAssignmentTarget, targetRange,
             "expression is not a valid assignment target");
@@ -707,6 +884,14 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
     }
 
     while (true) {
+        if (Check(TokenType::Increment)) {
+            const Token& operation = Advance();
+            expression = std::make_unique<UnaryExpression>(
+                source::SourceRange{expression->Range().start,
+                                    operation.range.end},
+                TokenType::Increment, std::move(expression));
+            continue;
+        }
         if (Match(TokenType::As)) {
             std::unique_ptr<TypeNode> targetType = ParseType();
             if (targetType == nullptr) return expression;
@@ -722,8 +907,8 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
             if (Check(TokenType::Identifier) || Check(TokenType::String)) {
                 member = &Advance();
             } else {
-                member = Consume(TokenType::Identifier,
-                                 "member name after '.'");
+                member =
+                    Consume(TokenType::Identifier, "member name after '.'");
             }
             if (member == nullptr) return expression;
             if (member->value == "cast" && Match(TokenType::Less)) {
@@ -760,9 +945,8 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
             if (index == nullptr) return expression;
             const Token* close =
                 Consume(TokenType::RBracket, "']' after index");
-            const source::SourceLocation end = close == nullptr
-                                                   ? index->Range().end
-                                                   : close->range.end;
+            const source::SourceLocation end =
+                close == nullptr ? index->Range().end : close->range.end;
             expression = std::make_unique<IndexExpression>(
                 source::SourceRange{expression->Range().start, end},
                 std::move(expression), std::move(index));
@@ -788,8 +972,7 @@ std::vector<std::unique_ptr<Expression>> Parser::ParseArgumentList(
         std::unique_ptr<Expression> argument = ParseExpression();
         if (argument == nullptr) {
             while (!IsAtEnd() && !Check(TokenType::Comma) &&
-                   !Check(TokenType::RParen) &&
-                   !Check(TokenType::SemiColon)) {
+                   !Check(TokenType::RParen) && !Check(TokenType::SemiColon)) {
                 Advance();
             }
         } else {
@@ -817,15 +1000,60 @@ std::vector<std::unique_ptr<Expression>> Parser::ParseArgumentList(
         break;
     }
 
-    const Token* closeParen =
-        Consume(TokenType::RParen, "')' after arguments");
+    const Token* closeParen = Consume(TokenType::RParen, "')' after arguments");
     if (closeParen != nullptr) end = closeParen->range.end;
     return arguments;
+}
+
+std::optional<std::uint64_t> Parser::ParseArrayLength() {
+    const Token* count = Consume(TokenType::NumberLiteral,
+                                 "nonnegative integer literal array length");
+    if (count == nullptr) return std::nullopt;
+    std::uint64_t length = 0;
+    const auto result = std::from_chars(
+        count->value.data(), count->value.data() + count->value.size(), length);
+    if (result.ec != std::errc{} ||
+        result.ptr != count->value.data() + count->value.size()) {
+        _diagnostics.Report(diagnostics::DiagnosticCode::InvalidArrayLength,
+                            count->range, "array length is too large");
+        return std::nullopt;
+    }
+    return length;
+}
+
+std::unique_ptr<Expression> Parser::ParseArrayExpression() {
+    const source::SourceLocation start = Advance().range.start;
+    std::vector<std::unique_ptr<Expression>> elements;
+    bool repeat = false;
+    std::uint64_t length = 0;
+    if (!Check(TokenType::RBracket)) {
+        for (;;) {
+            std::unique_ptr<Expression> element = ParseExpression();
+            if (element == nullptr) return nullptr;
+            elements.push_back(std::move(element));
+            if (elements.size() == 1 && Match(TokenType::SemiColon)) {
+                const std::optional<std::uint64_t> count = ParseArrayLength();
+                if (!count.has_value()) return nullptr;
+                repeat = true;
+                length = *count;
+                break;
+            }
+            if (!Match(TokenType::Comma) || Check(TokenType::RBracket)) break;
+        }
+    }
+    const Token* close =
+        Consume(TokenType::RBracket, "']' after array initializer");
+    if (close == nullptr) return nullptr;
+    return std::make_unique<ArrayExpression>(
+        source::SourceRange{start, close->range.end}, std::move(elements),
+        repeat, length);
 }
 
 std::unique_ptr<Expression> Parser::ParsePrimaryExpression() {
     const Token& token = Current();
     switch (token.type) {
+        case TokenType::LBracket:
+            return ParseArrayExpression();
         case TokenType::NumberLiteral:
         case TokenType::FloatLiteral:
         case TokenType::StringLiteral:

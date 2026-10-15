@@ -2,10 +2,10 @@
 #define FLECHA_CODEGEN_LLVM_CODE_GENERATOR_HPP
 
 #include <llvm/IR/DataLayout.h>
+#include <llvm/IR/DerivedTypes.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
-#include <llvm/IR/DerivedTypes.h>
 
 #include <memory>
 #include <optional>
@@ -57,6 +57,12 @@ class LlvmCodeGenerator final {
     bool EmitWhile(const lowering::BoundWhileStatement& statement);
     void DeclarePositions(const lowering::BoundBlockStatement& block);
     bool EmitPosition(const lowering::BoundPositionStatement& statement);
+    [[nodiscard]] llvm::AllocaInst* CreateTemporaryAlloca(
+        llvm::Type* type, std::string_view name);
+    [[nodiscard]] llvm::Value* EmitArray(
+        const lowering::BoundArrayExpression& expression);
+    [[nodiscard]] llvm::Value* EmitArrayStorage(
+        const lowering::BoundExpression& expression);
     [[nodiscard]] llvm::Value* EmitAddress(
         const lowering::BoundPlaceExpression& place);
     [[nodiscard]] llvm::Value* EmitExpression(
@@ -71,20 +77,22 @@ class LlvmCodeGenerator final {
         const lowering::BoundBinaryExpression& expression);
     [[nodiscard]] llvm::Value* EmitBooleanLogical(
         const lowering::BoundBinaryExpression& expression);
-    [[nodiscard]] llvm::Value* EmitStringViewEquality(
-        llvm::Value* left, llvm::Value* right, bool negate);
+    [[nodiscard]] llvm::Value* EmitStringViewEquality(llvm::Value* left,
+                                                      llvm::Value* right,
+                                                      bool negate);
     [[nodiscard]] llvm::Value* EmitStringConcat(
-        llvm::Value* left, semantic::SemanticType leftType,
-        llvm::Value* right, semantic::SemanticType rightType);
-    [[nodiscard]] llvm::Value* EmitRuntimeOutput(
-        llvm::Value* value, semantic::SemanticType type, bool newline);
+        llvm::Value* left, semantic::SemanticType leftType, llvm::Value* right,
+        semantic::SemanticType rightType);
+    [[nodiscard]] llvm::Value* EmitRuntimeOutput(llvm::Value* value,
+                                                 semantic::SemanticType type,
+                                                 bool newline);
     [[nodiscard]] llvm::Value* EmitStringViewOperation(
         const lowering::BoundStringViewOperationExpression& expression);
     [[nodiscard]] llvm::Value* EmitOwnedString(
         llvm::Value* value, semantic::SemanticType sourceType,
         bool temporary = true);
     [[nodiscard]] llvm::Value* EmitStringView(llvm::Value* value,
-                                               semantic::SemanticType type);
+                                              semantic::SemanticType type);
     void EmitStringDestroy(llvm::Value* value);
     void EmitStringStorageCleanup(llvm::AllocaInst* storage);
     [[nodiscard]] llvm::AllocaInst* CreateOwnedStringTemporary(
@@ -110,16 +118,15 @@ class LlvmCodeGenerator final {
     std::unordered_map<const semantic::VariableSymbol*, llvm::AllocaInst*>
         _variables;
     std::unordered_map<std::string, llvm::BasicBlock*> _positions;
-    std::unordered_map<
-        std::string, std::vector<const lowering::BoundBlockStatement*>>
+    std::unordered_map<std::string,
+                       std::vector<const lowering::BoundBlockStatement*>>
         _positionScopePaths;
     std::vector<LoopTarget> _proceedTargets;
     std::vector<LoopTarget> _breakTargets;
     std::vector<std::shared_ptr<CleanupScope>> _cleanupScopes;
     std::vector<CleanupRequest> _cleanupRequests;
     llvm::Function* _currentFunction = nullptr;
-    semantic::SemanticType _currentReturnType{
-        semantic::SemanticTypeKind::Void};
+    semantic::SemanticType _currentReturnType{semantic::SemanticTypeKind::Void};
     std::string _error;
 };
 

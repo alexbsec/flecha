@@ -1545,3 +1545,351 @@ TEST(SemanticReferenceTests,
     EXPECT_NE(FindDiagnostic(analysis, DiagnosticCode::MovedReference),
               nullptr);
 }
+
+TEST(SemanticArrayTests, InfersElementsAndPreservesLengthInTypeIdentity) {
+    Analysis analysis = Analyze(
+        "void f() { inferred := [1, 2, 3]; [3]u8 bytes = [1, 2, 3]; "
+        "repeated := [true; 4]; [0]u8 empty = []; [2][2]u8 grid = [[1, 2], [3, "
+        "4]]; }");
+    ASSERT_FALSE(analysis.diagnostics.HasErrors());
+    const auto& function = FunctionAt(analysis, 0);
+    EXPECT_EQ(
+        analysis.model.DeclaredSymbol(VariableAt(function, 0))->Type().Name(),
+        "[3]i32");
+    EXPECT_EQ(
+        analysis.model.DeclaredSymbol(VariableAt(function, 1))->Type().Name(),
+        "[3]u8");
+    EXPECT_EQ(
+        analysis.model.DeclaredSymbol(VariableAt(function, 2))->Type().Name(),
+        "[4]bool");
+    EXPECT_EQ(
+        analysis.model.DeclaredSymbol(VariableAt(function, 3))->Type().Length(),
+        0);
+    EXPECT_EQ(
+        analysis.model.DeclaredSymbol(VariableAt(function, 4))->Type().Name(),
+        "[2][2]u8");
+    const SemanticType byte(SemanticTypeKind::U8);
+    const SemanticType first(SemanticTypeKind::Array, byte, false, 3);
+    const SemanticType second(SemanticTypeKind::Array, byte, false, 4);
+    EXPECT_FALSE(IsAssignable(first, second));
+    EXPECT_TRUE(IsAssignable(first, first.WithConst()));
+    EXPECT_FALSE(CanExplicitlyCast(first, first));
+}
+
+TEST(SemanticArrayTests,
+     SupportsWholeInitializationCopyReturnsAndElementWrites) {
+    EXPECT_FALSE(
+        Analyze("[2]u8 make() { return [1, 2]; }"
+                "[2]u8 change([2]u8 copy) { copy[0] = 9; return copy; }"
+                "usize f(bool flag) { [2]u8 a; if flag { a = make(); } else { "
+                "a = none; } "
+                "copy := change(a); a[0] = copy[1]; return a.len(); }")
+            .diagnostics.HasErrors());
+    EXPECT_FALSE(
+        Analyze("void f() { [1]*u8 a = [null]; [1]*u8 b = [none; 1]; b = a; }")
+            .diagnostics.HasErrors());
+    for (const std::string& body :
+         {"[2]u8 a; a[0] = 1;", "[2]u8 a; a.len();", "[2]u8 a; r := &a[0];",
+          "[2]u8 a; copy := a;", "[2]u8 a; while true { a[0] = 1; break; }"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(Analyze("void f() { " + body + " }"),
+                                 DiagnosticCode::UninitializedVariable),
+                  nullptr);
+    }
+}
+
+TEST(SemanticArrayTests,
+     RejectsMismatchedLengthsElementsAndUnsupportedStorage) {
+    const std::vector<std::pair<std::string, DiagnosticCode>> cases{
+        {"[2]u8 a = [1];", DiagnosticCode::ArrayInitializerCount},
+        {"[2]u8 a = [1; 3];", DiagnosticCode::ArrayInitializerCount},
+        {"[2]u8 a = [];", DiagnosticCode::ArrayInitializerCount},
+        {"[1]u8 a = [256];", DiagnosticCode::IntegerLiteralOutOfRange},
+        {"i32 x = 1; [1]u8 a = [x];", DiagnosticCode::IncompatibleType},
+        {"a := [];", DiagnosticCode::CannotInferType},
+        {"a := [none];", DiagnosticCode::InvalidArrayElement},
+        {"a := [null];", DiagnosticCode::InvalidArrayElement},
+        {"[1]string a = none;", DiagnosticCode::InvalidArrayElement},
+        {"a := [\"view\"];", DiagnosticCode::InvalidArrayElement},
+        {"[0]void a = none;", DiagnosticCode::InvalidArrayElement},
+        {"i32 x = 1; a := [&x];", DiagnosticCode::InvalidArrayElement},
+        {"[1]const u8 a = [1];", DiagnosticCode::InvalidArrayElement},
+        {"[1]constptr u8 a = [null];", DiagnosticCode::InvalidArrayElement},
+        {"[2][1]string a = none;", DiagnosticCode::InvalidArrayElement},
+        {"[18446744073709551615]u8 a = none;",
+         DiagnosticCode::InvalidArrayLength},
+        {"a := [1; 18446744073709551615];", DiagnosticCode::InvalidArrayLength},
+        {"[1000000000][1000000000]u64 a = none;",
+         DiagnosticCode::InvalidArrayLength},
+        {"[0][18446744073709551615]u8 a = none;",
+         DiagnosticCode::InvalidArrayLength},
+        {"[1]u8 a = [1]; a == a;", DiagnosticCode::InvalidOperand},
+        {"[1]u8 a = [1]; a as [1]u8;", DiagnosticCode::InvalidCast},
+        {"[1]u8 a = [1]; a.len(1);", DiagnosticCode::WrongArgumentCount},
+    };
+    for (const auto& [body, code] : cases) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(Analyze("void f() { " + body + " }"), code),
+                  nullptr);
+    }
+}
+
+TEST(SemanticArrayTests, RequiresUsizeIndicesAndRejectsKnownOutOfBounds) {
+    EXPECT_FALSE(Analyze("u8 f(usize i) { [2]u8 a = [1, 2]; return a[i]; }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(FindDiagnostic(
+                  Analyze("u8 f(i32 i) { [2]u8 a = [1, 2]; return a[i]; }"),
+                  DiagnosticCode::IncompatibleArgument),
+              nullptr);
+    for (const std::string& index :
+         {"2", "(3)", "1 + 1", "2 * 3", "4 / 2", "5 - 3"}) {
+        const std::string source =
+            "u8 f() { [2]u8 a = [1, 2]; return a[" + index + "]; }";
+        SCOPED_TRACE(source);
+        Analysis analysis = Analyze(source);
+        const Diagnostic* diagnostic =
+            FindDiagnostic(analysis, DiagnosticCode::ArrayIndexOutOfBounds);
+        ASSERT_NE(diagnostic, nullptr);
+        EXPECT_EQ(source.substr(diagnostic->range.start.offset,
+                                diagnostic->range.Length()),
+                  index);
+    }
+    EXPECT_NE(
+        FindDiagnostic(Analyze("u8 f(usize i) { [0]u8 a = []; return a[i]; }"),
+                       DiagnosticCode::ArrayIndexOutOfBounds),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze("u8 f() { [2]u8 a = none; return a[-1]; }"),
+                       DiagnosticCode::IntegerLiteralOutOfRange),
+        nullptr);
+}
+
+TEST(SemanticArrayTests,
+     EnforcesConstThroughNestedElementsAndSharedReferences) {
+    for (const std::string& body :
+         {"const [2]u8 a = [1, 2]; a[0] = 3;",
+          "const [2]u8 a = [1, 2]; a = [3, 4];",
+          "const [2][1]u8 a = [[1], [2]]; a[0][0] = 3;",
+          "const [2]u8 a = [1, 2]; r := &a[0]; *r = 3;",
+          "[2]u8 a = [1, 2]; &const [2]u8 r = &a; (*r)[0] = 3;"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(Analyze("void f() { " + body + " }"),
+                                 DiagnosticCode::SymbolNotWritable),
+                  nullptr);
+    }
+    EXPECT_FALSE(
+        Analyze("void f() { const [2]u8 a = [1, 2]; copy := a; copy[0] = 3; }")
+            .diagnostics.HasErrors());
+    EXPECT_FALSE(
+        Analyze("unsafe void f(*u8 p) { const [1]*u8 a = [p]; *a[0] = 3; }")
+            .diagnostics.HasErrors());
+}
+
+TEST(SemanticArrayTests,
+     BorrowsWholeArraysAndElementsWithoutEscapingTemporaries) {
+    EXPECT_FALSE(Analyze("void set(&u8 p) { *p = 6; } void clear(&[2]u8 a) { "
+                         "(*a)[0] = 0; (*a)[1] = 0; }"
+                         "u8 f() { [2]u8 a = [1, 2]; set(&a[0]); r := &a[1]; "
+                         "*r = 4; clear(&a); return a[0]; }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("u8 f() { [2]u8 a = [1, 2]; r := &a; child := "
+                         "&(*r)[0]; *child = 4; (*r)[1] = 5; return a[0]; }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("u8 f() { [2]u8 a = [1, 2]; &const u8 first = &a[0]; "
+                         "&const u8 second = &a[1]; return *first + *second; }")
+                     .diagnostics.HasErrors());
+    for (const std::string& body :
+         {"r := &a[0]; a[1] = 3; return *r;",
+          "r := &a[0]; copy := a; return *r;",
+          "r := &a[0]; other := &a[1]; return *r + *other;",
+          "r := &a[0]; a = [3, 4]; return *r;",
+          "r := &a; child := &(*r)[0]; (*r)[1] = 3; return *child;"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(
+            FindDiagnostic(Analyze("u8 f() { [2]u8 a = [1, 2]; " + body + " }"),
+                           DiagnosticCode::BorrowConflict),
+            nullptr);
+    }
+    EXPECT_NE(FindDiagnostic(Analyze("void f() { r := &[1, 2][0]; }"),
+                             DiagnosticCode::InvalidReference),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("void f() { [1, 2][0] = 3; }"),
+                             DiagnosticCode::SemanticInvalidAssignmentTarget),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("void f() { u8 x = 1; r := &x; { [1]u8 a "
+                                     "= [2]; r = &a[0]; } }"),
+                             DiagnosticCode::ReferenceEscape),
+              nullptr);
+}
+
+TEST(SemanticArrayTests,
+     TracksArrayBorrowsAcrossJoinsLoopsAndLiteralEvaluation) {
+    EXPECT_NE(
+        FindDiagnostic(Analyze("u8 f(bool flag) { [2]u8 a = [1, 2]; [2]u8 b = "
+                               "[3, 4]; r := &a[0]; "
+                               "if flag { r = &b[0]; } a[1] = 5; return *r; }"),
+                       DiagnosticCode::BorrowConflict),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze("void f(bool flag) { [2]u8 a = [1, 2]; r := "
+                               "&a[0]; while flag { *r = 3; a[1] = 4; } }"),
+                       DiagnosticCode::BorrowConflict),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("void f() { i32 x; a := [x; 0]; }"),
+                             DiagnosticCode::UninitializedVariable),
+              nullptr);
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("void f() { i32 x = 1; r := &x; moved := r; a := [*r]; }"),
+            DiagnosticCode::MovedReference),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("u8 read(&u8 p) { return *p; } u8 f() { "
+                                     "[2]u8 a = [1, 2]; r := &a[0]; "
+                                     "values := [read(&a[1])]; return *r; }"),
+                             DiagnosticCode::BorrowConflict),
+              nullptr);
+}
+
+TEST(SemanticArrayTests, PreservesRawPointerBoundaryForArrayElements) {
+    EXPECT_FALSE(
+        Analyze("unsafe void f() { [2]u8 a = [1, 2]; p := &raw a[0]; *p = 6; }")
+            .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("unsafe void f(*[2]u8 p) { (*p)[0] = 6; }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(FindDiagnostic(Analyze("void f(*[2]u8 p) { (*p)[0] = 6; }"),
+                             DiagnosticCode::UnsafeOperation),
+              nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze("unsafe void f(*[2]u8 p) { r := &(*p)[0]; }"),
+                       DiagnosticCode::InvalidReference),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { [2]u8 a = none; r := "
+                                     "&a; p := &raw (*r)[0]; }"),
+                             DiagnosticCode::ReferenceEscape),
+              nullptr);
+}
+
+TEST(SemanticArrayTests,
+     FreezesAddressingReferenceWhileEvaluatingIndexAndStoreValue) {
+    const std::string prefix =
+        "usize index(&[2]u8 a) { return 0; } u8 read(&[2]u8 a) { return "
+        "(*a)[0]; } "
+        "void f() { [2]u8 a = [1, 2]; [2]u8 b = [3, 4]; ref := &a; ";
+    for (const std::string& access :
+         {"(*ref)[index(ref = &b)] = 7;", "(*ref)[0] = read(ref = &b);",
+          "u8 value = (*ref)[index(ref = &b)];"}) {
+        SCOPED_TRACE(access);
+        EXPECT_NE(FindDiagnostic(Analyze(prefix + access + " }"),
+                                 DiagnosticCode::BorrowConflict),
+                  nullptr);
+    }
+}
+
+TEST(SemanticArrayTests, PreservesDeepConstAndArrayShapeDuringReborrowing) {
+    EXPECT_NE(FindDiagnostic(
+                  Analyze("unsafe void f(*const [2]u8 p) { (*p)[0] = 3; }"),
+                  DiagnosticCode::SymbolNotWritable),
+              nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze("void f(&[2]u8 p) { [3]u8 a = none; p = &a; }"),
+                       DiagnosticCode::IncompatibleType),
+        nullptr);
+    EXPECT_FALSE(Analyze("u8 read(&const [2]u8 p) { return (*p)[0]; }"
+                         "u8 f() { [2]u8 a = [1, 2]; constref [2]u8 r = &a; "
+                         "(*r)[0] = 3; return read(r); }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticAnalyzerTests, AcceptsRangeBindingsEmptyArraysAndCountedLoops) {
+    Analysis result = Analyze(R"(
+        void f() {
+            a := [1, 2];
+            for i := range a { usize copy = i; }
+            for (i, v) := range a { usize index = i; i32 value = v; }
+            for (u32 i, i32 v) = range a { i = 4; v = 5; }
+            for (_, v) := range a { v++; }
+            for (_, _) := range a {}
+            [0]u8 empty = [];
+            for (u8 i, u8 v) = range empty { v++; }
+            for (i, row) := range [[1, 2], [3, 4]] { row[0]++; }
+            loop u32 x = 1; x <= 10; x++ { if x == 3 { proceed; } if x == 8 { break; } }
+            loop i := 0; i < 2; i = i + 1 {}
+            loop ;; { break; }
+        }
+    )");
+    EXPECT_FALSE(result.diagnostics.HasErrors());
+}
+
+TEST(SemanticAnalyzerTests, ChecksRangeSourceBindingTypesAndIndexCapacity) {
+    for (const std::string& source :
+         {"void f() { for i := range 4 {} }",
+          "void f() { for i := range \"abc\" {} }",
+          "void f() { a := [1]; for (u32 i, u8 v) = range a {} }",
+          "void f() { a := [1]; for (f64 i, i32 v) = range a {} }",
+          "void f() { a := [1]; for (f64 _, i32 v) = range a {} }",
+          "void f() { a := [1]; for (u32 i, u8 _) = range a {} }",
+          "void f() { a := [0; 257]; for (u8 i, i32 v) = range a {} }",
+          "void f() { a := [0; 129]; for (i8 i, i32 v) = range a {} }",
+          "void f() { a := [1]; for (i, i) := range a {} }",
+          "void f() { a := [1]; for (const u32 i, i32 v) = range a { i++; } }",
+          "void f() { a := [1]; for (u32 i, const i32 v) = range a { v++; } "
+          "}"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+    EXPECT_FALSE(
+        Analyze("void f() { a := [0; 256]; for (u8 i, i32 v) = range a {} }")
+            .diagnostics.HasErrors());
+}
+
+TEST(SemanticAnalyzerTests, ChecksLoopScopeInitializationAndUpdateEdges) {
+    for (const std::string& source :
+         {"void f() { loop i := 0; i < 2; i++ {} i++; }",
+          "void f() { a := [1]; for (i, v) := range a {} v++; }",
+          "void f() { i32 x; loop i := 0; i < 2; i++ { x = 2; } x++; }",
+          "void f() { i32 x; loop i := 0; i < 2; x++ { proceed; } }",
+          "void f() { [2]u8 a; for i := range a {} }",
+          "void f() { loop i := 0; 1; i++ {} }",
+          "void f() { loop i := 0; i < 2; local++ { local := 1; } }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+    EXPECT_FALSE(
+        Analyze("void f() { i32 x; loop i := 0; i < 2; x++ { x = 1; i++; } }")
+            .diagnostics.HasErrors());
+}
+
+TEST(SemanticAnalyzerTests, IncrementHonorsPlacesConstBorrowingAndUnsafe) {
+    for (const std::string& source :
+         {"void f() { i32 x; x++; }", "void f() { const i32 x = 1; x++; }",
+          "void f() { (1 + 2)++; }", "void f() { [1, 2][0]++; }",
+          "void f() { f64 x = 1.0; x++; }", "void f() { bool x = false; x++; }",
+          "void f() { *u8 p = none; p++; }", "void f(*u8 p) { (*p)++; }",
+          "void f() { x := 1; r := &x; x++; *r = 2; }",
+          "void f() { x := 1; &const i32 r = &x; (*r)++; }",
+          "void f() { const [2]i32 a = [1, 2]; a[0]++; }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+    EXPECT_FALSE(Analyze("void f() { x := 1; r := &x; (*r)++; unsafe { p := "
+                         "&raw x; (*p)++; } }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticAnalyzerTests, RangeCopiesRespectLoansAndIterationLifetimes) {
+    EXPECT_TRUE(
+        Analyze(
+            "void f() { a := [1, 2]; r := &a[0]; for i := range a {} *r = 3; }")
+            .diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze("void f() { x := 1; r := &x; for (_, v) := range [1, "
+                        "2] { r = &v; } *r = 3; }")
+                    .diagnostics.HasErrors());
+    EXPECT_FALSE(
+        Analyze(
+            "void f() { a := [1, 2]; for (i, v) := range a { a[i] = v + 1; } }")
+            .diagnostics.HasErrors());
+    EXPECT_TRUE(
+        Analyze(
+            "void f() { x := 1; r := &x; loop i := 0; i < 2; x++ { *r = i; } }")
+            .diagnostics.HasErrors());
+}
