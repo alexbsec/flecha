@@ -1,6 +1,8 @@
 #include <cstddef>
 #include <cstdio>
 #include <initializer_list>
+extern "C" int allocation_contracts_test();
+extern "C" int allocation_contract_failure_test();
 extern "C" int allocation_values_test();
 extern "C" int allocation_lifecycle_test();
 extern "C" int allocation_defer_test();
@@ -21,7 +23,8 @@ extern "C" void* __wrap_flecha_runtime_v1_alloc(std::size_t size,
 int main() {
     int index = 0;
     for (const auto test : {allocation_values_test, allocation_lifecycle_test,
-                            allocation_defer_test, allocation_success_test}) {
+                            allocation_defer_test, allocation_success_test,
+                            allocation_contracts_test}) {
         ++index;
         const int result = test();
         if (result != 42) {
@@ -32,5 +35,7 @@ int main() {
     }
     failNext = true;
     if (allocation_failure_test() != 42 || failNext) return 5;
+    failNext = true;
+    if (allocation_contract_failure_test() != 42 || failNext) return 6;
     return 42;
 }

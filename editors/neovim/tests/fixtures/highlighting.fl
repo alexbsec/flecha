@@ -56,3 +56,5 @@ i32 Box::value(&self) { return self->x; }
 
 unsafe { pointer, err := new<u8>(42); defer free(pointer); }
 error allocError = AllocationError.OutOfMemory;
+unsafe own *i32 transfer(own *i32 pointer) { return pointer; }
+unsafe void inspect(lend *const i32 pointer) {}

@@ -2,6 +2,11 @@
 
 Status: design draft for discussion; not an implementation guarantee.
 
+The agreed `own` / `lend` contracts are now implemented as described in
+[ownership contracts](ownership_contracts.md). References never take either
+keyword. The broader move-by-default proposals below remain unimplemented;
+existing string copies and structure immovability rules are unchanged.
+
 The current agreed direction is explicit raw allocation/free in unsafe code,
 with `defer` for scheduled cleanup and compiler diagnostics for tracked resource
 errors. Unsafe code retains caller obligations; this is not a guarantee that

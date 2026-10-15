@@ -3131,3 +3131,148 @@ TEST(SemanticMemoryTests,
                        DiagnosticCode::MemoryLeak),
         nullptr);
 }
+
+TEST(SemanticMemoryTests, OwnershipContractsVerifyBodiesIndependently) {
+    for (const std::string& source : {
+             "unsafe void consume(own *i32 p) { free(p); }",
+             "unsafe void consume(own *i32 p) { if p == null { return; } "
+             "free(p); }",
+             "unsafe void inspect(lend *const i32 p) { if p != null { x := *p; "
+             "} }",
+             "unsafe own *i32 pass(own *i32 p) { return p; }",
+             "unsafe void consume(own *i32 p, bool again) { if again { "
+             "consume(p, false); } else { free(p); } }",
+             "unsafe void inspect(lend *i32 p, bool again) { if again { "
+             "inspect(p, false); } }",
+         }) {
+        SCOPED_TRACE(source);
+        const auto result = Analyze(source);
+        for (const auto& diagnostic : result.diagnostics.Diagnostics())
+            ADD_FAILURE() << diagnostic.message;
+    }
+    for (const std::string& source : {
+             "unsafe void leak(own *i32 p) {}",
+             "unsafe void leak(own *i32 p, bool flag) { if flag { free(p); } }",
+             "unsafe void destroy(lend *i32 p) { free(p); }",
+             "unsafe *i32 escape(lend *i32 p) { return p; }",
+             "unsafe *i32 escape(own *i32 p) { return p; }",
+             "unsafe own *i32 escape(lend *i32 p) { return p; }",
+             "unsafe own *i32 bad() { i32 x = 1; return &raw x; }",
+             "structure Box { *i32 p; }; unsafe Box bad(lend *i32 p) { return "
+             "build Box { self.p = p; }; }",
+         }) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+}
+
+TEST(SemanticMemoryTests, OwnershipTransfersInvalidateAliasesAndRespectDefers) {
+    const std::string prefix =
+        "unsafe void consume(own *i32 p) { free(p); } unsafe void f() { p, e "
+        ":= new<i32>(42); ";
+    for (const std::string& body : {
+             "q := p; consume(p); free(q);",
+             "q := p; consume(p); x := *q;",
+             "defer free(p); consume(p);",
+             "defer consume(p); consume(p);",
+         }) {
+        SCOPED_TRACE(body);
+        EXPECT_TRUE(Analyze(prefix + body + " }").diagnostics.HasErrors());
+    }
+    EXPECT_FALSE(Analyze(prefix + "consume(p); }").diagnostics.HasErrors());
+    EXPECT_FALSE(
+        Analyze(prefix + "defer consume(p); }").diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze("unsafe void both(own *i32 a, lend *i32 b) { free(a); "
+                        "} unsafe void f() { p,e := new<i32>(1); both(p,p); }")
+                    .diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze("unsafe void inspect(lend *i32 p) { x := *p; } unsafe "
+                        "void f() { inspect(null); }")
+                    .diagnostics.HasErrors());
+}
+
+TEST(SemanticMemoryTests,
+     OwningReturnsPreserveFailurePathsAndTransferResponsibility) {
+    const std::string prefix =
+        "unsafe (own *i32, error) create() { return new<i32>(42); } ";
+    EXPECT_FALSE(Analyze(prefix + "unsafe void f() { p,e := create(); if e != "
+                                  "none { return; } free(p); }")
+                     .diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze(prefix + "unsafe void f() { create(); }")
+                    .diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze(prefix + "unsafe void f() { p,e := create(); }")
+                    .diagnostics.HasErrors());
+    EXPECT_FALSE(
+        Analyze("unsafe own *i32 give(own *i32 p) { return p; } unsafe void "
+                "f() { p,e := new<i32>(42); q := give(p); free(q); }")
+            .diagnostics.HasErrors());
+    EXPECT_TRUE(
+        Analyze("unsafe own *i32 give(own *i32 p) { return p; } unsafe void "
+                "f() { p,e := new<i32>(42); q := give(p); free(p); free(q); }")
+            .diagnostics.HasErrors());
+}
+
+TEST(SemanticMemoryTests,
+     OwningFieldsRequireVerifiedTearAndConstructionTransfer) {
+    const std::string box =
+        "structure Box { own *i32 p; }; unsafe Box Box::init(own *i32 p) "
+        "override { return build Box { self.p = p; }; } ";
+    const std::string tear =
+        "unsafe void Box::tear(&self) override { free(self->p); } ";
+    const auto good =
+        Analyze(box + tear +
+                "unsafe void f() { p,e := new<i32>(42); b := Box::init(p); }");
+    for (const auto& diagnostic : good.diagnostics.Diagnostics())
+        ADD_FAILURE() << diagnostic.message;
+    EXPECT_TRUE(Analyze(box).diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze(box + "unsafe void Box::tear(&self) override {}")
+                    .diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze(box + "unsafe void Box::tear(&self) override { "
+                              "free(self->p); free(self->p); }")
+                    .diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze(box + tear +
+                        "unsafe void f() { p,e := new<i32>(42); b := "
+                        "Box::init(p); free(p); }")
+                    .diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze(box + tear +
+                        "unsafe void f() { p,e := new<i32>(42); b := "
+                        "Box::init(p); other := b; }")
+                    .diagnostics.HasErrors());
+    EXPECT_TRUE(
+        Analyze(box + tear + "unsafe void Box::bad(&self) { free(self->p); }")
+            .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze(box + "unsafe void Box::tear(&self) override { if "
+                               "self->p != null { free(self->p); } }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticMemoryTests, ContractsNeverQualifyReferencesOrOrdinaryStorage) {
+    for (const std::string& source : {
+             "void f(own &i32 x) {}",
+             "void f(lend &i32 x) {}",
+             "void f(own i32 x) {}",
+             "unsafe lend *i32 f() { return null; }",
+             "structure Box { lend *i32 p; };",
+             "void f() { own *i32 p = null; }",
+             "void f(*own *i32 p) {}",
+             "void f((own *i32, i32) p) {}",
+             "structure Box { (own *i32, i32) p; };",
+         }) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+}
+
+TEST(SemanticMemoryTests, ContractSummariesRejectIndirectHandleMutation) {
+    EXPECT_TRUE(
+        Analyze("unsafe void clear(lend **i32 slot) { *slot = null; } unsafe "
+                "void f() { p,e := new<i32>(42); clear(&raw p); free(p); }")
+            .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("unsafe own *i32 give(own *i32 p) { return p; } "
+                         "unsafe void f() { give(null); }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticMemoryTests, ContractsRejectDuplicatedOwnersAndInteriorAliases) {
+    EXPECT_TRUE(Analyze("unsafe (own *i32, own *i32) duplicate(own *i32 p) { return (p, p); }").diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze("structure Item { i32 n; }; unsafe void consume(own *Item p, lend *i32 inside) { free(p); } unsafe void f() { p,e := new<Item>(Item::init()); if e != none { return; } consume(p, &raw p->n); }").diagnostics.HasErrors());
+}

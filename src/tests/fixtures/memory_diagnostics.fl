@@ -14,3 +14,8 @@ unsafe void invalid_alias() {
     *alias = 7;
     free(alias);
 }
+
+unsafe void invalid_lending(lend *u8 pointer) {
+    free(pointer);
+}
+unsafe void missing_cleanup(own *u8 pointer) {}

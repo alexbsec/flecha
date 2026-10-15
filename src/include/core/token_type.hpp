@@ -88,6 +88,8 @@ enum class TokenType {
     Break,
     JumpTo,
     Error,
+    Own,
+    Lend,
     Const,
     ConstPtr,
     ConstRef,

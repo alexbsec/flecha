@@ -171,3 +171,47 @@ i32 allocation_success_test() {
     }
     return 42;
 }
+
+// Contracts affect checking, while keeping the existing raw-pointer ABI.
+unsafe (own *i32, error) contract_create() { return new<i32>(42); }
+unsafe own *i32 contract_forward(own *i32 p) { return p; }
+unsafe i32 contract_read(lend *const i32 p) {
+    if p == null { return 0; }
+    return *p;
+}
+unsafe void contract_consume(own *i32 p, bool recurse) {
+    if recurse { contract_consume(p, false); }
+    else { free(p); }
+}
+structure ContractBox { own *i32 value; };
+unsafe ContractBox ContractBox::init(own *i32 value) override {
+    return build ContractBox { self.value = value; };
+}
+unsafe void ContractBox::tear(&self) override { free(self->value); }
+unsafe i32 ContractBox::read(&const self) {
+    return contract_read(self->value);
+}
+i32 allocation_contracts_test() {
+    unsafe {
+        p, e := contract_create();
+        if e != none { return 1; }
+        q := contract_forward(p);
+        if contract_read(q) != 42 { free(q); return 2; }
+        box := ContractBox::init(q);
+        if box.read() != 42 { return 3; }
+        other, err := contract_create();
+        if err != none { return 4; }
+        defer contract_consume(other, true);
+        empty := ContractBox::init(null);
+        if empty.read() != 0 { return 5; }
+    }
+    return 42;
+}
+i32 allocation_contract_failure_test() {
+    unsafe {
+        p, e := contract_create();
+        if e == AllocationError.OutOfMemory and p == null { return 42; }
+        free(p);
+    }
+    return 1;
+}

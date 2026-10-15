@@ -366,3 +366,12 @@ TEST(TokenizerTests, RecognizesLoopKeywordsAndAdjacentIncrement) {
     EXPECT_EQ(tokens[4].value, "++");
     EXPECT_EQ(tokens[4].range.end.offset - tokens[4].range.start.offset, 2);
 }
+
+TEST(TokenizerTests, RecognizesOwnershipContractsAsKeywords) {
+    const auto tokens = Tokenize("own lend owner lender");
+    ASSERT_EQ(tokens.size(), 5);
+    EXPECT_EQ(tokens[0].type, TokenType::Own);
+    EXPECT_EQ(tokens[1].type, TokenType::Lend);
+    EXPECT_EQ(tokens[2].type, TokenType::Identifier);
+    EXPECT_EQ(tokens[3].type, TokenType::Identifier);
+}

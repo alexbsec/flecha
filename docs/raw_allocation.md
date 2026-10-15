@@ -149,10 +149,14 @@ unsafe void example() {
 
 ### Conservative limits and the unsafe boundary
 
+Explicit `own` and `lend` contracts and owning fields are described in
+[ownership contracts](ownership_contracts.md). Unannotated helpers retain the
+behavior above.
+
 Ownership that cannot be represented is rejected with `FLECHA-S0052`. Current
-examples include storing a tracked allocation in a structure field or another
+examples include storing a tracked allocation in an ordinary non-owning structure field or another
 heap object, mutable/indexed addresses and slices over containers of allocation
-handles, dynamic indexing of those handles, recursive pointer effects, and
+handles, dynamic indexing of those handles, unannotated recursive pointer effects, and
 revisiting an allocation site while its earlier instance remains live. This
 last restriction also applies to multiple outstanding results from one factory
 allocation site. Use a per-iteration scope with `defer free(pointer)` when
@@ -161,8 +165,8 @@ allocating in a loop. Previously freed aliases remain stale if the site repeats.
 Analysis is bounded at 128 distinct states per CFG node and 100,000 processed
 states per root function, including interpreted callees. Exceeding either budget
 is an error, not a silently successful check. Complex but valid programs may
-need simpler control flow. General ownership summaries, recursive contracts,
-and owning container storage remain future work.
+need simpler control flow. Declared ownership contracts support recursive calls; general inferred recursive
+summaries and owning container storage remain future work.
 
 This is an allocation checker, not a proof that arbitrary unsafe code is memory
 safe. Raw pointer parameters entering a root function are symbolic external

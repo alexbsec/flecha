@@ -6,7 +6,8 @@ Named and generic error values are merged; see [error_values.md](error_values.md
 Structures are implemented on `feat/structures`; see [structures.md](structures.md).
 Raw allocation is implemented on `feat/raw-allocation`; see [raw_allocation.md](raw_allocation.md).
 Mandatory allocation identity diagnostics and bounded visible-call analysis are
-also implemented on that branch. General ownership contracts remain.
+also implemented on that branch. Explicit `own` / `lend` contracts and initial
+owning-field support are implemented; see [ownership contracts](ownership_contracts.md).
 
 Based on the agreed rules in [memory_model.md](memory_model.md), with the
 const-type milestone merged into `master` at `c9e6ee4`. Each milestone should be a separate feature
@@ -243,8 +244,11 @@ Proposed branch for the remaining work: `feat/resource-call-effects`. Depends on
 
 Bounded interpretation of visible nonrecursive callees is already implemented
 in `feat/raw-allocation`, including consuming helpers, conditional consumption,
-returned allocations, deferred cleanup, and caller aliases. Recursive summaries,
-external contracts, and general stored ownership remain below.
+returned allocations, deferred cleanup, and caller aliases. Explicit contracts now support independent checking and annotated recursion.
+Owning fields support build-time initialization and verified tear cleanup. General
+inferred recursive summaries, external functions, and field replacement remain
+future work. The historical inferred-summary proposal below is not the current
+implementation contract.
 
 - Infer borrow/consume/escape summaries for visible functions. Include deferred
   effects on all returning paths and compute summaries to a fixed point for

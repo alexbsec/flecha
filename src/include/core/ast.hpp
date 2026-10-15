@@ -107,6 +107,8 @@ enum class PrimitiveType {
     ErrorValue,
 };
 
+enum class OwnershipContract { None, Own, Lend };
+
 enum class TypeKind {
     Primitive,
     Named,
@@ -227,6 +229,8 @@ class TypeNode final : public AstNode {
         assert(_typeKind == TypeKind::Primitive);
         return _type;
     }
+    OwnershipContract Contract() const { return _contract; }
+    void SetContract(OwnershipContract contract) { _contract = contract; }
     [[nodiscard]] const TypeNode* Target() const { return _target.get(); }
     [[nodiscard]] bool IsConst() const { return _isConst; }
     [[nodiscard]] const source::SourceRange& QualifierRange() const {
@@ -234,6 +238,7 @@ class TypeNode final : public AstNode {
     }
 
    private:
+    OwnershipContract _contract = OwnershipContract::None;
     TypeKind _typeKind;
     std::string _name;
     std::uint64_t _length = 0;

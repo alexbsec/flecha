@@ -12,6 +12,7 @@
 namespace flecha::semantic {
 namespace {
 using core::AstNodeKind;
+using core::OwnershipContract;
 using diagnostics::DiagnosticCode;
 using Identity = const core::AstNode*;
 
@@ -25,6 +26,7 @@ enum class ValueKind {
     Pointer,
     Interior,
     Dangling,
+    Transferred,
     Address,
     Aggregate
 };
@@ -39,6 +41,8 @@ struct Value final {
 struct Resource final {
     bool live = true;
     bool owned = true;
+    bool lent = false;
+    bool nullable = false;
     bool operator==(const Resource&) const = default;
 };
 struct Deferred final {
@@ -53,6 +57,9 @@ struct State final {
     std::map<const core::Expression*, Value> values;
     std::map<Identity, Resource> resources;
     std::vector<Deferred> deferred;
+    std::set<std::pair<const Symbol*, const core::StructureField*>>
+        initializedOwners;
+    std::set<Identity> nullPointers;
     bool operator==(const State&) const = default;
 };
 struct Outcome final {
@@ -106,25 +113,157 @@ class AllocationChecker final {
             }
         }
         for (const core::FunctionDeclaration* function : _ordered) {
-            if (!_resourceFunctions.contains(function)) continue;
-            _steps = 0;
-            State state;
-            std::vector<Value> arguments;
-            for (const auto& parameter : function->Parameters()) {
-                const Symbol* symbol = _model.DeclaredSymbol(*parameter);
-                Value argument;
-                if (symbol &&
-                    symbol->Type().Kind() == SemanticTypeKind::Pointer) {
-                    argument = {ValueKind::Pointer, parameter.get()};
-                    state.resources[parameter.get()] = {true, false};
-                }
-                arguments.push_back(argument);
-            }
-            (void)Run(*function, std::move(state), arguments);
+            if (!_resourceFunctions.contains(function) &&
+                !HasContracts(*function) && !HasOwningFields(*function))
+                continue;
+            Verify(*function);
         }
     }
 
    private:
+    void VerifyNullCall(const core::FunctionDeclaration& function,
+                        const std::vector<Value>& supplied) {
+        std::vector<bool> mask;
+        bool any = false;
+        for (const auto& value : supplied) {
+            mask.push_back(value.kind == ValueKind::Null);
+            any |= mask.back();
+        }
+        if (!any || !_nullCalls.emplace(&function, mask).second) return;
+        if (_nullCalls.size() > 128) {
+            Report(DiagnosticCode::UnverifiedOwnership, function,
+                   "ownership analysis exceeded its nullable-call budget");
+            return;
+        }
+        State state;
+        std::vector<Value> arguments;
+        for (std::size_t i = 0; i < function.Parameters().size(); ++i) {
+            const auto& parameter = function.Parameters()[i];
+            Value value;
+            if (i < mask.size() && mask[i])
+                value = {ValueKind::Null};
+            else if (parameter->Type().TypeForm() == core::TypeKind::Pointer) {
+                value = {ValueKind::Pointer, parameter.get()};
+                const auto contract = parameter->Type().Contract();
+                state.resources[parameter.get()] = {
+                    true, contract == OwnershipContract::Own,
+                    contract == OwnershipContract::Lend, true};
+            }
+            arguments.push_back(value);
+        }
+        SeedFields(function, state);
+        const auto savedSteps = _steps;
+        _steps = 0;
+        for (auto& outcome : Run(function, std::move(state), arguments))
+            _nullShapes[{&function, mask}].push_back(std::move(outcome.result));
+        _steps = savedSteps;
+    }
+    void Verify(const core::FunctionDeclaration& function) {
+        if (_verified.contains(&function) || _verifying.contains(&function))
+            return;
+        _verifying.insert(&function);
+        const auto savedSteps = _steps;
+        _steps = 0;
+        State state;
+        std::vector<Value> arguments;
+        for (const auto& parameter : function.Parameters()) {
+            const Symbol* symbol = _model.DeclaredSymbol(*parameter);
+            Value argument;
+            if (symbol && symbol->Type().Kind() == SemanticTypeKind::Pointer) {
+                argument = {ValueKind::Pointer, parameter.get()};
+                const auto contract = parameter->Type().Contract();
+                state.resources[parameter.get()] = {
+                    true, contract == OwnershipContract::Own,
+                    contract == OwnershipContract::Lend, true};
+            }
+            arguments.push_back(argument);
+        }
+        SeedFields(function, state);
+
+        auto outcomes = Run(function, std::move(state), arguments);
+        for (auto& outcome : outcomes)
+            _returnShapes[&function].push_back(std::move(outcome.result));
+        _steps = savedSteps;
+        _verifying.erase(&function);
+        _verified.insert(&function);
+    }
+
+    bool HasContract(const core::TypeNode& type) const {
+        if (type.Contract() != OwnershipContract::None) return true;
+        for (const auto& element : type.Elements())
+            if (HasContract(*element)) return true;
+        return false;
+    }
+    bool HasContracts(const core::FunctionDeclaration& function) const {
+        if (HasContract(function.ReturnType())) return true;
+        for (const auto& parameter : function.Parameters())
+            if (HasContract(parameter->Type())) return true;
+        return false;
+    }
+    const FunctionSymbol* Function(
+        const core::FunctionDeclaration& function) const {
+        return static_cast<const FunctionSymbol*>(
+            _model.DeclaredSymbol(function));
+    }
+    bool HasOwningFields(const core::FunctionDeclaration& function) const {
+        const auto* symbol = Function(function);
+        if (!symbol || !symbol->Owner()) return false;
+        for (const auto& field : symbol->Owner()->fields)
+            if (field.syntax->Type().Contract() == OwnershipContract::Own)
+                return true;
+        return false;
+    }
+    void SeedFields(const core::FunctionDeclaration& function, State& state) {
+        if (!HasOwningFields(function) || !Function(function)->HasReceiver())
+            return;
+        for (const auto& field : Function(function)->Owner()->fields) {
+            if (field.syntax->Type().Contract() != OwnershipContract::Own)
+                continue;
+            const bool tear = function.Name() == "tear";
+            state.resources[field.syntax] = {true, tear, !tear, true};
+        }
+    }
+    bool Lent(const State& state, const Value& value) const {
+        const auto found = state.resources.find(value.identity);
+        if (found != state.resources.end() && found->second.lent) return true;
+        for (const auto& child : value.elements)
+            if (Lent(state, child)) return true;
+        return false;
+    }
+    void Invalidate(Value& value, Identity identity) {
+        if (value.identity == identity) value.kind = ValueKind::Transferred;
+        for (auto& child : value.elements) Invalidate(child, identity);
+    }
+    bool Transfer(State& state, const Value& value, const core::AstNode& at) {
+        if (value.kind == ValueKind::Null) return true;
+        CheckUse(state, value, at);
+        const auto found = state.resources.find(value.identity);
+        if (value.kind != ValueKind::Pointer ||
+            found == state.resources.end() || !found->second.live ||
+            !found->second.owned || found->second.lent) {
+            Report(DiagnosticCode::UnverifiedOwnership, at,
+                   "own requires a live allocation with cleanup "
+                   "responsibility, or null",
+                   value.identity);
+            return false;
+        }
+        for (const auto& deferred : state.deferred)
+            for (const auto& argument : deferred.arguments)
+                if (RefersTo(argument, value.identity)) {
+                    Report(DiagnosticCode::UnverifiedOwnership, at,
+                           "ownership transfer conflicts with a pending "
+                           "deferred use or cleanup",
+                           value.identity);
+                    return false;
+                }
+        found->second.live = false;
+        for (auto& [symbol, alias] : state.bindings)
+            Invalidate(alias, value.identity);
+        for (auto& [expression, alias] : state.values)
+            Invalidate(alias, value.identity);
+        return true;
+    }
+
     void Register(const core::FunctionDeclaration& function) {
         const auto* symbol =
             static_cast<const FunctionSymbol*>(_model.DeclaredSymbol(function));
@@ -132,6 +271,8 @@ class AllocationChecker final {
         _functions[symbol] = &function;
         _graphs.emplace(&function, BuildControlFlowGraph(function, _model));
         _ordered.push_back(&function);
+        if (HasContracts(function) || HasOwningFields(function))
+            _resourceFunctions.insert(&function);
     }
 
     void Report(DiagnosticCode code, const core::AstNode& at,
@@ -181,6 +322,12 @@ class AllocationChecker final {
             value.elements.begin(), value.elements.end(),
             [&](const Value& child) { return Contains(child, identity); });
     }
+    bool RefersTo(const Value& value, Identity identity) const {
+        if (value.identity == identity) return true;
+        for (const auto& child : value.elements)
+            if (RefersTo(child, identity)) return true;
+        return false;
+    }
     bool Tracks(const Value& value) const {
         if (value.identity) return true;
         return std::any_of(value.elements.begin(), value.elements.end(),
@@ -189,6 +336,12 @@ class AllocationChecker final {
     void CheckUse(const State& state, const Value& value,
                   const core::AstNode& at, bool dereference = false) {
         const auto found = state.resources.find(value.identity);
+        if (value.kind == ValueKind::Transferred) {
+            Report(DiagnosticCode::UseAfterFree, at,
+                   "pointer is unavailable after ownership transfer",
+                   value.identity);
+            return;
+        }
         if (value.kind == ValueKind::Dangling ||
             (found != state.resources.end() && !found->second.live))
             Report(DiagnosticCode::UseAfterFree, at,
@@ -202,6 +355,15 @@ class AllocationChecker final {
     }
     void Free(State& state, const Value& value, const core::AstNode& at) {
         if (value.kind == ValueKind::Null) return;
+        if (Lent(state, value)) {
+            Report(DiagnosticCode::UnverifiedOwnership, at,
+                   "a lent pointer cannot be freed", value.identity);
+            return;
+        }
+        if (value.kind == ValueKind::Transferred) {
+            CheckUse(state, value, at);
+            return;
+        }
         const auto found = state.resources.find(value.identity);
         if (value.kind == ValueKind::Dangling ||
             (found != state.resources.end() && !found->second.live)) {
@@ -253,6 +415,7 @@ class AllocationChecker final {
                    const Value& returned = {}) {
         for (auto& [identity, resource] : state.resources) {
             if (!resource.live || !resource.owned ||
+                identity->Kind() == AstNodeKind::StructureField ||
                 Contains(returned, identity))
                 continue;
             bool held = false;
@@ -328,10 +491,39 @@ class AllocationChecker final {
                        "cannot verify mutation of an aggregate containing "
                        "allocation handles");
         }
+        if (unwrapped.Kind() == AstNodeKind::MemberAccessExpression) {
+            const auto& member =
+                static_cast<const core::MemberAccessExpression&>(unwrapped);
+            const auto* field = _model.FieldFor(member);
+            if (field &&
+                field->syntax->Type().Contract() == OwnershipContract::Own) {
+                const Symbol* receiver = DirectTarget(member.Receiver());
+                const bool building =
+                    receiver && receiver->Name() == "self" &&
+                    receiver->Kind() == SymbolKind::LocalVariable;
+                if (!building) {
+                    Report(DiagnosticCode::UnverifiedOwnership, target,
+                           "owning fields can currently be assigned only "
+                           "during build; tear discharges them",
+                           field->syntax);
+                    return;
+                }
+                const auto slot = std::make_pair(receiver, field->syntax);
+                if (state.initializedOwners.contains(slot))
+                    Report(DiagnosticCode::MemoryLeak, target,
+                           "overwriting an initialized owning field loses its "
+                           "allocation",
+                           field->syntax);
+                if (Transfer(state, value, target) &&
+                    value.kind != ValueKind::Null)
+                    state.initializedOwners.insert(slot);
+                return;
+            }
+        }
         const Value address = Address(state, target);
         if (address.kind == ValueKind::Address && address.address) {
             Bind(state, address.address, std::move(value));
-        } else if (Owns(state, value)) {
+        } else if (Owns(state, value) || Lent(state, value)) {
             Report(DiagnosticCode::UnverifiedOwnership, target,
                    "cannot verify ownership stored through a field, index, or "
                    "indirect pointer; "
@@ -407,6 +599,72 @@ class AllocationChecker final {
                    "cannot verify ownership effects of this call");
             return {{std::move(state), {}}};
         }
+        if (HasContracts(*found->second) || HasOwningFields(*found->second)) {
+            const auto& syntax = *found->second;
+            std::set<Identity> consumed;
+            for (std::size_t i = 0;
+                 i < arguments.size() && i < syntax.Parameters().size(); ++i) {
+                const auto contract = syntax.Parameters()[i]->Type().Contract();
+                if (arguments[i].address &&
+                    (Owns(state, arguments[i]) ||
+                     Lent(state, Binding(state, arguments[i].address))))
+                    Report(DiagnosticCode::UnverifiedOwnership, expression,
+                           "a contract cannot yet summarize mutation through "
+                           "an address of a tracked pointer slot");
+                if (contract == OwnershipContract::Own &&
+                    arguments[i].kind != ValueKind::Null) {
+                    if (!consumed.insert(arguments[i].identity).second)
+                        Report(DiagnosticCode::UnverifiedOwnership, expression,
+                               "the same allocation cannot satisfy two "
+                               "consuming parameters",
+                               arguments[i].identity);
+                    for (std::size_t j = 0; j < arguments.size(); ++j)
+                        if (i != j &&
+                            RefersTo(arguments[j], arguments[i].identity))
+                            Report(DiagnosticCode::UnverifiedOwnership,
+                                   expression,
+                                   "a consumed allocation cannot also be "
+                                   "passed through an alias",
+                                   arguments[i].identity);
+                    Transfer(state, arguments[i], expression);
+                } else if (contract == OwnershipContract::None &&
+                           ((Tracks(arguments[i]) &&
+                             syntax.Parameters()[i]->Type().TypeForm() !=
+                                 core::TypeKind::Reference) ||
+                            (arguments[i].address &&
+                             Owns(state, arguments[i])))) {
+                    Report(DiagnosticCode::UnverifiedOwnership, expression,
+                           "an annotated function needs own or lend on every "
+                           "raw pointer receiving tracked storage",
+                           arguments[i].identity);
+                }
+            }
+            Verify(syntax);
+            VerifyNullCall(syntax, arguments);
+            std::vector<Outcome> outcomes;
+            std::vector<bool> nullMask;
+            for (const auto& argument : arguments)
+                nullMask.push_back(argument.kind == ValueKind::Null);
+            const auto nullableShapes = _nullShapes.find({&syntax, nullMask});
+            const auto shapes = _returnShapes.find(&syntax);
+            const std::vector<Value>* alternatives =
+                nullableShapes != _nullShapes.end() ? &nullableShapes->second
+                : shapes != _returnShapes.end()     ? &shapes->second
+                                                    : nullptr;
+            if (alternatives && !alternatives->empty()) {
+                for (const auto& shape : *alternatives) {
+                    State next = state;
+                    Value result = ContractResult(next, expression,
+                                                  syntax.ReturnType(), &shape);
+                    outcomes.push_back({std::move(next), std::move(result)});
+                }
+            } else {
+                auto result =
+                    ContractResult(state, expression, syntax.ReturnType());
+                outcomes.push_back({std::move(state), std::move(result)});
+            }
+            return outcomes;
+        }
         if (std::find(_active.begin(), _active.end(), found->second) !=
             _active.end()) {
             Report(DiagnosticCode::UnverifiedOwnership, expression,
@@ -415,6 +673,84 @@ class AllocationChecker final {
             return {};
         }
         return Run(*found->second, std::move(state), arguments);
+    }
+
+    Value ContractResult(State& state, const core::Expression& call,
+                         const core::TypeNode& type,
+                         const Value* shape = nullptr) {
+        if (type.Contract() == OwnershipContract::Own) {
+            if (shape && shape->kind == ValueKind::Null)
+                return {ValueKind::Null};
+            const auto key = std::make_pair(&call, &type);
+            auto& origin = _returnOrigins[key];
+            if (!origin)
+                origin = std::make_unique<core::TypeNode>(
+                    call.Range(), core::PrimitiveType::Void);
+            const Identity identity = origin.get();
+            const auto previous = state.resources.find(identity);
+            if (previous != state.resources.end() && previous->second.live)
+                Report(DiagnosticCode::UnverifiedOwnership, call,
+                       "owning return site is revisited while its previous "
+                       "result remains live",
+                       identity);
+            for (auto& [symbol, value] : state.bindings)
+                Retire(value, identity);
+            for (auto& [expression, value] : state.values)
+                Retire(value, identity);
+            state.resources[identity] = {true, true, false, true};
+            return {ValueKind::Pointer, identity};
+        }
+        if (type.TypeForm() == core::TypeKind::Tuple) {
+            Value result{ValueKind::Aggregate};
+            for (std::size_t i = 0; i < type.Elements().size(); ++i)
+                result.elements.push_back(ContractResult(
+                    state, call, *type.Elements()[i],
+                    shape && i < shape->elements.size() ? &shape->elements[i]
+                                                        : nullptr));
+            return result;
+        }
+        if (shape &&
+            (shape->kind == ValueKind::Null || shape->kind == ValueKind::Error))
+            return *shape;
+        return {};
+    }
+    void CheckReturn(State& state, const Value& result,
+                     const core::TypeNode& type, const core::AstNode& at,
+                     bool explicitContract,
+                     std::set<Identity>& returnedOwners) {
+        if (type.TypeForm() == core::TypeKind::Tuple) {
+            for (std::size_t i = 0; i < type.Elements().size(); ++i)
+                CheckReturn(
+                    state,
+                    i < result.elements.size() ? result.elements[i] : Value{},
+                    *type.Elements()[i], at, explicitContract, returnedOwners);
+            return;
+        }
+        if (Lent(state, result))
+            Report(DiagnosticCode::UnverifiedOwnership, at,
+                   "a lent pointer or its derived aliases cannot escape in a "
+                   "return",
+                   result.identity);
+        if (type.Contract() == OwnershipContract::Own) {
+            if (result.kind == ValueKind::Pointer &&
+                !returnedOwners.insert(result.identity).second)
+                Report(DiagnosticCode::UnverifiedOwnership, at,
+                       "one allocation cannot be returned as multiple owners",
+                       result.identity);
+            const auto found = state.resources.find(result.identity);
+            if (result.kind != ValueKind::Null &&
+                (result.kind != ValueKind::Pointer ||
+                 found == state.resources.end() || !found->second.owned ||
+                 !found->second.live || found->second.lent))
+                Report(DiagnosticCode::UnverifiedOwnership, at,
+                       "owning return requires a live owned allocation or null",
+                       result.identity);
+        } else if (explicitContract && Owns(state, result)) {
+            Report(DiagnosticCode::UnverifiedOwnership, at,
+                   "returning cleanup responsibility requires an own return "
+                   "contract",
+                   result.identity);
+        }
     }
 
     // Consume child temporaries only after their parent has used them. Address
@@ -508,11 +844,14 @@ class AllocationChecker final {
                         return {};
                 }
             }
-            case AstNodeKind::NameExpression:
-                return Binding(
+            case AstNodeKind::NameExpression: {
+                Value value = Binding(
                     state,
                     _model.SymbolFor(
                         static_cast<const core::NameExpression&>(expression)));
+                CheckUse(state, value, expression);
+                return value;
+            }
             case AstNodeKind::ParenthesizedExpression:
                 return Get(state,
                            static_cast<const core::ParenthesizedExpression&>(
@@ -537,6 +876,19 @@ class AllocationChecker final {
                 if (unary.OperatorType() == TokenType::RawAddress ||
                     unary.OperatorType() == TokenType::Ampersand) {
                     const core::Expression& target = Unwrap(unary.Operand());
+                    if (target.Kind() == AstNodeKind::MemberAccessExpression) {
+                        const auto* field = _model.FieldFor(
+                            static_cast<const core::MemberAccessExpression&>(
+                                target));
+                        if (field && field->syntax->Type().Contract() ==
+                                         OwnershipContract::Own)
+                            Report(DiagnosticCode::UnverifiedOwnership,
+                                   expression,
+                                   "taking an address of an owning field would "
+                                   "bypass its ownership contract",
+                                   field->syntax);
+                    }
+
                     if (target.Kind() == AstNodeKind::IndexExpression &&
                         Owns(state,
                              Get(state,
@@ -584,7 +936,8 @@ class AllocationChecker final {
                             const auto resource =
                                 state.resources.find(value.identity);
                             return resource != state.resources.end() &&
-                                   resource->second.owned;
+                                   resource->second.owned &&
+                                   !resource->second.nullable;
                         }
                         return value.kind == ValueKind::Null ||
                                value.kind == ValueKind::Error ||
@@ -631,6 +984,30 @@ class AllocationChecker final {
                 }
                 CheckUse(state, Get(state, member.Receiver()), expression,
                          member.Access() == TokenType::Arrow);
+                const auto* field = _model.FieldFor(member);
+                if (field->syntax->Type().Contract() ==
+                    OwnershipContract::Own) {
+                    const Symbol* receiver = DirectTarget(member.Receiver());
+                    if (!receiver || receiver->Name() != "self") {
+                        Report(DiagnosticCode::UnverifiedOwnership, expression,
+                               "access owning fields through the structure's "
+                               "self methods",
+                               field->syntax);
+                        return {};
+                    }
+                    if (receiver->Kind() == SymbolKind::LocalVariable &&
+                        !state.initializedOwners.contains(
+                            {receiver, field->syntax}))
+                        return {ValueKind::Null};
+                    if (state.nullPointers.contains(field->syntax))
+                        return {ValueKind::Null};
+                    if (!state.resources.contains(field->syntax))
+                        state.resources[field->syntax] = {true, false, true,
+                                                          true};
+                    Value result{ValueKind::Pointer, field->syntax};
+                    CheckUse(state, result, expression);
+                    return result;
+                }
                 return {};
             }
             case AstNodeKind::SliceExpression: {
@@ -863,7 +1240,8 @@ class AllocationChecker final {
                 }
             } else {
                 if (node.memoryUntrackedStore) {
-                    if (Owns(state, Get(state, *node.memoryUntrackedStore)))
+                    if (Owns(state, Get(state, *node.memoryUntrackedStore)) ||
+                        Lent(state, Get(state, *node.memoryUntrackedStore)))
                         Report(DiagnosticCode::UnverifiedOwnership,
                                *node.memoryUntrackedStore,
                                "cannot verify ownership stored in a structure "
@@ -952,6 +1330,26 @@ class AllocationChecker final {
                             return !savedValues.contains(entry.first);
                         });
                         CheckUse(finished, result, at);
+                        std::set<Identity> returnedOwners;
+                        CheckReturn(
+                            finished, result, function.ReturnType(), at,
+                            HasContracts(function) || HasOwningFields(function),
+                            returnedOwners);
+                        if (function.Name() == "tear" &&
+                            HasOwningFields(function))
+                            for (const auto& field :
+                                 Function(function)->Owner()->fields) {
+                                const auto resource =
+                                    finished.resources.find(field.syntax);
+                                if (field.syntax->Type().Contract() ==
+                                        OwnershipContract::Own &&
+                                    resource != finished.resources.end() &&
+                                    resource->second.live)
+                                    Report(DiagnosticCode::MemoryLeak, at,
+                                           "tear must discharge every live "
+                                           "owning field",
+                                           field.syntax);
+                            }
                         CheckLost(finished, at, result);
                         results.push_back({std::move(finished), result});
                     }
@@ -966,7 +1364,79 @@ class AllocationChecker final {
                          (condition.kind == ValueKind::False && edge != 1)))
                         continue;
                     State outgoing = output;
-                    if (node.condition) Drop(outgoing, *node.condition);
+                    if (node.condition) {
+                        const auto& conditionExpression =
+                            Unwrap(*node.condition);
+                        if (conditionExpression.Kind() ==
+                            AstNodeKind::BinaryExpression) {
+                            const auto& binary =
+                                static_cast<const core::BinaryExpression&>(
+                                    conditionExpression);
+                            const auto op = binary.OperatorType();
+                            if (op == TokenType::Equal ||
+                                op == TokenType::NotEqual ||
+                                op == TokenType::StrictEqual ||
+                                op == TokenType::StrictNotEqual) {
+                                // Child temporaries have been consumed;
+                                // re-evaluate pure operands only.
+                                auto operand =
+                                    [&](const core::Expression& expression) {
+                                        const auto& e = Unwrap(expression);
+                                        if (e.Kind() ==
+                                            AstNodeKind::NameExpression)
+                                            return Binding(outgoing,
+                                                           DirectTarget(e));
+                                        if (e.Kind() ==
+                                            AstNodeKind::LiteralExpression)
+                                            return Evaluate(outgoing, e);
+                                        if (e.Kind() ==
+                                            AstNodeKind::MemberAccessExpression)
+                                            return Evaluate(outgoing, e);
+                                        return Value{};
+                                    };
+                                Value left = operand(binary.Left()),
+                                      right = operand(binary.Right());
+                                Value pointer =
+                                    left.kind == ValueKind::Null ? right : left;
+                                if ((left.kind == ValueKind::Null ||
+                                     right.kind == ValueKind::Null) &&
+                                    pointer.kind == ValueKind::Pointer &&
+                                    outgoing.resources.contains(
+                                        pointer.identity)) {
+                                    const bool equal =
+                                        op == TokenType::Equal ||
+                                        op == TokenType::StrictEqual;
+                                    const bool isNull = (edge == 0) == equal;
+                                    auto& resource =
+                                        outgoing.resources[pointer.identity];
+                                    if (isNull && !resource.nullable) continue;
+                                    if (isNull) {
+                                        resource.live = false;
+                                        outgoing.nullPointers.insert(
+                                            pointer.identity);
+                                        auto clear = [&](auto&& self,
+                                                         Value& value) -> void {
+                                            if (value.identity ==
+                                                    pointer.identity &&
+                                                value.kind ==
+                                                    ValueKind::Pointer)
+                                                value = {ValueKind::Null};
+                                            for (auto& child : value.elements)
+                                                self(self, child);
+                                        };
+                                        for (auto& [symbol, value] :
+                                             outgoing.bindings)
+                                            clear(clear, value);
+                                        for (auto& [expression, value] :
+                                             outgoing.values)
+                                            clear(clear, value);
+                                    } else
+                                        resource.nullable = false;
+                                }
+                            }
+                        }
+                        Drop(outgoing, *node.condition);
+                    }
                     if (node.allocation) {
                         if (edge == 0) {
                             if (!Allocate(outgoing, *node.allocation)) continue;
@@ -984,8 +1454,13 @@ class AllocationChecker final {
                             if (std::find(graph.nodes[successor].scopes.begin(),
                                           graph.nodes[successor].scopes.end(),
                                           scope) ==
-                                graph.nodes[successor].scopes.end())
+                                graph.nodes[successor].scopes.end()) {
                                 next.bindings.erase(symbol);
+                                std::erase_if(next.initializedOwners,
+                                              [&](const auto& slot) {
+                                                  return slot.first == symbol;
+                                              });
+                            }
                         // Do not check here while a return value is in transit:
                         // its expression temporary represents the transferred
                         // owner.
@@ -1021,6 +1496,17 @@ class AllocationChecker final {
             [&](const Value& child) { return Owns(state, child, depth + 1); });
     }
 
+    std::set<std::pair<const core::FunctionDeclaration*, std::vector<bool>>>
+        _nullCalls;
+    std::map<std::pair<const core::FunctionDeclaration*, std::vector<bool>>,
+             std::vector<Value>>
+        _nullShapes;
+    std::set<const core::FunctionDeclaration*> _verified, _verifying;
+    std::map<const core::FunctionDeclaration*, std::vector<Value>>
+        _returnShapes;
+    std::map<std::pair<const core::Expression*, const core::TypeNode*>,
+             std::unique_ptr<core::TypeNode>>
+        _returnOrigins;
     const SemanticModel& _model;
     diagnostics::DiagnosticBag& _diagnostics;
     std::map<const FunctionSymbol*, const core::FunctionDeclaration*>
