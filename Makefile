@@ -6,7 +6,7 @@ TEST_BUILD_DIR ?= build-tests
 .DEFAULT_GOAL := build
 
 .PHONY: help configure build configure-tests build-tests test \
-	test-semantic llvm-poc native-poc clean
+	test-semantic llvm-poc native-poc native-if-also clean
 
 help:
 	@echo "Flecha build targets:"
@@ -15,6 +15,7 @@ help:
 	@echo "  make test-semantic  Run only semantic and scope tests"
 	@echo "  make llvm-poc       Emit and execute the LLVM proof of concept"
 	@echo "  make native-poc     Build and execute a native Flecha program"
+	@echo "  make native-if-also Build and test the if/also native example"
 	@echo "  make clean          Clean generated build artifacts"
 	@echo ""
 	@echo "Overrides: CMAKE, CMAKE_GENERATOR, BUILD_DIR, TEST_BUILD_DIR"
@@ -55,6 +56,13 @@ native-poc: build
 	@test -f $(BUILD_DIR)/llvm_poc.o
 	@$(BUILD_DIR)/llvm_poc; result=$$?; test $$result -eq 42
 	@echo "Native proof of concept returned 42"
+
+native-if-also: build
+	$(BUILD_DIR)/flecha build examples/if_also.fl \
+		-o $(BUILD_DIR)/if_also
+	@test -f $(BUILD_DIR)/if_also.o
+	@$(BUILD_DIR)/if_also; result=$$?; test $$result -eq 42
+	@echo "Native if/also example returned 42"
 
 clean:
 	@if test -f $(BUILD_DIR)/CMakeCache.txt; then \
