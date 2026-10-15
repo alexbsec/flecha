@@ -57,6 +57,8 @@ class LlvmCodeGenerator final {
     bool EmitWhile(const lowering::BoundWhileStatement& statement);
     void DeclarePositions(const lowering::BoundBlockStatement& block);
     bool EmitPosition(const lowering::BoundPositionStatement& statement);
+    [[nodiscard]] llvm::Value* EmitAddress(
+        const lowering::BoundPlaceExpression& place);
     [[nodiscard]] llvm::Value* EmitExpression(
         const lowering::BoundExpression& expression);
     [[nodiscard]] llvm::Value* EmitLiteral(

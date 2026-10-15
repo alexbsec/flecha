@@ -169,6 +169,9 @@ class AssignmentGraph final {
 
     NodeId BuildStatement(const core::Statement& statement, NodeId next) {
         switch (statement.Kind()) {
+            case core::AstNodeKind::BlockStatement:
+                return BuildBlock(
+                    static_cast<const core::BlockStatement&>(statement), next);
             case core::AstNodeKind::VariableDeclarationStatement: {
                 const auto& declaration =
                     static_cast<const core::VariableDeclarationStatement&>(
@@ -323,13 +326,22 @@ class AssignmentGraph final {
                 const auto& assignment =
                     static_cast<const core::AssignmentExpression&>(expression);
                 const NodeId store = AddNode({next});
-                if (assignment.Target().Kind() ==
-                    core::AstNodeKind::NameExpression) {
-                    _nodes[store].write = _model.SymbolFor(
-                        static_cast<const core::NameExpression&>(
-                            assignment.Target()));
+                const core::Expression* target = &assignment.Target();
+                while (target->Kind() ==
+                       core::AstNodeKind::ParenthesizedExpression) {
+                    target = &static_cast<const core::ParenthesizedExpression&>(
+                                  *target)
+                                  .Inner();
                 }
-                return BuildExpression(assignment.Value(), store);
+                if (target->Kind() == core::AstNodeKind::NameExpression) {
+                    _nodes[store].write = _model.SymbolFor(
+                        static_cast<const core::NameExpression&>(*target));
+                    return BuildExpression(assignment.Value(), store);
+                }
+                // Indirect stores read the pointer, but do not initialize its
+                // binding or prove another local initialized through aliasing.
+                const NodeId value = BuildExpression(assignment.Value(), store);
+                return BuildExpression(*target, value);
             }
             case core::AstNodeKind::CallExpression: {
                 const auto& call =

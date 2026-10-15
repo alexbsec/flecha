@@ -98,3 +98,16 @@ add_test(
         -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_control_flow_assignment.cmake
 )
+
+add_test(
+    NAME NativeSemanticTests.UnsafePointers
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/unsafe_pointer_api.fl
+        -DFLECHA_HARNESS=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/unsafe_pointer_harness.cpp
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/unsafe_pointers_test
+        -DFLECHA_RUNTIME=$<TARGET_FILE:runtime>
+        -DFLECHA_LINKER=${CMAKE_CXX_COMPILER}
+        -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_unsafe_pointers.cmake
+)

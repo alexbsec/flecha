@@ -73,6 +73,9 @@ llvm::Type* LlvmCodeGenerator::MapType(semantic::SemanticType type) {
             return llvm::Type::getDoubleTy(_context);
         case semantic::SemanticTypeKind::Bool:
             return llvm::Type::getInt1Ty(_context);
+        case semantic::SemanticTypeKind::Pointer:
+        case semantic::SemanticTypeKind::Null:
+            return llvm::PointerType::getUnqual(_context);
         case semantic::SemanticTypeKind::Void:
             return llvm::Type::getVoidTy(_context);
         case semantic::SemanticTypeKind::StringView:
@@ -254,6 +257,13 @@ void LlvmCodeGenerator::EmitCleanupsTo(std::size_t retainedScopeCount) {
 llvm::Value* LlvmCodeGenerator::CoerceValue(
     llvm::Value* value, semantic::SemanticType sourceType,
     semantic::SemanticType destinationType) {
+    if (sourceType.Kind() == semantic::SemanticTypeKind::Null &&
+        destinationType.Kind() == semantic::SemanticTypeKind::Pointer)
+        return value;
+    if (sourceType.Kind() == semantic::SemanticTypeKind::Pointer &&
+        destinationType.Kind() == semantic::SemanticTypeKind::Pointer &&
+        semantic::IsAssignable(destinationType, sourceType))
+        return value;
     if (sourceType.WithoutConst() == destinationType.WithoutConst())
         return value;
     if (destinationType.Kind() == semantic::SemanticTypeKind::String) {
@@ -562,7 +572,11 @@ void LlvmCodeGenerator::CollectPositionScopePaths(
                     *statement);
             _positionScopePaths.emplace(position.Name(), path);
         } else if (statement->Kind() ==
-                   lowering::BoundNodeKind::IfStatement) {
+                   lowering::BoundNodeKind::BlockStatement) {
+            CollectPositionScopePaths(
+                static_cast<const lowering::BoundBlockStatement&>(*statement),
+                path);
+        } else if (statement->Kind() == lowering::BoundNodeKind::IfStatement) {
             const lowering::BoundIfStatement& conditional =
                 static_cast<const lowering::BoundIfStatement&>(*statement);
             CollectPositionScopePaths(conditional.ThenBlock(), path);
@@ -585,6 +599,11 @@ void LlvmCodeGenerator::DeclarePositions(
     for (const std::unique_ptr<lowering::BoundStatement>& statement :
          block.Statements()) {
         switch (statement->Kind()) {
+            case lowering::BoundNodeKind::BlockStatement:
+                DeclarePositions(
+                    static_cast<const lowering::BoundBlockStatement&>(
+                        *statement));
+                break;
             case lowering::BoundNodeKind::PositionStatement: {
                 const lowering::BoundPositionStatement& position =
                     static_cast<const lowering::BoundPositionStatement&>(
@@ -620,6 +639,9 @@ void LlvmCodeGenerator::DeclarePositions(
 bool LlvmCodeGenerator::EmitStatement(
     const lowering::BoundStatement& statement) {
     switch (statement.Kind()) {
+        case lowering::BoundNodeKind::BlockStatement:
+            return EmitBlock(
+                static_cast<const lowering::BoundBlockStatement&>(statement));
         case lowering::BoundNodeKind::VariableDeclarationStatement: {
             const lowering::BoundVariableDeclarationStatement& declaration =
                 static_cast<const lowering::BoundVariableDeclarationStatement&>(
@@ -799,7 +821,9 @@ llvm::Value* LlvmCodeGenerator::EmitLiteral(
     const lowering::BoundLiteralExpression& expression) {
     llvm::Type* type = MapType(expression.Type());
     if (type == nullptr) return nullptr;
-    if (expression.IsZeroValue()) return llvm::Constant::getNullValue(type);
+    if (expression.IsZeroValue() ||
+        expression.Type().Kind() == semantic::SemanticTypeKind::Null)
+        return llvm::Constant::getNullValue(type);
     if (expression.Type().Kind() == semantic::SemanticTypeKind::Bool) {
         return llvm::ConstantInt::get(type, expression.Value() == "true");
     }
@@ -1096,9 +1120,33 @@ llvm::Value* LlvmCodeGenerator::EmitStringViewEquality(
     return negate ? _builder.CreateNot(equal, "stringv.not_equal") : equal;
 }
 
+llvm::Value* LlvmCodeGenerator::EmitAddress(
+    const lowering::BoundPlaceExpression& place) {
+    if (place.Kind() == lowering::BoundNodeKind::VariableExpression) {
+        return _variables.at(
+            &static_cast<const lowering::BoundVariableExpression&>(place)
+                 .Symbol());
+    }
+    return EmitExpression(
+        static_cast<const lowering::BoundDereferenceExpression&>(place)
+            .Pointer());
+}
+
 llvm::Value* LlvmCodeGenerator::EmitExpression(
     const lowering::BoundExpression& expression) {
     switch (expression.Kind()) {
+        case lowering::BoundNodeKind::AddressExpression:
+            return EmitAddress(
+                static_cast<const lowering::BoundAddressExpression&>(expression)
+                    .Place());
+        case lowering::BoundNodeKind::DereferenceExpression: {
+            llvm::Value* address = EmitAddress(
+                static_cast<const lowering::BoundPlaceExpression&>(expression));
+            return address == nullptr
+                       ? nullptr
+                       : _builder.CreateLoad(MapType(expression.Type()),
+                                             address, "deref");
+        }
         case lowering::BoundNodeKind::LiteralExpression:
             return EmitLiteral(
                 static_cast<const lowering::BoundLiteralExpression&>(
@@ -1126,6 +1174,8 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
             const lowering::BoundAssignmentExpression& assignment =
                 static_cast<const lowering::BoundAssignmentExpression&>(
                     expression);
+            llvm::Value* storage = EmitAddress(assignment.Target());
+            if (storage == nullptr) return nullptr;
             llvm::Value* value = EmitExpression(assignment.Value());
             if (value == nullptr) return nullptr;
             value = CoerceValue(value, assignment.Value().Type(),
@@ -1140,11 +1190,10 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
             if (value == nullptr) return nullptr;
             if (assignment.Target().Type().Kind() ==
                 semantic::SemanticTypeKind::String) {
-                EmitStringDestroy(_builder.CreateLoad(
-                    StringType(), _variables.at(&assignment.Target()),
-                    "string.old"));
+                EmitStringDestroy(
+                    _builder.CreateLoad(StringType(), storage, "string.old"));
             }
-            _builder.CreateStore(value, _variables.at(&assignment.Target()));
+            _builder.CreateStore(value, storage);
             return value;
         }
         case lowering::BoundNodeKind::CallExpression: {

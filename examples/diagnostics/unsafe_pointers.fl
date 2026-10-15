@@ -1,0 +1,28 @@
+// Intentionally rejected. Each function illustrates a separate restriction.
+// Check: build/flecha --emit-llvm examples/diagnostics/unsafe_pointers.fl
+
+unsafe void write(*i32 pointer) {
+    *pointer = 42;
+}
+
+void missing_permission(*i32 pointer) {
+    write(pointer);       // FLECHA-S0025: unsafe call.
+    *pointer;             // FLECHA-S0025: unsafe read.
+    *pointer = 42;        // FLECHA-S0025: unsafe write.
+    &raw pointer;         // FLECHA-S0025: unsafe address creation.
+}
+
+unsafe void const_rules(*const i32 readOnly) {
+    *readOnly = 42;        // FLECHA-S0005: read-only target.
+    constptr i32 fixed = none;
+    fixed = null;         // FLECHA-S0005: fixed pointer binding.
+}
+
+unsafe void uninitialized_pointer() {
+    *i32 pointer;
+    *pointer = 42;        // FLECHA-S0021: reads an uninitialized pointer.
+}
+
+unsafe void opaque_pointer(*void pointer) {
+    *pointer;             // FLECHA-S0026: void has no readable value.
+}

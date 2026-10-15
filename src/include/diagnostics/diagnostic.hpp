@@ -44,6 +44,8 @@ enum class DiagnosticCode {
     BorrowRequiresInitializer,
     ConstRequiresInitializer,
     UnsupportedCompoundType,
+    UnsafeOperation,
+    InvalidPointerAccess,
     NativeTargetUnavailable,
     ObjectEmissionFailed,
     RuntimeUnavailable,

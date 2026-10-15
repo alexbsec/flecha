@@ -1,54 +1,29 @@
-// Syntax examples only: this file intentionally fails semantic analysis.
-// Each compound type below reports FLECHA-S0024 before LLVM generation.
-// Pointer/reference operations and reference initialization arrive later.
+// Intentionally rejected: reference execution and pointer casts remain unsupported.
 // Check: build/flecha --emit-llvm examples/diagnostics/compound_types.fl
+// For executable pointer examples, see examples/unsafe_pointers.fl.
 
-void pointer_types() {
-    *u8 writable;                    // Rebindable pointer, writable target.
-    *const u8 readOnly;               // Rebindable pointer, read-only target.
-
-    constptr u8 fixedAlias;           // Fixed pointer, writable target.
-    const *u8 fixedExpanded;          // Same type as constptr u8.
-
-    constptr const u8 fixedReadOnlyAlias;
-    const *const u8 fixedReadOnlyExpanded;
-    // Both above: fixed pointer, read-only target.
-}
-
-// Parameters illustrate reference types without inventing an initializer.
+// Every reference type below reports FLECHA-S0024.
 void reference_types(
-    &u8 writable,                    // Rebindable reference, writable target.
-    &const u8 readOnly,               // Rebindable reference, read-only target.
-    constref u8 fixedAlias,           // Fixed reference, writable target.
-    const &u8 fixedExpanded,          // Same type as constref u8.
+    &u8 writable,
+    &const u8 readOnly,
+    constref u8 fixedAlias,
+    const &u8 fixedExpanded,
     constref const u8 fixedReadOnlyAlias,
     const &const u8 fixedReadOnlyExpanded
-) {
-    // The last two parameters have fixed bindings and read-only targets.
-}
-
-// Qualifiers belong to individual layers, including inside compound types.
-void nested_types(
-    &*u8 referenceToPointer,
-    &constptr u8 referenceToFixedPointerAlias,
-    &const *u8 referenceToFixedPointerExpanded,
-    *const *const u8 pointerToFixedReadOnlyPointer,
-    constref *const u8 fixedReferenceToReadOnlyPointer,
-    & &u8 referenceToReference        // Space distinguishes this from &&.
 ) {}
 
-// Compound return types and casts are represented but also rejected.
-*u8 pointer_result() {
-    return none;
+void nested_references(
+    &*u8 referenceToPointer,
+    &constptr u8 referenceToFixedPointer,
+    *&u8 pointerToReference
+) {}
+
+void unsupported_casts() {
+    0 as *u8;                // FLECHA-S0017: integer-to-pointer cast rejected.
+    0.cast<constref u8>;      // FLECHA-S0024: reference type not yet executable.
 }
 
-void compound_casts() {
-    0 as *u8;
-    0.cast<constref u8>;
-}
-
-// constptr and constref already include const on their own layer.
-// These would instead cause parser errors for a duplicate qualifier:
+// Aliases already include const on their own layer. These cause parser errors:
 // const constptr u8 duplicatePointer;
 // const constref u8 duplicateReference;
 // const const i32 duplicateValue = 42;

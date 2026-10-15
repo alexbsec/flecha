@@ -20,6 +20,7 @@ syntax keyword flechaConstant none null
 syntax keyword flechaWordOperator and or
 
 syntax match flechaOperator /:=\|===\|!==\|==\|!=\|<=\|>=\|&&\|||\|[&=+*\/%^!<>-]/
+syntax match flechaRawAddress /\%(&\s*\)\@<=raw\>/
 syntax match flechaFunction /\<[A-Za-z_][A-Za-z0-9_]*\>\ze\s*(/
 syntax match flechaCastMethod /\.cast\>\ze\s*</
 syntax match flechaLabel /#\s*[A-Za-z_][A-Za-z0-9_]*/
@@ -49,6 +50,7 @@ highlight default link flechaBoolean Boolean
 highlight default link flechaConstant Constant
 highlight default link flechaWordOperator Operator
 highlight default link flechaOperator Operator
+highlight default link flechaRawAddress Keyword
 highlight default link flechaFunction Function
 highlight default link flechaCastMethod Function
 highlight default link flechaLabel Label

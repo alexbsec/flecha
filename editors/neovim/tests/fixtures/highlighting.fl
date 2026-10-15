@@ -24,3 +24,6 @@ constptr u8 fixed_pointer;
 constref u8 fixed_reference;
 &const u8 shared_reference;
 constval := 42;
+
+unsafe { pointer := &raw value; }
+raw := 1;

@@ -1,0 +1,46 @@
+// Build: build/flecha build examples/unsafe_pointers.fl -o build/unsafe_pointers
+// Prints 42 and exits with 42. All pointers below refer to live local storage.
+
+unsafe void write(constptr i32 destination, i32 value) {
+    // The pointer binding is fixed; its target remains writable.
+    *destination = value;
+}
+
+unsafe i32 read(*const i32 source) {
+    // The target is read-only, including inside this unsafe function.
+    return *source;
+}
+
+*i32 pass_pointer(*i32 pointer) {
+    // Copying an address does not access its target and needs no unsafe block.
+    return pointer;
+}
+
+i32 main() {
+    i32 value = 0;
+    *i32 pointer = none;
+    if pointer != null { return 1; }
+
+    unsafe {
+        pointer = &raw value;
+        write(pointer, 40);
+        constptr i32 fixed = pointer;
+        *fixed = *fixed + 2;
+
+        // Read-only access may be added, but never removed implicitly.
+        *const i32 readOnly = fixed;
+        if read(readOnly) != 42 { return 2; }
+
+        // Nested pointers preserve each layer's qualifiers.
+        **i32 slot = &raw pointer;
+        if **slot != 42 { return 3; }
+    }
+
+    pointer = pass_pointer(pointer);
+    unsafe {
+        // value still lives here. The unsafe block did not free anything.
+        if *pointer != 42 { return 4; }
+    }
+    stdoutln(value);
+    return value;
+}

@@ -40,6 +40,7 @@ enum class TokenType {
     StrictEqual,
     StrictNotEqual,
     Ampersand,
+    RawAddress,  // Parser-composed &raw operator; raw remains contextual.
     And,
     Or,
     Less,

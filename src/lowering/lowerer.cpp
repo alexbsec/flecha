@@ -70,6 +70,9 @@ std::unique_ptr<BoundBlockStatement> Lowerer::LowerBlock(
 std::unique_ptr<BoundStatement> Lowerer::LowerStatement(
     const core::Statement& statement) {
     switch (statement.Kind()) {
+        case core::AstNodeKind::BlockStatement:
+            return LowerBlock(
+                static_cast<const core::BlockStatement&>(statement));
         case core::AstNodeKind::VariableDeclarationStatement: {
             const core::VariableDeclarationStatement& declaration =
                 static_cast<const core::VariableDeclarationStatement&>(
@@ -194,6 +197,25 @@ std::unique_ptr<BoundStatement> Lowerer::LowerWhile(
         std::move(body));
 }
 
+std::unique_ptr<BoundPlaceExpression> Lowerer::LowerPlace(
+    const core::Expression& expression) {
+    if (expression.Kind() == core::AstNodeKind::ParenthesizedExpression) {
+        return LowerPlace(
+            static_cast<const core::ParenthesizedExpression&>(expression)
+                .Inner());
+    }
+    if (expression.Kind() == core::AstNodeKind::NameExpression) {
+        const auto& name = static_cast<const core::NameExpression&>(expression);
+        return std::make_unique<BoundVariableExpression>(
+            expression.Range(), static_cast<const semantic::VariableSymbol&>(
+                                    *_semanticModel->SymbolFor(name)));
+    }
+    const auto& dereference =
+        static_cast<const core::UnaryExpression&>(expression);
+    return std::make_unique<BoundDereferenceExpression>(
+        expression.Range(), LowerExpression(dereference.Operand()));
+}
+
 std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
     const core::Expression& expression, semantic::SemanticType expected) {
     const semantic::SemanticType type = _semanticModel->TypeOf(expression);
@@ -201,7 +223,9 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
         case core::AstNodeKind::LiteralExpression: {
             const core::LiteralExpression& literal =
                 static_cast<const core::LiteralExpression&>(expression);
-            if (literal.LiteralType() == TokenType::None &&
+            if ((literal.LiteralType() == TokenType::None ||
+                 (literal.LiteralType() == TokenType::Null &&
+                  expected.Kind() == semantic::SemanticTypeKind::Pointer)) &&
                 !expected.IsError() &&
                 expected.Kind() != semantic::SemanticTypeKind::None) {
                 return std::make_unique<BoundLiteralExpression>(
@@ -238,6 +262,12 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
         case core::AstNodeKind::UnaryExpression: {
             const core::UnaryExpression& unary =
                 static_cast<const core::UnaryExpression&>(expression);
+            if (unary.OperatorType() == TokenType::Mul)
+                return LowerPlace(expression);
+            if (unary.OperatorType() == TokenType::RawAddress) {
+                return std::make_unique<BoundAddressExpression>(
+                    expression.Range(), type, LowerPlace(unary.Operand()));
+            }
             return std::make_unique<BoundUnaryExpression>(
                 expression.Range(), type, unary.OperatorType(),
                 LowerExpression(unary.Operand()));
@@ -245,21 +275,37 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
         case core::AstNodeKind::BinaryExpression: {
             const core::BinaryExpression& binary =
                 static_cast<const core::BinaryExpression&>(expression);
+            const semantic::SemanticType leftType =
+                _semanticModel->TypeOf(binary.Left());
+            const semantic::SemanticType rightType =
+                _semanticModel->TypeOf(binary.Right());
+            // Contextualize null/none only for pointer equality in this
+            // milestone.
             return std::make_unique<BoundBinaryExpression>(
-                expression.Range(), type, LowerExpression(binary.Left()),
-                binary.OperatorType(), LowerExpression(binary.Right()));
+                expression.Range(), type,
+                LowerExpression(
+                    binary.Left(),
+                    (rightType.Kind() == semantic::SemanticTypeKind::Pointer ||
+                     rightType.Kind() == semantic::SemanticTypeKind::Null)
+                        ? rightType
+                        : semantic::SemanticType::Error()),
+                binary.OperatorType(),
+                LowerExpression(
+                    binary.Right(),
+                    (leftType.Kind() == semantic::SemanticTypeKind::Pointer ||
+                     leftType.Kind() == semantic::SemanticTypeKind::Null)
+                        ? leftType
+                        : semantic::SemanticType::Error()));
         }
         case core::AstNodeKind::AssignmentExpression: {
             const core::AssignmentExpression& assignment =
                 static_cast<const core::AssignmentExpression&>(expression);
-            const core::NameExpression& name =
-                static_cast<const core::NameExpression&>(assignment.Target());
-            const semantic::VariableSymbol& target =
-                static_cast<const semantic::VariableSymbol&>(
-                    *_semanticModel->SymbolFor(name));
+            std::unique_ptr<BoundPlaceExpression> target =
+                LowerPlace(assignment.Target());
+            const semantic::SemanticType targetType = target->Type();
             return std::make_unique<BoundAssignmentExpression>(
-                expression.Range(), target,
-                LowerExpression(assignment.Value(), target.Type()));
+                expression.Range(), std::move(target),
+                LowerExpression(assignment.Value(), targetType));
         }
         case core::AstNodeKind::CallExpression: {
             const core::CallExpression& call =

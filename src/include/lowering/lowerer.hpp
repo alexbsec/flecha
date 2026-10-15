@@ -33,6 +33,8 @@ class Lowerer final {
     std::unique_ptr<BoundIfStatement> LowerBranch(
         const core::ConditionalBranch& branch,
         std::unique_ptr<BoundBlockStatement> elseBlock);
+    std::unique_ptr<BoundPlaceExpression> LowerPlace(
+        const core::Expression& expression);
     std::unique_ptr<BoundExpression> LowerExpression(
         const core::Expression& expression,
         semantic::SemanticType expected = semantic::SemanticType::Error());
