@@ -10,7 +10,6 @@
 #include <llvm/TargetParser/Triple.h>
 
 #include <cstdlib>
-#include <cstdint>
 #include <memory>
 #include <string>
 #include <utility>
@@ -94,146 +93,86 @@ llvm::StructType* LlvmCodeGenerator::StringViewType() {
                    llvm::IntegerType::get(_context, width)});
 }
 
-llvm::Value* LlvmCodeGenerator::EmitStdout(llvm::Value* value) {
-    if (_stdoutFunction == nullptr) {
-        llvm::FunctionType* stdoutType = llvm::FunctionType::get(
-            llvm::Type::getVoidTy(_context), {StringViewType()}, false);
-        _stdoutFunction =
-            llvm::Function::Create(stdoutType, llvm::Function::InternalLinkage,
-                                   "flecha.stdout", *_module);
-
-        const llvm::IRBuilderBase::InsertPoint insertionPoint =
-            _builder.saveIP();
-        llvm::BasicBlock* entry =
-            llvm::BasicBlock::Create(_context, "entry", _stdoutFunction);
-        _builder.SetInsertPoint(entry);
-        llvm::Argument* output = _stdoutFunction->getArg(0);
-        output->setName("value");
+llvm::Value* LlvmCodeGenerator::EmitRuntimeOutput(
+    llvm::Value* value, semantic::SemanticType type, bool newline) {
+    std::string suffix;
+    std::vector<llvm::Value*> arguments;
+    std::vector<llvm::Type*> parameterTypes;
+    if (type.Kind() == semantic::SemanticTypeKind::StringView) {
+        suffix = "string_view";
         llvm::Value* data =
-            _builder.CreateExtractValue(output, {0}, "stdout.data");
+            _builder.CreateExtractValue(value, 0, "stdout.data");
         llvm::Value* length =
-            _builder.CreateExtractValue(output, {1}, "stdout.length");
-        llvm::Type* sizeType = length->getType();
-        llvm::FunctionType* writeType = llvm::FunctionType::get(
-            sizeType,
-            {llvm::Type::getInt32Ty(_context),
-             llvm::PointerType::getUnqual(_context), sizeType},
-            false);
-        llvm::FunctionCallee write =
-            _module->getOrInsertFunction("write", writeType);
-        _builder.CreateCall(
-            write, {llvm::ConstantInt::get(llvm::Type::getInt32Ty(_context), 1),
-                    data, length});
-        _builder.CreateRetVoid();
-        _builder.restoreIP(insertionPoint);
-    }
-    return _builder.CreateCall(_stdoutFunction, {value});
-}
-
-llvm::Value* LlvmCodeGenerator::EmitPrintableValue(
-    llvm::Value* value, semantic::SemanticType type) {
-    if (type.Kind() == semantic::SemanticTypeKind::StringView) return value;
-
-    llvm::StructType* stringViewType = StringViewType();
-    llvm::Type* sizeType = stringViewType->getElementType(1);
-    llvm::Value* data = nullptr;
-    llvm::Value* length = nullptr;
-
-    if (type.Kind() == semantic::SemanticTypeKind::Bool) {
-        llvm::Value* trueData =
-            _builder.CreateGlobalString("true", "stdout.true");
-        llvm::Value* falseData =
-            _builder.CreateGlobalString("false", "stdout.false");
-        data = _builder.CreateSelect(value, trueData, falseData, "stdout.bool");
-        length = _builder.CreateSelect(
-            value, llvm::ConstantInt::get(sizeType, 4),
-            llvm::ConstantInt::get(sizeType, 5), "stdout.bool.length");
-    } else if (type.Kind() == semantic::SemanticTypeKind::Char) {
-        llvm::AllocaInst* character =
-            _builder.CreateAlloca(llvm::Type::getInt8Ty(_context), nullptr,
-                                  "stdout.char");
-        _builder.CreateStore(value, character);
-        data = character;
-        length = llvm::ConstantInt::get(sizeType, 1);
+            _builder.CreateExtractValue(value, 1, "stdout.length");
+        arguments = {data, length};
+        parameterTypes = {data->getType(), length->getType()};
     } else {
-        constexpr std::uint64_t bufferSize = 128;
-        llvm::ArrayType* bufferType = llvm::ArrayType::get(
-            llvm::Type::getInt8Ty(_context), bufferSize);
-        llvm::AllocaInst* buffer =
-            _builder.CreateAlloca(bufferType, nullptr, "stdout.buffer");
-        data = _builder.CreateInBoundsGEP(
-            bufferType, buffer,
-            {llvm::ConstantInt::get(llvm::Type::getInt32Ty(_context), 0),
-             llvm::ConstantInt::get(llvm::Type::getInt32Ty(_context), 0)},
-            "stdout.buffer.data");
-
-        std::string format;
-        llvm::Value* formattedValue = value;
         switch (type.Kind()) {
             case semantic::SemanticTypeKind::I8:
-            case semantic::SemanticTypeKind::I16:
-                format = "%d";
-                formattedValue = _builder.CreateSExt(
-                    value, llvm::Type::getInt32Ty(_context));
+                suffix = "i8";
                 break;
-            case semantic::SemanticTypeKind::U8:
-            case semantic::SemanticTypeKind::U16:
-                format = "%u";
-                formattedValue = _builder.CreateZExt(
-                    value, llvm::Type::getInt32Ty(_context));
+            case semantic::SemanticTypeKind::I16:
+                suffix = "i16";
                 break;
             case semantic::SemanticTypeKind::I32:
-                format = "%d";
-                break;
-            case semantic::SemanticTypeKind::U32:
-                format = "%u";
+                suffix = "i32";
                 break;
             case semantic::SemanticTypeKind::I64:
-                format = "%lld";
-                break;
-            case semantic::SemanticTypeKind::U64:
-                format = "%llu";
+                suffix = "i64";
                 break;
             case semantic::SemanticTypeKind::ISize:
-                format = "%zd";
+                suffix = "isize";
+                break;
+            case semantic::SemanticTypeKind::U8:
+                suffix = "u8";
+                break;
+            case semantic::SemanticTypeKind::U16:
+                suffix = "u16";
+                break;
+            case semantic::SemanticTypeKind::U32:
+                suffix = "u32";
+                break;
+            case semantic::SemanticTypeKind::U64:
+                suffix = "u64";
                 break;
             case semantic::SemanticTypeKind::USize:
-                format = "%zu";
+                suffix = "usize";
                 break;
             case semantic::SemanticTypeKind::F32:
-                format = "%.9g";
-                formattedValue = _builder.CreateFPExt(
-                    value, llvm::Type::getDoubleTy(_context));
+                suffix = "f32";
                 break;
             case semantic::SemanticTypeKind::F64:
-                format = "%.17g";
+                suffix = "f64";
+                break;
+            case semantic::SemanticTypeKind::Bool:
+                suffix = "bool";
+                value = _builder.CreateZExt(
+                    value, llvm::Type::getInt8Ty(_context), "stdout.bool");
+                break;
+            case semantic::SemanticTypeKind::Char:
+                suffix = "char";
                 break;
             default:
                 Fail("stdout does not support type '" +
                      std::string(type.Name()) + "'");
                 return nullptr;
         }
-
-        llvm::FunctionType* snprintfType = llvm::FunctionType::get(
-            llvm::Type::getInt32Ty(_context),
-            {llvm::PointerType::getUnqual(_context), sizeType,
-             llvm::PointerType::getUnqual(_context)},
-            true);
-        llvm::FunctionCallee snprintf =
-            _module->getOrInsertFunction("snprintf", snprintfType);
-        llvm::Value* written = _builder.CreateCall(
-            snprintf,
-            {data, llvm::ConstantInt::get(sizeType, bufferSize),
-             _builder.CreateGlobalString(format, "stdout.format"),
-             formattedValue},
-            "stdout.written");
-        length = _builder.CreateZExtOrTrunc(written, sizeType,
-                                           "stdout.formatted.length");
+        arguments = {value};
+        parameterTypes = {value->getType()};
     }
 
-    llvm::Value* result = llvm::UndefValue::get(stringViewType);
-    result = _builder.CreateInsertValue(result, data, 0, "stdout.data");
-    return _builder.CreateInsertValue(result, length, 1, "stdout.value");
+    llvm::FunctionType* outputType = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(_context), parameterTypes, false);
+    llvm::FunctionCallee output = _module->getOrInsertFunction(
+        "flecha_runtime_v1_stdout_" + suffix, outputType);
+    llvm::Value* call = _builder.CreateCall(output, arguments);
+    if (!newline) return call;
+
+    llvm::FunctionType* newlineType = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(_context), {}, false);
+    llvm::FunctionCallee emitNewline = _module->getOrInsertFunction(
+        "flecha_runtime_v1_stdout_newline", newlineType);
+    return _builder.CreateCall(emitNewline);
 }
 
 llvm::FunctionType* LlvmCodeGenerator::MapFunctionType(
@@ -785,27 +724,13 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
             }
             if (call.Function().BuiltIn() ==
                 semantic::BuiltInFunction::Stdout) {
-                llvm::Value* output = EmitPrintableValue(
-                    arguments.front(), call.Arguments().front()->Type());
-                return output == nullptr ? nullptr : EmitStdout(output);
+                return EmitRuntimeOutput(
+                    arguments.front(), call.Arguments().front()->Type(), false);
             }
             if (call.Function().BuiltIn() ==
                 semantic::BuiltInFunction::StdoutLine) {
-                llvm::Value* output = EmitPrintableValue(
-                    arguments.front(), call.Arguments().front()->Type());
-                if (output == nullptr) return nullptr;
-                (void)EmitStdout(output);
-                llvm::Value* newlineData =
-                    _builder.CreateGlobalString("\n", "stdout.newline");
-                llvm::StructType* type = StringViewType();
-                llvm::Value* newline = llvm::UndefValue::get(type);
-                newline = _builder.CreateInsertValue(newline, newlineData, 0,
-                                                     "newline.data");
-                newline = _builder.CreateInsertValue(
-                    newline,
-                    llvm::ConstantInt::get(type->getElementType(1), 1), 1,
-                    "newline");
-                return EmitStdout(newline);
+                return EmitRuntimeOutput(
+                    arguments.front(), call.Arguments().front()->Type(), true);
             }
             llvm::Function* function = _functions.at(&call.Function());
             return _builder.CreateCall(
@@ -828,7 +753,6 @@ std::unique_ptr<llvm::Module> LlvmCodeGenerator::Generate(
     _error.clear();
     _functions.clear();
     _variables.clear();
-    _stdoutFunction = nullptr;
     _module = std::make_unique<llvm::Module>(moduleName, _context);
     if (!_targetTriple.empty()) {
         _module->setTargetTriple(llvm::Triple(_targetTriple));

@@ -21,3 +21,8 @@ target_link_libraries(llvm_codegen
         flecha_project_options
         LLVM
 )
+
+add_dependencies(llvm_codegen runtime)
+target_compile_definitions(llvm_codegen PRIVATE
+    FLECHA_RUNTIME_LIBRARY_PATH="$<TARGET_FILE:runtime>"
+)

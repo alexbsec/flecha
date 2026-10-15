@@ -37,6 +37,10 @@ enum class DiagnosticCode {
     DuplicatePosition,
     UnknownPosition,
     InvalidCast,
+    NativeTargetUnavailable,
+    ObjectEmissionFailed,
+    RuntimeUnavailable,
+    LinkerFailed,
 };
 
 [[nodiscard]] std::string_view DiagnosticCodeName(DiagnosticCode code);

@@ -1,10 +1,19 @@
 i32 main() {
     stdoutln("Flecha");
-    stdoutln(42);
-    stdoutln(-7);
+    stdoutln(8 as i8);
+    stdoutln(16 as i16);
+    stdoutln(32);
+    stdoutln(64 as i64);
+    stdoutln(72 as isize);
+    stdoutln(8 as u8);
+    stdoutln(16 as u16);
+    stdoutln(32 as u32);
+    stdoutln(64 as u64);
+    stdoutln(72 as usize);
+    stdoutln(1.25 as f32);
+    stdoutln(1.5);
     stdoutln(true);
     stdoutln(false);
     stdoutln('!');
-    stdoutln(1.5);
     return 42;
 }

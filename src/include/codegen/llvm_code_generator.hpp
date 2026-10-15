@@ -54,9 +54,8 @@ class LlvmCodeGenerator final {
         const lowering::BoundBinaryExpression& expression);
     [[nodiscard]] llvm::Value* EmitStringViewEquality(
         llvm::Value* left, llvm::Value* right, bool negate);
-    [[nodiscard]] llvm::Value* EmitStdout(llvm::Value* value);
-    [[nodiscard]] llvm::Value* EmitPrintableValue(
-        llvm::Value* value, semantic::SemanticType type);
+    [[nodiscard]] llvm::Value* EmitRuntimeOutput(
+        llvm::Value* value, semantic::SemanticType type, bool newline);
     [[nodiscard]] llvm::AllocaInst* CreateEntryAlloca(
         const semantic::VariableSymbol& variable);
     bool Fail(std::string message);
@@ -74,7 +73,6 @@ class LlvmCodeGenerator final {
     std::vector<llvm::BasicBlock*> _proceedTargets;
     std::vector<llvm::BasicBlock*> _breakTargets;
     llvm::Function* _currentFunction = nullptr;
-    llvm::Function* _stdoutFunction = nullptr;
     std::string _error;
 };
 

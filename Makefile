@@ -120,7 +120,7 @@ native-stdout: build
 	@$(BUILD_DIR)/stdout > $(BUILD_DIR)/stdout.actual; result=$$?; \
 		output=`base64 -w 0 $(BUILD_DIR)/stdout.actual`; \
 		test "$$output" = \
-		"RmxlY2hhCjQyCi03CnRydWUKZmFsc2UKIQoxLjUK"; \
+		"RmxlY2hhCjgKMTYKMzIKNjQKNzIKOAoxNgozMgo2NAo3MgoxLjI1CjEuNQp0cnVlCmZhbHNlCiEK"; \
 		test $$result -eq 42
 	@echo "Native stdout example printed the expected text and returned 42"
 

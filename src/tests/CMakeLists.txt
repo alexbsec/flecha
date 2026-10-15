@@ -26,3 +26,12 @@ target_link_libraries(test_flecha
 
 include(GoogleTest)
 gtest_discover_tests(test_flecha)
+
+add_test(
+    NAME NativeRuntimeTests.PrintsEveryPrintableType
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/stdout.fl
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/runtime_stdout_test
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_stdout.cmake
+)
