@@ -77,6 +77,21 @@ TEST(LlvmCodeGeneratorTests, EmitsVerifiedFunctionsLocalsCallsAndReturns) {
     EXPECT_NE(ir.find("call i32 @add"), std::string::npos);
 }
 
+TEST(LlvmCodeGeneratorTests, EmitsForwardAndRecursiveCalls) {
+    GeneratedSource result = Generate(
+        "i32 main() { return Add(Factorial(3), 36); } "
+        "i32 Add(i32 left, i32 right) { return left + right; } "
+        "i32 Factorial(i32 value) { if value <= 1 { return 1; } "
+        "return value * Factorial(value - 1); }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("call i32 @Add"), std::string::npos);
+    EXPECT_NE(ir.find("call i32 @Factorial"), std::string::npos);
+}
+
 TEST(LlvmCodeGeneratorTests, EmitsAssignmentsAndConditionalControlFlow) {
     GeneratedSource result = Generate(
         "i32 main() { value := 1; if value < 2 { value = value + 41; } "
@@ -154,6 +169,38 @@ TEST(NativeCompilerTests, EmitsObjectAndLinksExecutableForHost) {
     const int exitCode =
         llvm::sys::ExecuteAndWait(executablePathText, arguments);
     EXPECT_EQ(exitCode, 42);
+
+    std::filesystem::remove(executablePath);
+    std::filesystem::remove(objectPath);
+}
+
+TEST(NativeCompilerTests, RunsForwardAndRecursiveCalls) {
+    GeneratedSource result = Generate(
+        "i32 main() { return Add(Factorial(3), 36); } "
+        "i32 Add(i32 left, i32 right) { return left + right; } "
+        "i32 Factorial(i32 value) { if value <= 1 { return 1; } "
+        "return value * Factorial(value - 1); }");
+    ASSERT_NE(result.boundProgram, nullptr);
+
+    const std::filesystem::path temporaryDirectory =
+        std::filesystem::temp_directory_path();
+    const std::filesystem::path executablePath =
+        temporaryDirectory / "flecha_native_functions_test";
+    const std::filesystem::path objectPath =
+        temporaryDirectory / "flecha_native_functions_test.o";
+    std::filesystem::remove(executablePath);
+    std::filesystem::remove(objectPath);
+
+    NativeCompiler compiler;
+    ASSERT_TRUE(compiler.Ready()) << compiler.Error();
+    ASSERT_TRUE(compiler.BuildExecutable(*result.boundProgram,
+                                         "native_functions_test",
+                                         executablePath.string()))
+        << compiler.Error();
+
+    const std::string executablePathText = executablePath.string();
+    const llvm::StringRef arguments[] = {executablePathText};
+    EXPECT_EQ(llvm::sys::ExecuteAndWait(executablePathText, arguments), 42);
 
     std::filesystem::remove(executablePath);
     std::filesystem::remove(objectPath);

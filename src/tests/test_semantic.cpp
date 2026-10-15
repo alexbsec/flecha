@@ -291,6 +291,25 @@ TEST(SemanticCallTests, ValidatesCalleeArityAndArgumentTypes) {
               nullptr);
 }
 
+TEST(SemanticCallTests, ResolvesForwardAndRecursiveCalls) {
+    Analysis analysis = Analyze(
+        "i32 main() { return Add(Factorial(3), 36); } "
+        "i32 Add(i32 left, i32 right) { return left + right; } "
+        "i32 Factorial(i32 value) { if value <= 1 { return 1; } "
+        "return value * Factorial(value - 1); }");
+
+    EXPECT_FALSE(analysis.diagnostics.HasErrors());
+}
+
+TEST(SemanticCallTests, RejectsDuplicateFunctionDeclarations) {
+    Analysis analysis = Analyze(
+        "i32 Calculate(i32 value) { return value; } "
+        "bool Calculate(bool value) { return value; }");
+
+    EXPECT_NE(FindDiagnostic(analysis, DiagnosticCode::DuplicateDeclaration),
+              nullptr);
+}
+
 TEST(SemanticIntegrationTests, AnalyzesCompleteValidProgram) {
     Analysis analysis = Analyze(
         "i32 add(i32 left, i32 right) { return left + right; } "
