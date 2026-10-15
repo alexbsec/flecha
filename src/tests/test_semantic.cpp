@@ -255,6 +255,50 @@ TEST(SemanticStringTests, FormatsScalarsOnlyAsOwningStrings) {
     EXPECT_NE(FindDiagnostic(invalid, DiagnosticCode::InvalidCast), nullptr);
 }
 
+TEST(SemanticStringTests, ConcatenatesStringsAndViewsIntoOwningStrings) {
+    Analysis analysis = Analyze(
+        "void Main() { string owned = \"fle\"; stringv view = \"cha\"; "
+        "first := owned + view; second := view + owned; "
+        "third := \"f\" + \"le\" + \"cha\"; }");
+    ASSERT_FALSE(analysis.diagnostics.HasErrors());
+    const FunctionDeclaration& function = FunctionAt(analysis, 0);
+    for (std::size_t index = 2; index < 5; ++index) {
+        EXPECT_EQ(analysis.model.DeclaredSymbol(VariableAt(function, index))
+                      ->Type()
+                      .Kind(),
+                  SemanticTypeKind::String);
+    }
+}
+
+TEST(SemanticStringTests, RejectsViewsThatEscapeLocalOwners) {
+    Analysis direct = Analyze(
+        "stringv Bad() { string owned = \"temporary\"; "
+        "return owned.view(); }");
+    EXPECT_NE(FindDiagnostic(direct, DiagnosticCode::BorrowEscapesOwner),
+              nullptr);
+
+    Analysis indirect = Analyze(
+        "stringv Bad() { string owned = \"temporary\"; "
+        "stringv view = owned; return view; }");
+    EXPECT_NE(FindDiagnostic(indirect, DiagnosticCode::BorrowEscapesOwner),
+              nullptr);
+
+    Analysis parameter = Analyze(
+        "stringv Bad(string owned) { return owned.view(); }");
+    EXPECT_NE(FindDiagnostic(parameter, DiagnosticCode::BorrowEscapesOwner),
+              nullptr);
+
+    Analysis temporary = Analyze(
+        "stringv Bad() { return (\"a\" + \"b\").view(); }");
+    EXPECT_NE(FindDiagnostic(temporary, DiagnosticCode::BorrowEscapesOwner),
+              nullptr);
+
+    Analysis safe = Analyze(
+        "stringv Identity(stringv value) { return value; } "
+        "stringv Literal() { return \"static\"; }");
+    EXPECT_FALSE(safe.diagnostics.HasErrors());
+}
+
 TEST(SemanticDeclarationTests, BindsEveryNameToItsResolvedSymbol) {
     Analysis analysis =
         Analyze("i32 identity(i32 value) { copy := value; return copy; }");

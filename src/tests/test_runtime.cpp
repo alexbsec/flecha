@@ -55,3 +55,13 @@ TEST(RuntimeStringTests, EmptyStringNeedsNoAllocation) {
     EXPECT_EQ(empty.capacity, 0);
     flecha_runtime_v1_string_destroy(empty.data);
 }
+
+TEST(RuntimeStringTests, ConcatenatesIndependentOwnedStorage) {
+    FlechaRuntimeString joined{};
+    flecha_runtime_v1_string_concat(&joined, "fle", 3, "cha", 3);
+    ASSERT_NE(joined.data, nullptr);
+    EXPECT_EQ(joined.length, 6);
+    EXPECT_EQ(joined.capacity, 6);
+    EXPECT_STREQ(joined.data, "flecha");
+    flecha_runtime_v1_string_destroy(joined.data);
+}

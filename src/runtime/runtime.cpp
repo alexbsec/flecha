@@ -125,6 +125,38 @@ void flecha_runtime_v1_string_clone(FlechaRuntimeString* output,
     flecha_runtime_v1_string_from_view(output, data, length);
 }
 
+void flecha_runtime_v1_string_concat(FlechaRuntimeString* output,
+                                     const char* leftData, size_t leftLength,
+                                     const char* rightData,
+                                     size_t rightLength) {
+    if (rightLength > SIZE_MAX - leftLength) {
+        (void)std::fputs(
+            "Flecha runtime error: string concatenation size overflow\n",
+            stderr);
+        std::abort();
+    }
+    const size_t length = leftLength + rightLength;
+    if (length == 0) {
+        *output = {nullptr, 0, 0};
+        return;
+    }
+    if (length == SIZE_MAX) {
+        (void)std::fputs(
+            "Flecha runtime error: string allocation size overflow\n", stderr);
+        std::abort();
+    }
+    char* data = static_cast<char*>(std::malloc(length + 1));
+    if (data == nullptr) {
+        (void)std::fputs("Flecha runtime error: string allocation failed\n",
+                         stderr);
+        std::abort();
+    }
+    std::memcpy(data, leftData, leftLength);
+    std::memcpy(data + leftLength, rightData, rightLength);
+    data[length] = '\0';
+    *output = {data, length, length};
+}
+
 void flecha_runtime_v1_string_destroy(char* data) {
     std::free(data);
 }

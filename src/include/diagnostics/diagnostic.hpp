@@ -39,6 +39,7 @@ enum class DiagnosticCode {
     InvalidCast,
     InvalidMember,
     NotIndexable,
+    BorrowEscapesOwner,
     NativeTargetUnavailable,
     ObjectEmissionFailed,
     RuntimeUnavailable,

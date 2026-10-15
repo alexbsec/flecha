@@ -109,6 +109,7 @@ void SemanticAnalyzer::AnalyzeFunction(
     }
 
     _positions.clear();
+    _localStringBorrows.clear();
     _loopDepth = 0;
     CollectPositions(function.Body(), 0);
 
@@ -241,10 +242,16 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                            "'");
                 variableType = SemanticType::Error();
             }
-            AddSymbol(std::make_unique<VariableSymbol>(
-                          SymbolKind::LocalVariable, variable.Name(),
-                          variableType, variable.NameRange(), true),
-                      variable);
+            const Symbol* symbol = AddSymbol(std::make_unique<VariableSymbol>(
+                                                 SymbolKind::LocalVariable,
+                                                 variable.Name(), variableType,
+                                                 variable.NameRange(), true),
+                                             variable);
+            if (symbol != nullptr && variable.Initializer() != nullptr &&
+                variableType.Kind() == SemanticTypeKind::StringView &&
+                BorrowsLocalString(*variable.Initializer())) {
+                _localStringBorrows.insert(symbol);
+            }
             break;
         }
         case core::AstNodeKind::ExpressionStatement:
@@ -269,6 +276,12 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                         : returnStatement.Value()->Range();
                 Report(diagnostics::DiagnosticCode::InvalidReturnType, range,
                        TypeMismatch(expected, actual));
+            } else if (returnStatement.Value() != nullptr &&
+                       expected.Kind() == SemanticTypeKind::StringView &&
+                       BorrowsLocalString(*returnStatement.Value())) {
+                Report(diagnostics::DiagnosticCode::BorrowEscapesOwner,
+                       returnStatement.Value()->Range(),
+                       "borrowed string view outlives its local owning string");
             }
             break;
         }
@@ -472,6 +485,13 @@ SemanticType SemanticAnalyzer::AnalyzeBinary(
     if (left.IsError() || right.IsError()) return SemanticType::Error();
     const TokenType operation = expression.OperatorType();
     const bool same = left == right;
+    const bool leftString = left.Kind() == SemanticTypeKind::String ||
+                            left.Kind() == SemanticTypeKind::StringView;
+    const bool rightString = right.Kind() == SemanticTypeKind::String ||
+                             right.Kind() == SemanticTypeKind::StringView;
+    if (operation == TokenType::Add && leftString && rightString) {
+        return SemanticType(SemanticTypeKind::String);
+    }
     if (operation == TokenType::Add || operation == TokenType::Sub ||
         operation == TokenType::Mul || operation == TokenType::Div ||
         operation == TokenType::Mod) {
@@ -494,7 +514,8 @@ SemanticType SemanticAnalyzer::AnalyzeBinary(
         }
     } else if (operation == TokenType::Equal ||
                operation == TokenType::NotEqual) {
-        if (same || left.Kind() == SemanticTypeKind::None ||
+        if ((leftString && rightString) || same ||
+            left.Kind() == SemanticTypeKind::None ||
             right.Kind() == SemanticTypeKind::None) {
             return SemanticType(SemanticTypeKind::Bool);
         }
@@ -534,7 +555,52 @@ SemanticType SemanticAnalyzer::AnalyzeAssignment(
                expression.Value().Range(), TypeMismatch(target, value));
         return SemanticType::Error();
     }
+    if (target.Kind() == SemanticTypeKind::StringView) {
+        if (BorrowsLocalString(expression.Value())) {
+            _localStringBorrows.insert(symbol);
+        } else {
+            _localStringBorrows.erase(symbol);
+        }
+    }
     return target;
+}
+
+bool SemanticAnalyzer::BorrowsLocalString(
+    const core::Expression& expression) const {
+    switch (expression.Kind()) {
+        case core::AstNodeKind::NameExpression: {
+            const Symbol* symbol = _model.SymbolFor(
+                static_cast<const core::NameExpression&>(expression));
+            if (symbol == nullptr) return false;
+            if (_localStringBorrows.contains(symbol)) return true;
+            return symbol->Type().Kind() == SemanticTypeKind::String;
+        }
+        case core::AstNodeKind::ParenthesizedExpression:
+            return BorrowsLocalString(
+                static_cast<const core::ParenthesizedExpression&>(expression)
+                    .Inner());
+        case core::AstNodeKind::CastExpression: {
+            const core::CastExpression& cast =
+                static_cast<const core::CastExpression&>(expression);
+            return SemanticType::FromSyntax(cast.TargetType().Type()).Kind() ==
+                       SemanticTypeKind::StringView &&
+                   (_model.TypeOf(cast.Value()).Kind() ==
+                        SemanticTypeKind::String ||
+                    BorrowsLocalString(cast.Value()));
+        }
+        case core::AstNodeKind::MemberCallExpression: {
+            const core::MemberCallExpression& call =
+                static_cast<const core::MemberCallExpression&>(expression);
+            if (call.Member() != "view" && call.Member() != "substr") {
+                return false;
+            }
+            return _model.TypeOf(call.Receiver()).Kind() ==
+                       SemanticTypeKind::String ||
+                   BorrowsLocalString(call.Receiver());
+        }
+        default:
+            return false;
+    }
 }
 
 SemanticType SemanticAnalyzer::AnalyzeCall(

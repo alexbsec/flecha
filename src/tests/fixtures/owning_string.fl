@@ -1,14 +1,15 @@
 i32 main() {
-    string greeting = "hi mom".string();
+    string greeting = "hi " + "mom";
     string copied = greeting;
     string returned = Echo(copied);
     string answer = 42.string();
     stringv borrowed = returned.cast<stringv>;
+    string nested = "h" + "i" + " mom";
 
     stdoutln(greeting);
     stdoutln(answer);
 
-    if borrowed == "hi mom" and answer.view() == "42" {
+    if borrowed == "hi mom" and nested == greeting and answer.view() == "42" {
         return 42;
     }
     return 0;

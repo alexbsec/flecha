@@ -40,6 +40,10 @@ void flecha_runtime_v1_string_from_view(FlechaRuntimeString* output,
                                         const char* data, size_t length);
 void flecha_runtime_v1_string_clone(FlechaRuntimeString* output,
                                     const char* data, size_t length);
+void flecha_runtime_v1_string_concat(FlechaRuntimeString* output,
+                                     const char* leftData, size_t leftLength,
+                                     const char* rightData,
+                                     size_t rightLength);
 void flecha_runtime_v1_string_destroy(char* data);
 void flecha_runtime_v1_string_from_i8(FlechaRuntimeString* output,
                                       int8_t value);

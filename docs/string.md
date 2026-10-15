@@ -111,3 +111,12 @@ The runtime will provide versioned C ABI operations for:
 Bounds checking for `at`, indexing, and `substr` follows the existing
 `stringv` policy: an invalid dynamic range reports a runtime error and
 terminates safely.
+## Lifetime safety
+
+`stringv` never owns storage. A view may be returned when it refers to static
+literal storage or a borrowed `stringv` parameter, but a view into any owning
+`string` in the current function cannot escape the owner's scope. The semantic analyzer reports
+`FLECHA-S0020` when a returned view would outlive its local owner.
+
+Owning `string` locals are destroyed at their lexical scope edge, including
+control-flow exits through `return`, `break`, `proceed`, and `jumpto`.

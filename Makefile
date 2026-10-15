@@ -2,6 +2,8 @@ CMAKE ?= cmake
 CMAKE_GENERATOR ?= Ninja
 BUILD_DIR ?= build
 TEST_BUILD_DIR ?= build-tests
+SANITIZER_BUILD_DIR ?= build-sanitizers
+GTEST_SOURCE_DIR ?=
 
 .DEFAULT_GOAL := build
 
@@ -9,7 +11,7 @@ TEST_BUILD_DIR ?= build-tests
 	test-semantic llvm-poc native-poc native-if-also native-functions \
 	native-while native-loop-control native-casts native-string-view \
 	native-string-view-operations native-owning-string native-stdout \
-	test-neovim clean
+	test-neovim test-sanitizers clean
 
 help:
 	@echo "Flecha build targets:"
@@ -17,6 +19,7 @@ help:
 	@echo "  make test           Configure, build, and run all tests"
 	@echo "  make test-semantic  Run only semantic and scope tests"
 	@echo "  make test-neovim    Test Neovim filetype and syntax support"
+	@echo "  make test-sanitizers Run unit tests with ASan and UBSan"
 	@echo "  make llvm-poc       Emit and execute the LLVM proof of concept"
 	@echo "  make native-poc     Build and execute a native Flecha program"
 	@echo "  make native-if-also Build and test the if/also native example"
@@ -59,6 +62,17 @@ test-neovim:
 	NVIM_LOG_FILE=/dev/null nvim --headless -u NONE -i NONE -n \
 		--cmd 'set runtimepath^=$(CURDIR)/editors/neovim' \
 		-S editors/neovim/tests/syntax_test.vim
+
+test-sanitizers:
+	$(CMAKE) -S . -B $(SANITIZER_BUILD_DIR) -G "$(CMAKE_GENERATOR)" \
+		-DBUILD_TESTING=ON \
+		-DFLECHA_ENABLE_SANITIZERS=ON \
+		$(if $(GTEST_SOURCE_DIR),-DFETCHCONTENT_SOURCE_DIR_GOOGLETEST=$(GTEST_SOURCE_DIR),) \
+		-DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+	$(CMAKE) --build $(SANITIZER_BUILD_DIR) --parallel
+	ASAN_OPTIONS=detect_leaks=0 \
+	UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+		$(SANITIZER_BUILD_DIR)/src/tests/test_flecha
 
 llvm-poc: build
 	$(BUILD_DIR)/flecha --emit-llvm examples/llvm_poc.fl \
