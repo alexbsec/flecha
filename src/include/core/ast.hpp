@@ -100,18 +100,25 @@ class TypeNode final : public AstNode {
 class Parameter final : public AstNode {
    public:
     Parameter(source::SourceRange range, std::unique_ptr<TypeNode> type,
-              std::string name)
-        : AstNode(range), _type(std::move(type)), _name(std::move(name)) {}
+              std::string name, source::SourceRange nameRange = {})
+        : AstNode(range),
+          _type(std::move(type)),
+          _name(std::move(name)),
+          _nameRange(nameRange.Empty() ? range : nameRange) {}
 
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::Parameter;
     }
     [[nodiscard]] const TypeNode& Type() const { return *_type; }
     [[nodiscard]] const std::string& Name() const { return _name; }
+    [[nodiscard]] const source::SourceRange& NameRange() const {
+        return _nameRange;
+    }
 
    private:
     std::unique_ptr<TypeNode> _type;
     std::string _name;
+    source::SourceRange _nameRange;
 };
 
 enum class FunctionModifier : std::uint8_t {
@@ -142,17 +149,19 @@ class BlockStatement final : public Statement {
 
 class FunctionDeclaration final : public Declaration {
    public:
-    FunctionDeclaration(
-        source::SourceRange range, std::vector<FunctionModifier> modifiers,
-        std::unique_ptr<TypeNode> returnType, std::string name,
-        std::vector<std::unique_ptr<Parameter>> parameters,
-        std::unique_ptr<BlockStatement> body)
+    FunctionDeclaration(source::SourceRange range,
+                        std::vector<FunctionModifier> modifiers,
+                        std::unique_ptr<TypeNode> returnType, std::string name,
+                        std::vector<std::unique_ptr<Parameter>> parameters,
+                        std::unique_ptr<BlockStatement> body,
+                        source::SourceRange nameRange = {})
         : Declaration(range),
           _modifiers(std::move(modifiers)),
           _returnType(std::move(returnType)),
           _name(std::move(name)),
           _parameters(std::move(parameters)),
-          _body(std::move(body)) {}
+          _body(std::move(body)),
+          _nameRange(nameRange.Empty() ? range : nameRange) {}
 
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::FunctionDeclaration;
@@ -162,6 +171,9 @@ class FunctionDeclaration final : public Declaration {
     }
     [[nodiscard]] const TypeNode& ReturnType() const { return *_returnType; }
     [[nodiscard]] const std::string& Name() const { return _name; }
+    [[nodiscard]] const source::SourceRange& NameRange() const {
+        return _nameRange;
+    }
     [[nodiscard]] const std::vector<std::unique_ptr<Parameter>>& Parameters()
         const {
         return _parameters;
@@ -174,6 +186,7 @@ class FunctionDeclaration final : public Declaration {
     std::string _name;
     std::vector<std::unique_ptr<Parameter>> _parameters;
     std::unique_ptr<BlockStatement> _body;
+    source::SourceRange _nameRange;
 };
 
 class CompilationUnit final : public AstNode {
@@ -211,8 +224,7 @@ class ReturnStatement final : public Statement {
 
 class AlsoClause final : public AstNode {
    public:
-    AlsoClause(source::SourceRange range,
-               std::unique_ptr<Expression> condition,
+    AlsoClause(source::SourceRange range, std::unique_ptr<Expression> condition,
                std::unique_ptr<BlockStatement> body)
         : AstNode(range),
           _condition(std::move(condition)),
@@ -289,11 +301,13 @@ class VariableDeclarationStatement final : public Statement {
     VariableDeclarationStatement(source::SourceRange range,
                                  std::unique_ptr<TypeNode> type,
                                  std::string name,
-                                 std::unique_ptr<Expression> initializer)
+                                 std::unique_ptr<Expression> initializer,
+                                 source::SourceRange nameRange = {})
         : Statement(range),
           _type(std::move(type)),
           _name(std::move(name)),
-          _initializer(std::move(initializer)) {}
+          _initializer(std::move(initializer)),
+          _nameRange(nameRange.Empty() ? range : nameRange) {}
 
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::VariableDeclarationStatement;
@@ -301,6 +315,9 @@ class VariableDeclarationStatement final : public Statement {
     [[nodiscard]] const TypeNode* ExplicitType() const { return _type.get(); }
     [[nodiscard]] bool HasExplicitType() const { return _type != nullptr; }
     [[nodiscard]] const std::string& Name() const { return _name; }
+    [[nodiscard]] const source::SourceRange& NameRange() const {
+        return _nameRange;
+    }
     [[nodiscard]] const Expression* Initializer() const {
         return _initializer.get();
     }
@@ -309,6 +326,7 @@ class VariableDeclarationStatement final : public Statement {
     std::unique_ptr<TypeNode> _type;
     std::string _name;
     std::unique_ptr<Expression> _initializer;
+    source::SourceRange _nameRange;
 };
 
 class ExpressionStatement final : public Statement {

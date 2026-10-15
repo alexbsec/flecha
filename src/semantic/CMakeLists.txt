@@ -1,0 +1,19 @@
+add_library(semantic STATIC
+    scope.cpp
+    semantic_analyzer.cpp
+    semantic_model.cpp
+    semantic_type.cpp
+)
+
+target_include_directories(semantic
+    PUBLIC
+        ${PROJECT_SOURCE_DIR}/src/include
+)
+
+target_link_libraries(semantic
+    PUBLIC
+        core
+        diagnostics
+    PRIVATE
+        flecha_project_options
+)
