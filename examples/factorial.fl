@@ -1,9 +1,38 @@
-i32 factorial(i32 val) {
-    if val <= 1 {
-        return 1;
+i32 valid() {
+    allocator := system_allocator();
+    *u8 ptr = none;
+
+    unsafe {
+        (ptr, error err) = allocator.alloc<u8>(10); 
     }
 
-    return val * factorial(val - 1);
+    unsafe perform(ptr);
+}
+
+unsafe void perform(*const u8 ptr) {
+    // do stuff with ptr
+    allocator := system_allocator();
+    allocator.free(ptr);
+}
+
+
+i32 invalid() {
+    allocator := system_allocator();
+    *u8 ptr;
+
+    // cannot alloc in safe code, must be in unsafe block
+    (ptr, error err) = allocator.alloc<u8>(10);
+
+    unsafe {
+        (ptr, error err) = allocator.alloc<u8>(10); 
+
+        // do stuff with it
+
+        // Missing free, this will cause a memory leak
+        // compiler must warn about this before even compiling
+    }
+
+    allocator.free(ptr); // compile error: use of possibly uninitialized variable 'ptr'
 }
 
 void main() {
