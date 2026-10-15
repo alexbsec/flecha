@@ -21,6 +21,10 @@ enum class AstNodeKind {
     ReturnStatement,
     IfStatement,
     WhileStatement,
+    ProceedStatement,
+    BreakStatement,
+    JumpToStatement,
+    PositionStatement,
     ConditionalBranch,
     AlsoClause,
     VariableDeclarationStatement,
@@ -319,6 +323,62 @@ class WhileStatement final : public Statement {
     std::unique_ptr<Expression> _condition;
     std::unique_ptr<BlockStatement> _body;
     std::unique_ptr<AlsoClause> _alsoClause;
+};
+
+class ProceedStatement final : public Statement {
+   public:
+    using Statement::Statement;
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::ProceedStatement;
+    }
+};
+
+class BreakStatement final : public Statement {
+   public:
+    using Statement::Statement;
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::BreakStatement;
+    }
+};
+
+class JumpToStatement final : public Statement {
+   public:
+    JumpToStatement(source::SourceRange range, std::string position,
+                    source::SourceRange positionRange)
+        : Statement(range),
+          _position(std::move(position)),
+          _positionRange(positionRange) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::JumpToStatement;
+    }
+    [[nodiscard]] const std::string& Position() const { return _position; }
+    [[nodiscard]] const source::SourceRange& PositionRange() const {
+        return _positionRange;
+    }
+
+   private:
+    std::string _position;
+    source::SourceRange _positionRange;
+};
+
+class PositionStatement final : public Statement {
+   public:
+    PositionStatement(source::SourceRange range, std::string name,
+                      source::SourceRange nameRange)
+        : Statement(range),
+          _name(std::move(name)),
+          _nameRange(nameRange) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::PositionStatement;
+    }
+    [[nodiscard]] const std::string& Name() const { return _name; }
+    [[nodiscard]] const source::SourceRange& NameRange() const {
+        return _nameRange;
+    }
+
+   private:
+    std::string _name;
+    source::SourceRange _nameRange;
 };
 
 class VariableDeclarationStatement final : public Statement {

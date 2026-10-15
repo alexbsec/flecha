@@ -102,6 +102,22 @@ std::unique_ptr<BoundStatement> Lowerer::LowerStatement(
         case core::AstNodeKind::WhileStatement:
             return LowerWhile(
                 static_cast<const core::WhileStatement&>(statement));
+        case core::AstNodeKind::ProceedStatement:
+            return std::make_unique<BoundProceedStatement>(statement.Range());
+        case core::AstNodeKind::BreakStatement:
+            return std::make_unique<BoundBreakStatement>(statement.Range());
+        case core::AstNodeKind::JumpToStatement: {
+            const core::JumpToStatement& jump =
+                static_cast<const core::JumpToStatement&>(statement);
+            return std::make_unique<BoundJumpToStatement>(statement.Range(),
+                                                          jump.Position());
+        }
+        case core::AstNodeKind::PositionStatement: {
+            const core::PositionStatement& position =
+                static_cast<const core::PositionStatement&>(statement);
+            return std::make_unique<BoundPositionStatement>(statement.Range(),
+                                                            position.Name());
+        }
         default:
             return nullptr;
     }

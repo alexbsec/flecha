@@ -143,6 +143,24 @@ class Dumper final {
                 WriteBlock(whileStatement.Body());
                 break;
             }
+            case BoundNodeKind::ProceedStatement:
+                _stream << "proceed\n";
+                break;
+            case BoundNodeKind::BreakStatement:
+                _stream << "break\n";
+                break;
+            case BoundNodeKind::JumpToStatement:
+                _stream << "jumpto "
+                        << static_cast<const BoundJumpToStatement&>(statement)
+                               .Position()
+                        << "\n";
+                break;
+            case BoundNodeKind::PositionStatement:
+                _stream << "position "
+                        << static_cast<const BoundPositionStatement&>(statement)
+                               .Name()
+                        << "\n";
+                break;
             default:
                 break;
         }

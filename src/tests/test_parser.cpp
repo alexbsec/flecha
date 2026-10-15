@@ -533,3 +533,25 @@ TEST(ParserWhileTests, RejectsMultipleAlsoClauses) {
     EXPECT_EQ(diagnostics.Diagnostics()[0].message,
               "a while loop may have only one 'also' clause");
 }
+
+TEST(ParserLoopControlTests, ParsesProceedBreakJumpAndPosition) {
+    DiagnosticBag diagnostics;
+    std::unique_ptr<CompilationUnit> unit = ParseSource(
+        "void Test() { while true { proceed; break; jumpto retry; "
+        "#retry } }",
+        diagnostics);
+
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const FunctionDeclaration& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    const WhileStatement& loop =
+        static_cast<const WhileStatement&>(*function.Body().Statements()[0]);
+    ASSERT_EQ(loop.Body().Statements().size(), 4);
+    EXPECT_EQ(loop.Body().Statements()[0]->Kind(),
+              AstNodeKind::ProceedStatement);
+    EXPECT_EQ(loop.Body().Statements()[1]->Kind(), AstNodeKind::BreakStatement);
+    EXPECT_EQ(loop.Body().Statements()[2]->Kind(),
+              AstNodeKind::JumpToStatement);
+    EXPECT_EQ(loop.Body().Statements()[3]->Kind(),
+              AstNodeKind::PositionStatement);
+}

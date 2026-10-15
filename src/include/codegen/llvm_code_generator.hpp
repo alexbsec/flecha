@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "lowering/bound_ir.hpp"
 
@@ -35,6 +36,8 @@ class LlvmCodeGenerator final {
     bool EmitStatement(const lowering::BoundStatement& statement);
     bool EmitIf(const lowering::BoundIfStatement& statement);
     bool EmitWhile(const lowering::BoundWhileStatement& statement);
+    void DeclarePositions(const lowering::BoundBlockStatement& block);
+    bool EmitPosition(const lowering::BoundPositionStatement& statement);
     [[nodiscard]] llvm::Value* EmitExpression(
         const lowering::BoundExpression& expression);
     [[nodiscard]] llvm::Value* EmitLiteral(
@@ -58,6 +61,9 @@ class LlvmCodeGenerator final {
         _functions;
     std::unordered_map<const semantic::VariableSymbol*, llvm::AllocaInst*>
         _variables;
+    std::unordered_map<std::string, llvm::BasicBlock*> _positions;
+    std::vector<llvm::BasicBlock*> _proceedTargets;
+    std::vector<llvm::BasicBlock*> _breakTargets;
     llvm::Function* _currentFunction = nullptr;
     std::string _error;
 };

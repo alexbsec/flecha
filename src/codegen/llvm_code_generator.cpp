@@ -124,9 +124,13 @@ bool LlvmCodeGenerator::EmitFunction(
     const lowering::BoundFunction& boundFunction) {
     _currentFunction = _functions.at(&boundFunction.Symbol());
     _variables.clear();
+    _positions.clear();
+    _proceedTargets.clear();
+    _breakTargets.clear();
     llvm::BasicBlock* entry =
         llvm::BasicBlock::Create(_context, "entry", _currentFunction);
     _builder.SetInsertPoint(entry);
+    DeclarePositions(boundFunction.Body());
 
     std::size_t index = 0;
     for (llvm::Argument& argument : _currentFunction->args()) {
@@ -155,10 +159,52 @@ bool LlvmCodeGenerator::EmitFunction(
 bool LlvmCodeGenerator::EmitBlock(const lowering::BoundBlockStatement& block) {
     for (const std::unique_ptr<lowering::BoundStatement>& statement :
          block.Statements()) {
-        if (_builder.GetInsertBlock()->getTerminator() != nullptr) break;
+        if (_builder.GetInsertBlock()->getTerminator() != nullptr &&
+            statement->Kind() != lowering::BoundNodeKind::PositionStatement) {
+            llvm::BasicBlock* unreachableBlock = llvm::BasicBlock::Create(
+                _context, "unreachable", _currentFunction);
+            _builder.SetInsertPoint(unreachableBlock);
+        }
         if (!EmitStatement(*statement)) return false;
     }
     return true;
+}
+
+void LlvmCodeGenerator::DeclarePositions(
+    const lowering::BoundBlockStatement& block) {
+    for (const std::unique_ptr<lowering::BoundStatement>& statement :
+         block.Statements()) {
+        switch (statement->Kind()) {
+            case lowering::BoundNodeKind::PositionStatement: {
+                const lowering::BoundPositionStatement& position =
+                    static_cast<const lowering::BoundPositionStatement&>(
+                        *statement);
+                _positions.emplace(
+                    position.Name(),
+                    llvm::BasicBlock::Create(_context,
+                                             "position." + position.Name(),
+                                             _currentFunction));
+                break;
+            }
+            case lowering::BoundNodeKind::IfStatement: {
+                const lowering::BoundIfStatement& ifStatement =
+                    static_cast<const lowering::BoundIfStatement&>(*statement);
+                DeclarePositions(ifStatement.ThenBlock());
+                if (ifStatement.ElseBlock() != nullptr) {
+                    DeclarePositions(*ifStatement.ElseBlock());
+                }
+                break;
+            }
+            case lowering::BoundNodeKind::WhileStatement:
+                DeclarePositions(
+                    static_cast<const lowering::BoundWhileStatement&>(
+                        *statement)
+                        .Body());
+                break;
+            default:
+                break;
+        }
+    }
 }
 
 bool LlvmCodeGenerator::EmitStatement(
@@ -200,6 +246,22 @@ bool LlvmCodeGenerator::EmitStatement(
         case lowering::BoundNodeKind::WhileStatement:
             return EmitWhile(
                 static_cast<const lowering::BoundWhileStatement&>(statement));
+        case lowering::BoundNodeKind::ProceedStatement:
+            _builder.CreateBr(_proceedTargets.back());
+            return true;
+        case lowering::BoundNodeKind::BreakStatement:
+            _builder.CreateBr(_breakTargets.back());
+            return true;
+        case lowering::BoundNodeKind::JumpToStatement: {
+            const lowering::BoundJumpToStatement& jump =
+                static_cast<const lowering::BoundJumpToStatement&>(statement);
+            _builder.CreateBr(_positions.at(jump.Position()));
+            return true;
+        }
+        case lowering::BoundNodeKind::PositionStatement:
+            return EmitPosition(
+                static_cast<const lowering::BoundPositionStatement&>(
+                    statement));
         default:
             return Fail("unsupported bound statement");
     }
@@ -253,12 +315,27 @@ bool LlvmCodeGenerator::EmitWhile(
     _builder.CreateCondBr(condition, bodyBlock, endBlock);
 
     _builder.SetInsertPoint(bodyBlock);
+    _proceedTargets.push_back(conditionBlock);
+    _breakTargets.push_back(endBlock);
     if (!EmitBlock(statement.Body())) return false;
+    _proceedTargets.pop_back();
+    _breakTargets.pop_back();
     if (_builder.GetInsertBlock()->getTerminator() == nullptr) {
         _builder.CreateBr(conditionBlock);
     }
 
     _builder.SetInsertPoint(endBlock);
+    return true;
+}
+
+bool LlvmCodeGenerator::EmitPosition(
+    const lowering::BoundPositionStatement& statement) {
+    llvm::BasicBlock* target = _positions.at(statement.Name());
+    llvm::BasicBlock* current = _builder.GetInsertBlock();
+    if (current != target && current->getTerminator() == nullptr) {
+        _builder.CreateBr(target);
+    }
+    _builder.SetInsertPoint(target);
     return true;
 }
 

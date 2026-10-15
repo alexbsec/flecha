@@ -19,6 +19,10 @@ enum class BoundNodeKind {
     ReturnStatement,
     IfStatement,
     WhileStatement,
+    ProceedStatement,
+    BreakStatement,
+    JumpToStatement,
+    PositionStatement,
     LiteralExpression,
     VariableExpression,
     FunctionExpression,
@@ -313,6 +317,48 @@ class BoundWhileStatement final : public BoundStatement {
    private:
     std::unique_ptr<BoundExpression> _condition;
     std::unique_ptr<BoundBlockStatement> _body;
+};
+
+class BoundProceedStatement final : public BoundStatement {
+   public:
+    using BoundStatement::BoundStatement;
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::ProceedStatement;
+    }
+};
+
+class BoundBreakStatement final : public BoundStatement {
+   public:
+    using BoundStatement::BoundStatement;
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::BreakStatement;
+    }
+};
+
+class BoundJumpToStatement final : public BoundStatement {
+   public:
+    BoundJumpToStatement(source::SourceRange range, std::string position)
+        : BoundStatement(range), _position(std::move(position)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::JumpToStatement;
+    }
+    [[nodiscard]] const std::string& Position() const { return _position; }
+
+   private:
+    std::string _position;
+};
+
+class BoundPositionStatement final : public BoundStatement {
+   public:
+    BoundPositionStatement(source::SourceRange range, std::string name)
+        : BoundStatement(range), _name(std::move(name)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::PositionStatement;
+    }
+    [[nodiscard]] const std::string& Name() const { return _name; }
+
+   private:
+    std::string _name;
 };
 
 class BoundFunction final {

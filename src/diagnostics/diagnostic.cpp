@@ -48,6 +48,12 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0012";
         case DiagnosticCode::InvalidVariableType:
             return "FLECHA-S0013";
+        case DiagnosticCode::LoopControlOutsideLoop:
+            return "FLECHA-S0014";
+        case DiagnosticCode::DuplicatePosition:
+            return "FLECHA-S0015";
+        case DiagnosticCode::UnknownPosition:
+            return "FLECHA-S0016";
     }
     return "FLECHA-UNKNOWN";
 }

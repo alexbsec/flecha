@@ -63,4 +63,10 @@ TEST(DiagnosticTests, SemanticCodesAreStableAndContiguous) {
               "FLECHA-S0012");
     EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::InvalidVariableType),
               "FLECHA-S0013");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::LoopControlOutsideLoop),
+              "FLECHA-S0014");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::DuplicatePosition),
+              "FLECHA-S0015");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::UnknownPosition),
+              "FLECHA-S0016");
 }

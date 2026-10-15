@@ -55,6 +55,7 @@ enum class TokenType {
     Dot,
     Colon,
     SemiColon,
+    Hash,
 
     // Keywords
     Unsafe,
@@ -68,6 +69,9 @@ enum class TokenType {
     Else,
     Also,
     While,
+    Proceed,
+    Break,
+    JumpTo,
     Error,
     Const,
     Volatile,

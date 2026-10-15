@@ -119,6 +119,22 @@ TEST(LlvmCodeGeneratorTests, EmitsWhileAndConditionalAlsoControlFlow) {
     EXPECT_NE(ir.find("if.then"), std::string::npos);
 }
 
+TEST(LlvmCodeGeneratorTests, EmitsLoopControlAndCrossNestedJumps) {
+    GeneratedSource result = Generate(
+        "i32 main() { value := 0; warmup := 0; while warmup < 1 { "
+        "warmup = warmup + 1; proceed; } while true { if value == 0 { "
+        "jumpto inner_position; } #outer_position break; while true { "
+        "#inner_position value = 42; jumpto outer_position; } } "
+        "return value; }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("position.outer_position"), std::string::npos);
+    EXPECT_NE(ir.find("position.inner_position"), std::string::npos);
+}
+
 TEST(LlvmCodeGeneratorTests, EmitsShortCircuitBooleanLogic) {
     GeneratedSource result =
         Generate("bool both(bool left, bool right) { return left and right; }");

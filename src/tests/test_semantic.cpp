@@ -227,6 +227,28 @@ TEST(SemanticDiagnosticTests, RequiresBooleanWhileAndAlsoConditions) {
               DiagnosticCode::InvalidCondition);
 }
 
+TEST(SemanticLoopControlTests, ResolvesPositionsAcrossNestedLoops) {
+    Analysis analysis = Analyze(
+        "void Test() { while true { while true { jumpto outer; break; } "
+        "#outer proceed; } }");
+
+    EXPECT_FALSE(analysis.diagnostics.HasErrors());
+}
+
+TEST(SemanticLoopControlTests, DiagnosesInvalidLoopControlAndPositions) {
+    Analysis analysis = Analyze(
+        "void Test() { proceed; break; jumpto missing; #outside "
+        "while true { #duplicate #duplicate jumpto unknown; } }");
+
+    EXPECT_NE(FindDiagnostic(analysis,
+                             DiagnosticCode::LoopControlOutsideLoop),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(analysis, DiagnosticCode::DuplicatePosition),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(analysis, DiagnosticCode::UnknownPosition),
+              nullptr);
+}
+
 TEST(SemanticDiagnosticTests, ReportsDuplicateAtExactIdentifierRange) {
     const std::string source = "i32 main() { x := 1; x := 2; return x; }";
     Analysis analysis = Analyze(source);

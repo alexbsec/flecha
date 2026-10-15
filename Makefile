@@ -7,7 +7,7 @@ TEST_BUILD_DIR ?= build-tests
 
 .PHONY: help configure build configure-tests build-tests test \
 	test-semantic llvm-poc native-poc native-if-also native-functions \
-	native-while clean
+	native-while native-loop-control clean
 
 help:
 	@echo "Flecha build targets:"
@@ -19,6 +19,7 @@ help:
 	@echo "  make native-if-also Build and test the if/also native example"
 	@echo "  make native-functions Build and test calls and recursion"
 	@echo "  make native-while   Build and test while/also loops"
+	@echo "  make native-loop-control Build and test loop control"
 	@echo "  make clean          Clean generated build artifacts"
 	@echo ""
 	@echo "Overrides: CMAKE, CMAKE_GENERATOR, BUILD_DIR, TEST_BUILD_DIR"
@@ -80,6 +81,13 @@ native-while: build
 	@test -f $(BUILD_DIR)/while_also.o
 	@$(BUILD_DIR)/while_also; result=$$?; test $$result -eq 42
 	@echo "Native while/also example returned 42"
+
+native-loop-control: build
+	$(BUILD_DIR)/flecha build examples/loop_control.fl \
+		-o $(BUILD_DIR)/loop_control
+	@test -f $(BUILD_DIR)/loop_control.o
+	@$(BUILD_DIR)/loop_control; result=$$?; test $$result -eq 42
+	@echo "Native loop-control example returned 42"
 
 clean:
 	@if test -f $(BUILD_DIR)/CMakeCache.txt; then \

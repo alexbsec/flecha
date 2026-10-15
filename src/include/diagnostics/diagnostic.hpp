@@ -33,6 +33,9 @@ enum class DiagnosticCode {
     InvalidReturnType,
     CannotInferType,
     InvalidVariableType,
+    LoopControlOutsideLoop,
+    DuplicatePosition,
+    UnknownPosition,
 };
 
 [[nodiscard]] std::string_view DiagnosticCodeName(DiagnosticCode code);

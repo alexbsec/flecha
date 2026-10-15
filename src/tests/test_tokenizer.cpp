@@ -37,16 +37,16 @@ TEST(TokenizerTests, RecognizesKeywords) {
 
 TEST(TokenizerTests, RecognizesFunctionModifiersAndReservedWords) {
     std::vector<Token> tokens = Tokenize(
-        "export extern inline comptime yield if else while error const "
-        "volatile as "
-        "null true false");
+        "export extern inline comptime yield if else while proceed break "
+        "jumpto error const volatile as null true false");
 
     const std::vector<TokenType> expected = {
-        TokenType::Export,    TokenType::Extern,   TokenType::Inline,
-        TokenType::Comptime,  TokenType::Yield,    TokenType::If,
-        TokenType::Else,      TokenType::While,    TokenType::Error,
-        TokenType::Const,     TokenType::Volatile, TokenType::As,
-        TokenType::Null,      TokenType::True,     TokenType::False,
+        TokenType::Export,   TokenType::Extern,   TokenType::Inline,
+        TokenType::Comptime, TokenType::Yield,    TokenType::If,
+        TokenType::Else,     TokenType::While,    TokenType::Proceed,
+        TokenType::Break,    TokenType::JumpTo,   TokenType::Error,
+        TokenType::Const,    TokenType::Volatile, TokenType::As,
+        TokenType::Null,     TokenType::True,     TokenType::False,
         TokenType::EOF_TOKEN,
     };
     ASSERT_EQ(tokens.size(), expected.size());

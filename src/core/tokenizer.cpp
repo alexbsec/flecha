@@ -36,6 +36,9 @@ const KeywordMap KEYWORDS = {
     {"else", TokenType::Else},
     {"also", TokenType::Also},
     {"while", TokenType::While},
+    {"proceed", TokenType::Proceed},
+    {"break", TokenType::Break},
+    {"jumpto", TokenType::JumpTo},
     {"error", TokenType::Error},
     {"const", TokenType::Const},
     {"volatile", TokenType::Volatile},
@@ -183,6 +186,8 @@ Token Tokenizer::NextToken() {
             return makeToken(TokenType::Mod);
         case '^':
             return makeToken(TokenType::Xor);
+        case '#':
+            return makeToken(TokenType::Hash);
         case ':':
             return makeToken(Match('=') ? TokenType::DeclareAssign
                                         : TokenType::Colon);

@@ -90,6 +90,10 @@ void SemanticAnalyzer::AnalyzeFunction(
         _currentFunction = nullptr;
     }
 
+    _positions.clear();
+    _loopDepth = 0;
+    CollectPositions(function.Body(), 0);
+
     Scope* previousScope = _currentScope;
     _currentScope = &AddScope(previousScope);
     for (const std::unique_ptr<core::Parameter>& parameter :
@@ -103,6 +107,56 @@ void SemanticAnalyzer::AnalyzeFunction(
     AnalyzeBlock(function.Body(), false);
     _currentScope = previousScope;
     _currentFunction = nullptr;
+}
+
+void SemanticAnalyzer::CollectPositions(const core::BlockStatement& block,
+                                        std::size_t loopDepth) {
+    for (const std::unique_ptr<core::Statement>& statement :
+         block.Statements()) {
+        if (statement->Kind() == core::AstNodeKind::PositionStatement) {
+            const core::PositionStatement& position =
+                static_cast<const core::PositionStatement&>(*statement);
+            if (loopDepth == 0) {
+                Report(diagnostics::DiagnosticCode::LoopControlOutsideLoop,
+                       position.Range(),
+                       "positions are only valid inside a loop");
+            }
+            if (!_positions.emplace(position.Name(), position.NameRange()).second) {
+                Report(diagnostics::DiagnosticCode::DuplicatePosition,
+                       position.NameRange(),
+                       "duplicate position '" + position.Name() + "'");
+            }
+            continue;
+        }
+        if (statement->Kind() == core::AstNodeKind::IfStatement) {
+            const core::IfStatement& ifStatement =
+                static_cast<const core::IfStatement&>(*statement);
+            CollectPositions(ifStatement.PrimaryBranch().Body(), loopDepth);
+            if (ifStatement.PrimaryBranch().Also() != nullptr) {
+                CollectPositions(ifStatement.PrimaryBranch().Also()->Body(),
+                                 loopDepth);
+            }
+            for (const std::unique_ptr<core::ConditionalBranch>& branch :
+                 ifStatement.ElseIfBranches()) {
+                CollectPositions(branch->Body(), loopDepth);
+                if (branch->Also() != nullptr) {
+                    CollectPositions(branch->Also()->Body(), loopDepth);
+                }
+            }
+            if (ifStatement.ElseBody() != nullptr) {
+                CollectPositions(*ifStatement.ElseBody(), loopDepth);
+            }
+            continue;
+        }
+        if (statement->Kind() == core::AstNodeKind::WhileStatement) {
+            const core::WhileStatement& whileStatement =
+                static_cast<const core::WhileStatement&>(*statement);
+            CollectPositions(whileStatement.Body(), loopDepth + 1);
+            if (whileStatement.Also() != nullptr) {
+                CollectPositions(whileStatement.Also()->Body(), loopDepth + 1);
+            }
+        }
+    }
 }
 
 void SemanticAnalyzer::AnalyzeBlock(const core::BlockStatement& block,
@@ -224,6 +278,7 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                        whileStatement.Condition().Range(),
                        "condition must have type 'bool'");
             }
+            ++_loopDepth;
             AnalyzeBlock(whileStatement.Body(), true);
             if (whileStatement.Also() != nullptr) {
                 const SemanticType alsoCondition =
@@ -236,8 +291,36 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                 }
                 AnalyzeBlock(whileStatement.Also()->Body(), true);
             }
+            --_loopDepth;
             break;
         }
+        case core::AstNodeKind::ProceedStatement:
+        case core::AstNodeKind::BreakStatement:
+            if (_loopDepth == 0) {
+                Report(diagnostics::DiagnosticCode::LoopControlOutsideLoop,
+                       statement.Range(),
+                       statement.Kind() == core::AstNodeKind::ProceedStatement
+                           ? "'proceed' is only valid inside a loop"
+                           : "'break' is only valid inside a loop");
+            }
+            break;
+        case core::AstNodeKind::JumpToStatement: {
+            const core::JumpToStatement& jump =
+                static_cast<const core::JumpToStatement&>(statement);
+            if (_loopDepth == 0) {
+                Report(diagnostics::DiagnosticCode::LoopControlOutsideLoop,
+                       statement.Range(),
+                       "'jumpto' is only valid inside a loop");
+            }
+            if (!_positions.contains(jump.Position())) {
+                Report(diagnostics::DiagnosticCode::UnknownPosition,
+                       jump.PositionRange(),
+                       "unknown position '" + jump.Position() + "'");
+            }
+            break;
+        }
+        case core::AstNodeKind::PositionStatement:
+            break;
         default:
             break;
     }

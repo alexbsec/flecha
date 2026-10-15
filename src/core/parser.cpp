@@ -271,6 +271,10 @@ std::unique_ptr<Statement> Parser::ParseStatement() {
     if (Check(TokenType::While)) {
         return ParseWhileStatement();
     }
+    if (Check(TokenType::Proceed)) return ParseProceedStatement();
+    if (Check(TokenType::Break)) return ParseBreakStatement();
+    if (Check(TokenType::JumpTo)) return ParseJumpToStatement();
+    if (Check(TokenType::Hash)) return ParsePositionStatement();
     if (IsTypeToken(Current().type) || IsInferredVariableDeclaration()) {
         return ParseVariableDeclarationStatement();
     }
@@ -447,6 +451,46 @@ std::unique_ptr<WhileStatement> Parser::ParseWhileStatement() {
     return std::make_unique<WhileStatement>(
         source::SourceRange{whileToken.range.start, end}, std::move(condition),
         std::move(body), std::move(alsoClause));
+}
+
+std::unique_ptr<ProceedStatement> Parser::ParseProceedStatement() {
+    const Token& keyword = Advance();
+    const Token* semicolon = Consume(TokenType::SemiColon, "';' after 'proceed'");
+    const source::SourceLocation end =
+        semicolon == nullptr ? keyword.range.end : semicolon->range.end;
+    return std::make_unique<ProceedStatement>(
+        source::SourceRange{keyword.range.start, end});
+}
+
+std::unique_ptr<BreakStatement> Parser::ParseBreakStatement() {
+    const Token& keyword = Advance();
+    const Token* semicolon = Consume(TokenType::SemiColon, "';' after 'break'");
+    const source::SourceLocation end =
+        semicolon == nullptr ? keyword.range.end : semicolon->range.end;
+    return std::make_unique<BreakStatement>(
+        source::SourceRange{keyword.range.start, end});
+}
+
+std::unique_ptr<JumpToStatement> Parser::ParseJumpToStatement() {
+    const Token& keyword = Advance();
+    const Token* position = Consume(TokenType::Identifier, "position name");
+    if (position == nullptr) return nullptr;
+    const Token* semicolon =
+        Consume(TokenType::SemiColon, "';' after position name");
+    const source::SourceLocation end =
+        semicolon == nullptr ? position->range.end : semicolon->range.end;
+    return std::make_unique<JumpToStatement>(
+        source::SourceRange{keyword.range.start, end}, position->value,
+        position->range);
+}
+
+std::unique_ptr<PositionStatement> Parser::ParsePositionStatement() {
+    const Token& hash = Advance();
+    const Token* name = Consume(TokenType::Identifier, "position name after '#'");
+    if (name == nullptr) return nullptr;
+    return std::make_unique<PositionStatement>(
+        source::SourceRange{hash.range.start, name->range.end}, name->value,
+        name->range);
 }
 
 std::unique_ptr<ReturnStatement> Parser::ParseReturnStatement() {

@@ -39,6 +39,10 @@ class Parser {
     std::unique_ptr<ReturnStatement> ParseReturnStatement();
     std::unique_ptr<IfStatement> ParseIfStatement();
     std::unique_ptr<WhileStatement> ParseWhileStatement();
+    std::unique_ptr<ProceedStatement> ParseProceedStatement();
+    std::unique_ptr<BreakStatement> ParseBreakStatement();
+    std::unique_ptr<JumpToStatement> ParseJumpToStatement();
+    std::unique_ptr<PositionStatement> ParsePositionStatement();
     std::unique_ptr<ConditionalBranch> ParseConditionalBranch(
         source::SourceLocation start);
     std::unique_ptr<AlsoClause> ParseAlsoClause();
