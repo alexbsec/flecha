@@ -12,6 +12,7 @@
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/TargetParser/Triple.h>
 
 namespace flecha::codegen {
 namespace {
@@ -31,6 +32,12 @@ bool IsUnsigned(semantic::SemanticType type) {
 
 LlvmCodeGenerator::LlvmCodeGenerator() : _builder(_context) {}
 
+void LlvmCodeGenerator::ConfigureTarget(std::string targetTriple,
+                                        llvm::DataLayout dataLayout) {
+    _targetTriple = std::move(targetTriple);
+    _dataLayout = std::move(dataLayout);
+}
+
 bool LlvmCodeGenerator::Fail(std::string message) {
     if (_error.empty()) _error = std::move(message);
     return false;
@@ -49,10 +56,15 @@ llvm::Type* LlvmCodeGenerator::MapType(semantic::SemanticType type) {
         case semantic::SemanticTypeKind::U32:
             return llvm::Type::getInt32Ty(_context);
         case semantic::SemanticTypeKind::I64:
-        case semantic::SemanticTypeKind::ISize:
         case semantic::SemanticTypeKind::U64:
-        case semantic::SemanticTypeKind::USize:
             return llvm::Type::getInt64Ty(_context);
+        case semantic::SemanticTypeKind::ISize:
+        case semantic::SemanticTypeKind::USize: {
+            const unsigned width = _dataLayout.has_value()
+                                       ? _dataLayout->getPointerSizeInBits()
+                                       : 64;
+            return llvm::IntegerType::get(_context, width);
+        }
         case semantic::SemanticTypeKind::F32:
             return llvm::Type::getFloatTy(_context);
         case semantic::SemanticTypeKind::F64:
@@ -425,6 +437,10 @@ std::unique_ptr<llvm::Module> LlvmCodeGenerator::Generate(
     _functions.clear();
     _variables.clear();
     _module = std::make_unique<llvm::Module>(moduleName, _context);
+    if (!_targetTriple.empty()) {
+        _module->setTargetTriple(llvm::Triple(_targetTriple));
+    }
+    if (_dataLayout.has_value()) _module->setDataLayout(*_dataLayout);
     if (!DeclareFunctions(program)) return nullptr;
     for (const std::unique_ptr<lowering::BoundFunction>& function :
          program.Functions()) {

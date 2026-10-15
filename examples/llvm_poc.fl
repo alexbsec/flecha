@@ -3,7 +3,7 @@ i32 add(i32 left, i32 right) {
 }
 
 i32 main() {
-    x := 21;
+    x := 20;
     y := 22;
     return add(x, y);
 }

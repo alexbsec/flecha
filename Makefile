@@ -6,7 +6,7 @@ TEST_BUILD_DIR ?= build-tests
 .DEFAULT_GOAL := build
 
 .PHONY: help configure build configure-tests build-tests test \
-	test-semantic llvm-poc clean
+	test-semantic llvm-poc native-poc clean
 
 help:
 	@echo "Flecha build targets:"
@@ -14,6 +14,7 @@ help:
 	@echo "  make test           Configure, build, and run all tests"
 	@echo "  make test-semantic  Run only semantic and scope tests"
 	@echo "  make llvm-poc       Emit and execute the LLVM proof of concept"
+	@echo "  make native-poc     Build and execute a native Flecha program"
 	@echo "  make clean          Clean generated build artifacts"
 	@echo ""
 	@echo "Overrides: CMAKE, CMAKE_GENERATOR, BUILD_DIR, TEST_BUILD_DIR"
@@ -47,6 +48,13 @@ llvm-poc: build
 	@lli $(BUILD_DIR)/llvm_poc.ll; result=$$?; \
 		test $$result -eq 42
 	@echo "LLVM proof of concept returned 42"
+
+native-poc: build
+	$(BUILD_DIR)/flecha build examples/llvm_poc.fl \
+		-o $(BUILD_DIR)/llvm_poc
+	@test -f $(BUILD_DIR)/llvm_poc.o
+	@$(BUILD_DIR)/llvm_poc; result=$$?; test $$result -eq 42
+	@echo "Native proof of concept returned 42"
 
 clean:
 	@if test -f $(BUILD_DIR)/CMakeCache.txt; then \

@@ -1,13 +1,16 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <filesystem>
 #include <string>
 #include <vector>
 
 #include <llvm/IR/Module.h>
 #include <llvm/Support/raw_ostream.h>
+#include <llvm/Support/Program.h>
 
 #include "codegen/llvm_code_generator.hpp"
+#include "codegen/native_compiler.hpp"
 #include "core/parser.hpp"
 #include "core/tokenizer.hpp"
 #include "lowering/lowerer.hpp"
@@ -104,4 +107,54 @@ TEST(LlvmCodeGeneratorTests, RejectsDeferredLiteralRepresentations) {
     ASSERT_NE(result.generator, nullptr);
     EXPECT_EQ(result.module, nullptr);
     EXPECT_NE(result.generator->Error().find("string"), std::string::npos);
+}
+
+TEST(LlvmCodeGeneratorTests, UsesTargetPointerWidthForSizeTypes) {
+    GeneratedSource result = Generate(
+        "isize identity(isize value) { return value; }");
+    ASSERT_NE(result.boundProgram, nullptr);
+
+    LlvmCodeGenerator generator;
+    generator.ConfigureTarget("i386-unknown-linux-gnu",
+                              llvm::DataLayout("e-p:32:32"));
+    std::unique_ptr<llvm::Module> module =
+        generator.Generate(*result.boundProgram, "pointer_width_test");
+    ASSERT_NE(module, nullptr) << generator.Error();
+    const std::string ir = ModuleText(*module);
+    EXPECT_NE(ir.find("define i32 @identity(i32 %value)"),
+              std::string::npos);
+}
+
+TEST(NativeCompilerTests, EmitsObjectAndLinksExecutableForHost) {
+    GeneratedSource result = Generate(
+        "i32 add(i32 left, i32 right) { return left + right; } "
+        "i32 main() { return add(20, 22); }");
+    ASSERT_NE(result.boundProgram, nullptr);
+
+    const std::filesystem::path temporaryDirectory =
+        std::filesystem::temp_directory_path();
+    const std::filesystem::path executablePath =
+        temporaryDirectory / "flecha_native_codegen_test";
+    const std::filesystem::path objectPath =
+        temporaryDirectory / "flecha_native_codegen_test.o";
+    std::filesystem::remove(executablePath);
+    std::filesystem::remove(objectPath);
+
+    NativeCompiler compiler;
+    ASSERT_TRUE(compiler.Ready()) << compiler.Error();
+    EXPECT_FALSE(compiler.TargetTriple().empty());
+    ASSERT_TRUE(compiler.BuildExecutable(*result.boundProgram, "native_test",
+                                         executablePath.string()))
+        << compiler.Error();
+    EXPECT_TRUE(std::filesystem::is_regular_file(objectPath));
+    EXPECT_TRUE(std::filesystem::is_regular_file(executablePath));
+
+    const std::string executablePathText = executablePath.string();
+    const llvm::StringRef arguments[] = {executablePathText};
+    const int exitCode =
+        llvm::sys::ExecuteAndWait(executablePathText, arguments);
+    EXPECT_EQ(exitCode, 42);
+
+    std::filesystem::remove(executablePath);
+    std::filesystem::remove(objectPath);
 }

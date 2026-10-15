@@ -2,6 +2,7 @@ find_package(LLVM REQUIRED CONFIG)
 
 add_library(llvm_codegen STATIC
     llvm_code_generator.cpp
+    native_compiler.cpp
 )
 
 target_include_directories(llvm_codegen
