@@ -1,0 +1,19 @@
+i32 main() {
+    value := 0;
+
+    if false {
+        value = 100;
+    } also true {
+        // This does not run because its owning `if` did not run.
+        value = 99;
+    } else if true {
+        value = 40;
+    } also value == 40 {
+        // This runs because its owning `else if` ran.
+        value = value + 2;
+    } else {
+        value = 1;
+    }
+
+    return value;
+}
