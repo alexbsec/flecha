@@ -1,0 +1,65 @@
+// Build with: build/flecha build examples/structures.fl -o /tmp/structures
+// The program returns 42.
+structure Box {
+    i32 x;
+    private {
+        i32 y;
+        bool ready;
+    }
+};
+
+Box Box::init(i32 x, i32 y) override {
+    return build Box {
+        self.x = x;
+        self.y = y;
+        self.ready = true;
+    };
+}
+
+private i32 Box::hidden(&const self) { return self->y; }
+i32 Box::value(&const self) { return self->x + self->hidden(); }
+void Box::setY(&self, i32 value) { self->y = value; }
+unsafe i32 Box::rawValue(*const self) { return self->x + self->y; }
+
+structure NamedBox {
+    string name = "answer";
+    Box box = Box::init(2, 40); // Explicit arguments for this constructor.
+};
+
+// An unsafe tear forbids copying and moving this type. The raw target below
+// remains alive until cleanup; unsafe code must uphold that requirement.
+structure Counter {
+    *i32 total;
+};
+unsafe void Counter::tear(&self) override {
+    if self->total != null { *self->total = *self->total + 1; }
+}
+unsafe Counter make_counter(*i32 total) {
+    return build Counter { self.total = total; };
+}
+
+i32 main() {
+    NamedBox named = NamedBox::init();
+    NamedBox copy = named; // Independently owns a copy of the string field.
+    named.name = "changed";
+    if copy.name != "answer" { return 1; }
+
+    copy.box.setY(39);
+    {
+        ref := &copy.box;
+        ref->setY(40);
+    }
+    unsafe {
+        *Box ptr = &raw copy.box;
+        if ptr->rawValue() != 42 { return 2; }
+    }
+
+    i32 cleanups = 0;
+    unsafe {
+        Counter counter = make_counter(&raw cleanups);
+        // Fresh factory return constructs directly in counter's storage.
+        // tear runs automatically at this scope's end.
+    }
+    if cleanups != 1 { return 3; }
+    return copy.box.value();
+}

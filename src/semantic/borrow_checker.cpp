@@ -196,6 +196,13 @@ class BorrowChecker final {
                     CollectUses(*argument, uses);
                 break;
             }
+            case Kind::MemberAccessExpression: {
+                const auto& field =
+                    static_cast<const core::MemberAccessExpression&>(
+                        expression);
+                if (_model.FieldFor(field)) CollectUses(field.Receiver(), uses);
+                break;
+            }
             case Kind::MemberCallExpression: {
                 const auto& call =
                     static_cast<const core::MemberCallExpression&>(expression);
@@ -429,6 +436,19 @@ class BorrowChecker final {
         const core::Expression& inner = Unwrap(expression);
         const Symbol* symbol = Named(inner);
         if (symbol != nullptr) return {{{symbol, {}}}, nullptr, 0};
+        if (inner.Kind() == Kind::MemberAccessExpression) {
+            const auto& field =
+                static_cast<const core::MemberAccessExpression&>(inner);
+            if (!_model.FieldFor(field)) return {};
+            if (field.Access() == TokenType::Arrow) {
+                Value receiver = Evaluate(field.Receiver());
+                return _model.TypeOf(field.Receiver()).Kind() ==
+                               SemanticTypeKind::Reference
+                           ? receiver
+                           : Value{};
+            }
+            return Place(field.Receiver());
+        }
         if (inner.Kind() == Kind::MemberCallExpression) {
             const auto& call =
                 static_cast<const core::MemberCallExpression&>(inner);
@@ -615,9 +635,45 @@ class BorrowChecker final {
                     static_cast<const core::CastExpression&>(expression)
                         .Value());
                 return {};
+            case Kind::MemberAccessExpression: {
+                const auto& field =
+                    static_cast<const core::MemberAccessExpression&>(
+                        expression);
+                if (_model.FieldFor(field))
+                    CheckAccess(Place(expression), false, expression.Range());
+                return {};
+            }
             case Kind::MemberCallExpression: {
                 const auto& call =
                     static_cast<const core::MemberCallExpression&>(expression);
+                if (const auto* method = _model.MethodFor(call)) {
+                    const std::vector<Loan> previousLoans = _temporaries;
+                    if (method->HasReceiver()) {
+                        Value value = call.Access() == TokenType::Arrow
+                                          ? Evaluate(call.Receiver())
+                                          : Place(call.Receiver());
+                        if (method->ParameterTypes()[0].Kind() ==
+                                SemanticTypeKind::Reference &&
+                            _model.TypeOf(call.Receiver()).Kind() !=
+                                SemanticTypeKind::Pointer)
+                            (void)Borrow(std::move(value),
+                                         !method->ParameterTypes()[0]
+                                              .Target()
+                                              ->IsConst(),
+                                         call.Receiver().Range());
+                    }
+                    const std::size_t offset = method->HasReceiver() ? 1 : 0;
+                    for (std::size_t i = 0; i < call.Arguments().size(); ++i) {
+                        Value value = Evaluate(*call.Arguments()[i]);
+                        const auto type = method->ParameterTypes()[i + offset];
+                        if (type.IsBorrowed())
+                            (void)Borrow(std::move(value),
+                                         !type.Target()->IsConst(),
+                                         call.Arguments()[i]->Range());
+                    }
+                    _temporaries = previousLoans;
+                    return {};
+                }
                 if (_model.TypeOf(call.Receiver()).IsSequence() &&
                     (call.Member() == "front" || call.Member() == "back")) {
                     CheckAccess(Place(expression), false, expression.Range());

@@ -27,6 +27,10 @@ const KeywordMap KEYWORDS = {
     {"void", TokenType::Void},
     {"string", TokenType::String},
     {"stringv", TokenType::StringView},
+    {"structure", TokenType::Structure},
+    {"private", TokenType::Private},
+    {"override", TokenType::Override},
+    {"build", TokenType::Build},
     {"unsafe", TokenType::Unsafe},
     {"export", TokenType::Export},
     {"extern", TokenType::Extern},
@@ -186,7 +190,7 @@ Token Tokenizer::NextToken() {
             return makeToken(Match('+') ? TokenType::Increment
                                         : TokenType::Add);
         case '-':
-            return makeToken(TokenType::Sub);
+            return makeToken(Match('>') ? TokenType::Arrow : TokenType::Sub);
         case '*':
             return makeToken(TokenType::Mul);
         case '/':
@@ -198,6 +202,7 @@ Token Tokenizer::NextToken() {
         case '#':
             return makeToken(TokenType::Hash);
         case ':':
+            if (Match(':')) return makeToken(TokenType::Scope);
             return makeToken(Match('=') ? TokenType::DeclareAssign
                                         : TokenType::Colon);
         case '=':

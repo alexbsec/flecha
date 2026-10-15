@@ -79,8 +79,8 @@ introduced in this milestone.
 ## Values, qualifiers, and ownership
 
 Supported elements are numeric scalars, booleans, characters, raw pointers,
-owning strings, supported fixed arrays, and nested tuples. Tuples use value-copy
-semantics. Arrays copy inline; owning string elements are deep-copied whenever
+owning strings, error values, structures, supported fixed arrays, and nested
+tuples. Tuples use value-copy semantics for copyable elements. Arrays copy inline; owning string elements are deep-copied whenever
 ownership is duplicated. Deferred tuple arguments also receive independent
 copies. Discarded owning elements and tuple results are cleaned up.
 
@@ -103,8 +103,10 @@ tuple copies its values into independently writable inferred bindings; explicit
 borrow and replace the whole value. References to owning tuples remain
 unsupported, consistent with the existing restriction on borrowing strings.
 
-`none` zero-initializes an explicitly typed tuple recursively, including empty
-owning strings and null raw pointers. Delayed tuple initialization uses the
+`none` zero-initializes an explicitly typed tuple without structures recursively,
+including empty owning strings and null raw pointers. Tuples containing structures
+require construction; their copy, destruction, and immovability rules follow
+[structures](structures.md). Noncopyable tuples cannot be destructured yet. Delayed tuple initialization uses the
 existing whole-variable definite-assignment rules. Tuples cannot be cast.
 
 ## Cleanup and ABI

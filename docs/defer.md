@@ -33,10 +33,14 @@ i32 main() {
   parent reborrow. They must not outlive their owners.
 - Each scope executes its registrations in reverse registration order. Inner
   scopes finish before outer scopes. Calls run before that scope destroys its
-  owning strings and compiler string temporaries.
+  owned strings, structures, and compiler temporaries.
 - Registration happens only if the statement executes. The same statement can
   register multiple calls, each with independent captures.
-- Non-void results are discarded. Owning string results are destroyed.
+- Non-void results are discarded and their owned storage is destroyed.
+- Copyable structure arguments (including arrays and tuples containing them)
+  receive independent copies of owning fields. Structure results construct
+  directly in final storage before cleanup, including immovable results. See
+  [structures](structures.md) for lifecycle rules.
 
 Only statically resolved direct function calls are supported, including
 `stdout` and `stdoutln`. Parenthesizing the call is allowed. Deferred blocks,

@@ -17,6 +17,9 @@ enum class AstNodeKind {
     CompilationUnit,
     FunctionDeclaration,
     ErrorDeclaration,
+    StructureDeclaration,
+    StructureField,
+    BuildExpression,
     Parameter,
     Type,
     BlockStatement,
@@ -147,8 +150,10 @@ class MemberAccessExpression final : public Expression {
    public:
     MemberAccessExpression(source::SourceRange range,
                            std::unique_ptr<Expression> receiver,
-                           std::string member, source::SourceRange memberRange)
+                           std::string member, source::SourceRange memberRange,
+                           TokenType access = TokenType::Dot)
         : Expression(range),
+          _access(access),
           _receiver(std::move(receiver)),
           _member(std::move(member)),
           _memberRange(memberRange) {}
@@ -161,7 +166,10 @@ class MemberAccessExpression final : public Expression {
         return _memberRange;
     }
 
+    TokenType Access() const { return _access; }
+
    private:
+    TokenType _access;
     std::unique_ptr<Expression> _receiver;
     std::string _member;
     source::SourceRange _memberRange;
@@ -236,6 +244,54 @@ class TypeNode final : public AstNode {
     source::SourceRange _qualifierRange;
 };
 
+class StructureField final : public AstNode {
+   public:
+    StructureField(source::SourceRange range, std::unique_ptr<TypeNode> type,
+                   std::string name, source::SourceRange nameRange,
+                   std::unique_ptr<Expression> initializer, bool isPrivate)
+        : AstNode(range),
+          _type(std::move(type)),
+          _name(std::move(name)),
+          _nameRange(nameRange),
+          _initializer(std::move(initializer)),
+          _isPrivate(isPrivate) {}
+    AstNodeKind Kind() const override { return AstNodeKind::StructureField; }
+    const TypeNode& Type() const { return *_type; }
+    const std::string& Name() const { return _name; }
+    source::SourceRange NameRange() const { return _nameRange; }
+    const Expression* Initializer() const { return _initializer.get(); }
+    bool IsPrivate() const { return _isPrivate; }
+
+   private:
+    std::unique_ptr<TypeNode> _type;
+    std::string _name;
+    source::SourceRange _nameRange;
+    std::unique_ptr<Expression> _initializer;
+    bool _isPrivate;
+};
+
+class StructureDeclaration final : public Declaration {
+   public:
+    StructureDeclaration(source::SourceRange range, std::string name,
+                         source::SourceRange nameRange,
+                         std::vector<std::unique_ptr<StructureField>> fields)
+        : Declaration(range),
+          _name(std::move(name)),
+          _nameRange(nameRange),
+          _fields(std::move(fields)) {}
+    AstNodeKind Kind() const override {
+        return AstNodeKind::StructureDeclaration;
+    }
+    const std::string& Name() const { return _name; }
+    source::SourceRange NameRange() const { return _nameRange; }
+    const auto& Fields() const { return _fields; }
+
+   private:
+    std::string _name;
+    source::SourceRange _nameRange;
+    std::vector<std::unique_ptr<StructureField>> _fields;
+};
+
 class Parameter final : public AstNode {
    public:
     Parameter(source::SourceRange range, std::unique_ptr<TypeNode> type,
@@ -261,6 +317,8 @@ class Parameter final : public AstNode {
 };
 
 enum class FunctionModifier : std::uint8_t {
+    Private,
+    Override,
     Unsafe,
     Export,
     Extern,
@@ -291,6 +349,20 @@ class BlockStatement final : public Statement {
     bool _isUnsafe;
 };
 
+class BuildExpression final : public Expression {
+   public:
+    BuildExpression(source::SourceRange range, std::unique_ptr<TypeNode> type,
+                    std::unique_ptr<BlockStatement> body)
+        : Expression(range), _type(std::move(type)), _body(std::move(body)) {}
+    AstNodeKind Kind() const override { return AstNodeKind::BuildExpression; }
+    const TypeNode& Type() const { return *_type; }
+    const BlockStatement& Body() const { return *_body; }
+
+   private:
+    std::unique_ptr<TypeNode> _type;
+    std::unique_ptr<BlockStatement> _body;
+};
+
 class FunctionDeclaration final : public Declaration {
    public:
     FunctionDeclaration(source::SourceRange range,
@@ -298,8 +370,10 @@ class FunctionDeclaration final : public Declaration {
                         std::unique_ptr<TypeNode> returnType, std::string name,
                         std::vector<std::unique_ptr<Parameter>> parameters,
                         std::unique_ptr<BlockStatement> body,
-                        source::SourceRange nameRange = {})
+                        source::SourceRange nameRange = {},
+                        std::string owner = {})
         : Declaration(range),
+          _owner(std::move(owner)),
           _modifiers(std::move(modifiers)),
           _returnType(std::move(returnType)),
           _name(std::move(name)),
@@ -319,6 +393,12 @@ class FunctionDeclaration final : public Declaration {
         }
         return false;
     }
+    const std::string& Owner() const { return _owner; }
+    bool HasModifier(FunctionModifier modifier) const {
+        for (const auto item : _modifiers)
+            if (item == modifier) return true;
+        return false;
+    }
     [[nodiscard]] const TypeNode& ReturnType() const { return *_returnType; }
     [[nodiscard]] const std::string& Name() const { return _name; }
     [[nodiscard]] const source::SourceRange& NameRange() const {
@@ -331,6 +411,7 @@ class FunctionDeclaration final : public Declaration {
     [[nodiscard]] const BlockStatement& Body() const { return *_body; }
 
    private:
+    std::string _owner;
     std::vector<FunctionModifier> _modifiers;
     std::unique_ptr<TypeNode> _returnType;
     std::string _name;
@@ -864,8 +945,10 @@ class MemberCallExpression final : public Expression {
     MemberCallExpression(source::SourceRange range,
                          std::unique_ptr<Expression> receiver,
                          std::string member, source::SourceRange memberRange,
-                         std::vector<std::unique_ptr<Expression>> arguments)
+                         std::vector<std::unique_ptr<Expression>> arguments,
+                         TokenType access = TokenType::Dot)
         : Expression(range),
+          _access(access),
           _receiver(std::move(receiver)),
           _member(std::move(member)),
           _memberRange(memberRange),
@@ -884,7 +967,10 @@ class MemberCallExpression final : public Expression {
         return _arguments;
     }
 
+    TokenType Access() const { return _access; }
+
    private:
+    TokenType _access;
     std::unique_ptr<Expression> _receiver;
     std::string _member;
     source::SourceRange _memberRange;

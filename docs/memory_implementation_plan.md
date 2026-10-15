@@ -2,8 +2,9 @@
 
 Status: const types, unsafe pointers, checked references, fixed arrays, and
 iteration, checked slices, deferred calls, and tuples/destructuring are merged.
-Named and generic error values are implemented on `feat/error-values`; see
-[error_values.md](error_values.md). Allocation and ownership work remain.
+Named and generic error values are merged; see [error_values.md](error_values.md).
+Structures are implemented on `feat/structures`; see [structures.md](structures.md).
+Allocation and general ownership work remain.
 
 Based on the agreed rules in [memory_model.md](memory_model.md), with the
 const-type milestone merged into `master` at `c9e6ee4`. Each milestone should be a separate feature
@@ -167,8 +168,7 @@ committed defer implementation to cover aggregate cleanup and deferred captures.
 
 Tuples, multiple results, and typed/mixed destructuring are implemented; see
 [tuples.md](tuples.md). Named and generic error values are implemented on
-`feat/error-values`; see [error_values.md](error_values.md). Generic allocator
-member-call syntax remains for the allocator milestone.
+`feat/error-values`; see [error_values.md](error_values.md). Generic `new<T>` syntax remains for the allocation milestone.
 
 This is a prerequisite for the agreed allocator API, not an allocator-specific
 parser shortcut.
@@ -181,20 +181,30 @@ parser shortcut.
 - Evaluate the right-hand side once before destination writes. Specify order,
   duplicate-target handling, scope visibility, and invalid/const destinations.
 - Preserve initialization and reference/resource effects across tuple elements.
-- Add generic member-call syntax sufficient for typed compiler built-ins such
-  as `allocator.alloc<T>(...)`; full user-defined generics are not required.
+- Add generic call syntax sufficient for the typed compiler built-in
+  `new<T>(...)`; full user-defined generics are not required.
 
 Acceptance: ordinary functions return/destructure multiple values correctly
 in native tests, including the mixed declaration/assignment form. Incorrect
 arity/types and writes to const bindings have precise diagnostics.
 
+## Structures (implemented before allocation)
+
+Implementation branch: `feat/structures`. Depends on the merged error-value
+milestone. See [structures.md](structures.md) for the complete implementation
+contract, restrictions, and native coverage. Includes nominal fields and
+privacy, `Type::method` declarations, `.`/`->` access, generated/overridden init,
+`build`, automatic tear, recursive cleanup, deep copies of owning fields, and
+direct final-storage construction for immovable results. General moves and
+stored-borrow lifetimes remain separate work.
+
 ## 6. System allocation and intraprocedural resource diagnostics
 
-Proposed branch: `feat/system-allocator`. Depends on: 2, 4, and 5.
+Proposed branch: `feat/raw-allocation`. Depends on: 2, 4, 5, and structures.
 
-- Add the built-in `Allocator` handle and `system_allocator()` for one
-  process-wide service. Copying/dropping a handle has no allocation side effects.
-- Implement unsafe `alloc<T>(value)` and `free`, with explicit result/error
+- Use the system allocation service through compiler built-ins; no public
+  `Allocator` handle or `system_allocator()` is planned.
+- Implement unsafe `new<T>(value)` returning `(*T, error)` and `free(ptr)`, with explicit result/error
   values. Allocation failure must set the pointer to null; successful allocation
   initializes one object. `none` means defined zero initialization.
 - Initially restrict element types to those whose size, alignment,

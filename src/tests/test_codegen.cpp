@@ -650,3 +650,21 @@ TEST(CodeGeneratorTests,
     EXPECT_NE(ir.find("define { i32, { ptr, i32 } } @generic"),
               std::string::npos);
 }
+
+TEST(LlvmCodeGeneratorTests, ConstructsStructureResultsInCallerStorage) {
+    GeneratedSource result = Generate(
+        "structure Box { i32 x = 42; }; "
+        "unsafe void Box::tear(&self) override {} "
+        "unsafe Box factory() { return Box::init(); } "
+        "unsafe (Box, i32) pair() { return (factory(), 42); } "
+        "i32 main() { unsafe { Box box = factory(); defer pair(); return "
+        "box.x; } }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("define void @factory(ptr"), std::string::npos);
+    EXPECT_NE(ir.find("define void @pair(ptr"), std::string::npos);
+    EXPECT_NE(ir.find("call void @factory(ptr"), std::string::npos);
+    EXPECT_NE(ir.find("call void @pair(ptr"), std::string::npos);
+}

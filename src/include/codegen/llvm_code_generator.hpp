@@ -7,6 +7,7 @@
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -35,7 +36,7 @@ class LlvmCodeGenerator final {
         std::vector<semantic::SemanticType> argumentTypes;
     };
     struct OwnedStorage final {
-        llvm::AllocaInst* storage;
+        llvm::Value* storage;
         semantic::SemanticType type;
     };
     struct CleanupScope final {
@@ -56,6 +57,14 @@ class LlvmCodeGenerator final {
         std::size_t retainedScopeCount;
     };
 
+    bool EmitInto(const lowering::BoundExpression& expression,
+                  llvm::Value* destination, semantic::SemanticType type);
+    bool EmitDefaultInto(llvm::Value* destination, semantic::SemanticType type);
+    void EmitDestroyAt(llvm::Value* storage, semantic::SemanticType type);
+    void EmitArrayElements(llvm::Value* storage, semantic::SemanticType type,
+                           bool reverse,
+                           const std::function<void(llvm::Value*)>& action);
+    llvm::AllocaInst* LifetimeFlag(llvm::Value* storage);
     [[nodiscard]] llvm::Type* MapType(semantic::SemanticType type);
     [[nodiscard]] llvm::StructType* StringViewType();
     [[nodiscard]] llvm::StructType* StringType();
@@ -111,7 +120,7 @@ class LlvmCodeGenerator final {
     llvm::Value* EmitValueCopy(llvm::Value* value, semantic::SemanticType type,
                                bool temporary);
     void EmitValueDestroy(llvm::Value* value, semantic::SemanticType type);
-    void EmitValueStorageCleanup(llvm::AllocaInst* storage,
+    void EmitValueStorageCleanup(llvm::Value* storage,
                                  semantic::SemanticType type);
     llvm::AllocaInst* CreateOwnedValueTemporary(semantic::SemanticType type,
                                                 std::string_view name);
@@ -141,7 +150,7 @@ class LlvmCodeGenerator final {
     std::optional<llvm::DataLayout> _dataLayout;
     std::unordered_map<const semantic::FunctionSymbol*, llvm::Function*>
         _functions;
-    std::unordered_map<const semantic::VariableSymbol*, llvm::AllocaInst*>
+    std::unordered_map<const semantic::VariableSymbol*, llvm::Value*>
         _variables;
     std::unordered_map<std::string, llvm::BasicBlock*> _positions;
     std::unordered_map<std::string,
@@ -154,6 +163,10 @@ class LlvmCodeGenerator final {
     std::unordered_map<const lowering::BoundBlockStatement*,
                        std::shared_ptr<CleanupScope>>
         _blockScopes;
+    std::unordered_map<const semantic::StructureType*, llvm::StructType*>
+        _structureTypes;
+    std::unordered_map<llvm::Value*, llvm::AllocaInst*> _lifetimeFlags;
+    llvm::Value* _returnStorage = nullptr;
     llvm::Function* _currentFunction = nullptr;
     semantic::SemanticType _currentReturnType{semantic::SemanticTypeKind::Void};
     std::string _error;

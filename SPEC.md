@@ -542,9 +542,32 @@ copying the backing elements. Slice returns and nested borrowed storage remain
 unsupported pending lifetime contracts. See [checked slices](docs/checked_slices.md)
 for exact rules, limitations, and diagnostics.
 
+## 13.1 Structures
+
+```flecha
+structure Box {
+    i32 x;
+    private { i32 y; }
+};
+Box Box::init() override {
+    return build Box { self.x = 2; self.y = 40; };
+}
+i32 Box::value(&const self) { return self->x + self->y; }
+```
+
+Structures, public/private fields and methods, generated `init`, explicit
+`build`, and compiler-only `tear` hooks are implemented. Values use
+`box.value()` and `box.x`; references and raw pointers use `box->value()` and
+`box->x`. Static calls use `Box::method()`. Lifecycle overrides require
+`override`; custom teardown precedes reverse field destruction at scope exit.
+An unsafe tear makes a type immovable and requires unsafe construction. Fresh
+factory results construct directly in their final destination. See
+[structures](docs/structures.md) for copy rules, borrow checking, supported
+fields, construction limits, examples, and diagnostics.
+
 ## 14. Memory and runtime model
 
-Flecha should not require a garbage collector. Stack allocation is the ordinary default. Heap allocation must be explicit and should use caller-selected allocators rather than a mandatory hidden global allocator.
+Flecha should not require a garbage collector. Stack allocation is the ordinary default. The planned explicit raw allocation API is `new<T>(value)` returning `(*T, error)`, paired with unsafe `free(ptr)`. It uses the system allocation service; custom allocators remain future work.
 
 The language should avoid hidden allocation in:
 
@@ -556,7 +579,7 @@ The language should avoid hidden allocation in:
 
 Owning strings have deterministic lexical destruction. `defer function(args);`
 captures arguments at registration and runs the call when its current lexical
-scope exits, before that scope destroys its strings. Calls run in reverse
+scope exits, before that scope destroys its owned strings and structures. Calls run in reverse
 registration order on fallthrough, return, break, proceed, and outward jumps.
 Return expressions evaluate before cleanup; traps do not unwind. String/view
 captures are independent snapshots, and reference/slice captures retain their
@@ -688,7 +711,7 @@ The following decisions are intentionally not finalized:
 - additional declaration forms, including whether to introduce `var`;
 - string literal representation and encoding;
 - slice syntax and array-to-slice conversion;
-- struct, union, enum, and generic syntax;
+- union, enum, and generic syntax;
 - ownership, borrowing, and deterministic cleanup;
 - allocator interfaces;
 - arithmetic overflow behavior;

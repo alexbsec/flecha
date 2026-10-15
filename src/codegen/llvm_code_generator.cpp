@@ -49,6 +49,18 @@ bool LlvmCodeGenerator::Fail(std::string message) {
 
 llvm::Type* LlvmCodeGenerator::MapType(semantic::SemanticType type) {
     switch (type.Kind()) {
+        case semantic::SemanticTypeKind::Structure: {
+            const auto found = _structureTypes.find(type.Structure());
+            if (found != _structureTypes.end()) return found->second;
+            auto* result =
+                llvm::StructType::create(_context, "flecha." + type.Name());
+            _structureTypes[type.Structure()] = result;
+            std::vector<llvm::Type*> fields;
+            for (const auto& field : type.Structure()->fields)
+                fields.push_back(MapType(field.type));
+            result->setBody(fields);
+            return result;
+        }
         case semantic::SemanticTypeKind::ErrorValue:
             return llvm::StructType::get(
                 _context, {llvm::PointerType::getUnqual(_context),
@@ -290,8 +302,56 @@ llvm::AllocaInst* LlvmCodeGenerator::CreateOwnedStringTemporary(
 llvm::Value* LlvmCodeGenerator::EmitValueCopy(llvm::Value* value,
                                               semantic::SemanticType type,
                                               bool temporary) {
+    if (temporary && type.ContainsStructure()) {
+        llvm::Value* copy = EmitValueCopy(value, type, false);
+        if (!copy) return nullptr;
+        auto* storage = CreateOwnedValueTemporary(type, "aggregate.copy");
+        EmitValueStorageCleanup(storage, type);
+        _builder.CreateStore(copy, storage);
+        _builder.CreateStore(llvm::ConstantInt::getTrue(_context),
+                             LifetimeFlag(storage));
+        return _builder.CreateLoad(MapType(type), storage);
+    }
     if (type.Kind() == semantic::SemanticTypeKind::String)
         return EmitOwnedString(value, type, temporary);
+    if (type.Kind() == semantic::SemanticTypeKind::Structure) {
+        llvm::Value* result = llvm::PoisonValue::get(MapType(type));
+        for (std::size_t i = 0; i < type.Structure()->fields.size(); ++i) {
+            llvm::Value* field =
+                EmitValueCopy(_builder.CreateExtractValue(value, i),
+                              type.Structure()->fields[i].type, temporary);
+            if (!field) return nullptr;
+            result = _builder.CreateInsertValue(result, field, i);
+        }
+        return result;
+    }
+    if (type.Kind() == semantic::SemanticTypeKind::Array &&
+        type.OwnsStorage()) {
+        auto* source =
+            CreateTemporaryAlloca(MapType(type), "array.copy.source");
+        auto* destination =
+            CreateTemporaryAlloca(MapType(type), "array.copy.result");
+        _builder.CreateStore(value, source);
+        llvm::Value* index =
+            llvm::ConstantInt::get(llvm::Type::getInt64Ty(_context), 0);
+        // Aggregate copies require independent owning fields.
+        auto* counter =
+            CreateTemporaryAlloca(index->getType(), "array.copy.index");
+        _builder.CreateStore(index, counter);
+        EmitArrayElements(destination, type, false, [&](llvm::Value* slot) {
+            llvm::Value* i = _builder.CreateLoad(index->getType(), counter);
+            llvm::Value* from =
+                _builder.CreateInBoundsGEP(MapType(type), source, {index, i});
+            llvm::Value* item = EmitValueCopy(
+                _builder.CreateLoad(MapType(*type.Target()), from),
+                *type.Target(), temporary);
+            if (item) _builder.CreateStore(item, slot);
+            _builder.CreateStore(
+                _builder.CreateAdd(i, llvm::ConstantInt::get(i->getType(), 1)),
+                counter);
+        });
+        return _builder.CreateLoad(MapType(type), destination);
+    }
     if (type.Kind() != semantic::SemanticTypeKind::Tuple || !type.OwnsStorage())
         return value;
     llvm::Value* result = llvm::PoisonValue::get(MapType(type));
@@ -307,6 +367,13 @@ llvm::Value* LlvmCodeGenerator::EmitValueCopy(llvm::Value* value,
 
 void LlvmCodeGenerator::EmitValueDestroy(llvm::Value* value,
                                          semantic::SemanticType type) {
+    if (type.ContainsStructure()) {
+        auto* storage =
+            CreateTemporaryAlloca(MapType(type), "aggregate.destroy");
+        _builder.CreateStore(value, storage);
+        EmitDestroyAt(storage, type);
+        return;
+    }
     if (type.Kind() == semantic::SemanticTypeKind::String)
         EmitStringDestroy(value);
     if (type.Kind() == semantic::SemanticTypeKind::Tuple && type.OwnsStorage())
@@ -315,10 +382,31 @@ void LlvmCodeGenerator::EmitValueDestroy(llvm::Value* value,
                              type.Elements()[i - 1]);
 }
 
-void LlvmCodeGenerator::EmitValueStorageCleanup(llvm::AllocaInst* storage,
+void LlvmCodeGenerator::EmitValueStorageCleanup(llvm::Value* storage,
                                                 semantic::SemanticType type) {
+    if (type.ContainsStructure()) {
+        const auto flag = _lifetimeFlags.find(storage);
+        if (flag != _lifetimeFlags.end()) {
+            auto* destroy = llvm::BasicBlock::Create(
+                _context, "structure.destroy", _currentFunction);
+            auto* done = llvm::BasicBlock::Create(
+                _context, "structure.destroy.done", _currentFunction);
+            _builder.CreateCondBr(
+                _builder.CreateLoad(llvm::Type::getInt1Ty(_context),
+                                    flag->second),
+                destroy, done);
+            _builder.SetInsertPoint(destroy);
+            _builder.CreateStore(llvm::ConstantInt::getFalse(_context),
+                                 flag->second);
+            EmitDestroyAt(storage, type);
+            _builder.CreateBr(done);
+            _builder.SetInsertPoint(done);
+        } else
+            EmitDestroyAt(storage, type);
+        return;
+    }
     if (type.Kind() == semantic::SemanticTypeKind::String) {
-        EmitStringStorageCleanup(storage);
+        EmitStringStorageCleanup(llvm::cast<llvm::AllocaInst>(storage));
         return;
     }
     EmitValueDestroy(_builder.CreateLoad(MapType(type), storage), type);
@@ -335,6 +423,7 @@ llvm::AllocaInst* LlvmCodeGenerator::CreateOwnedValueTemporary(
         entryBuilder.CreateAlloca(MapType(type), nullptr, std::string(name));
     entryBuilder.CreateStore(llvm::Constant::getNullValue(MapType(type)),
                              storage);
+    if (type.ContainsStructure()) LifetimeFlag(storage);
     _cleanupScopes.back()->ownedValues.push_back({storage, type});
     return storage;
 }
@@ -362,10 +451,12 @@ bool LlvmCodeGenerator::EmitDestructure(
     for (std::size_t i = 0; i < statement.Bindings().size(); ++i) {
         const auto& binding = statement.Bindings()[i];
         if (binding.variable == nullptr) continue;
-        llvm::AllocaInst* storage = binding.declaration
-                                        ? CreateEntryAlloca(*binding.variable)
-                                        : _variables.at(binding.variable);
+        llvm::Value* storage = binding.declaration
+                                   ? CreateEntryAlloca(*binding.variable)
+                                   : _variables.at(binding.variable);
         const auto targetType = binding.variable->Type();
+        if (targetType.ContainsStructure() && binding.declaration)
+            LifetimeFlag(storage);
         if (targetType.OwnsStorage()) {
             EmitValueStorageCleanup(storage, targetType);
             if (binding.declaration)
@@ -373,6 +464,9 @@ bool LlvmCodeGenerator::EmitDestructure(
                     {storage, targetType});
         }
         _builder.CreateStore(values[i], storage);
+        if (targetType.ContainsStructure())
+            _builder.CreateStore(llvm::ConstantInt::getTrue(_context),
+                                 LifetimeFlag(storage));
         if (binding.declaration) _variables.emplace(binding.variable, storage);
     }
     return true;
@@ -423,7 +517,8 @@ bool LlvmCodeGenerator::EmitDefer(
         else
             value = CoerceValue(value, argument.Type(), type);
         if (value == nullptr) return false;
-        if (type.Kind() == semantic::SemanticTypeKind::Tuple)
+        if (type.Kind() == semantic::SemanticTypeKind::Tuple ||
+            type.ContainsStructure())
             value = EmitValueCopy(value, type, false);
         captured.push_back(value);
     }
@@ -513,13 +608,27 @@ bool LlvmCodeGenerator::EmitDeferredCalls(const CleanupScope& scope) {
                         semantic::BuiltInFunction::StdoutLine) == nullptr)
                 return false;
         } else {
-            llvm::Value* result =
-                _builder.CreateCall(_functions.at(&call.Function()), arguments);
-            EmitValueDestroy(result, call.Type());
+            if (call.Type().ContainsStructure()) {
+                // Construct discarded results in their final storage too:
+                // an unsafe tear may rely on the object's address.
+                llvm::AllocaInst* result =
+                    CreateTemporaryAlloca(MapType(call.Type()), "defer.result");
+                std::vector<llvm::Value*> invocation{result};
+                invocation.insert(invocation.end(), arguments.begin(),
+                                  arguments.end());
+                _builder.CreateCall(_functions.at(&call.Function()),
+                                    invocation);
+                EmitDestroyAt(result, call.Type());
+            } else {
+                llvm::Value* result = _builder.CreateCall(
+                    _functions.at(&call.Function()), arguments);
+                EmitValueDestroy(result, call.Type());
+            }
         }
         for (std::size_t i = arguments.size(); i > 0; --i)
             if (deferred.argumentTypes[i - 1].Kind() ==
-                semantic::SemanticTypeKind::Tuple)
+                    semantic::SemanticTypeKind::Tuple ||
+                deferred.argumentTypes[i - 1].ContainsStructure())
                 EmitValueDestroy(arguments[i - 1],
                                  deferred.argumentTypes[i - 1]);
         for (auto string = strings.rbegin(); string != strings.rend(); ++string)
@@ -567,6 +676,12 @@ llvm::Value* LlvmCodeGenerator::CoerceValue(
     if (sourceType.Kind() == semantic::SemanticTypeKind::Pointer &&
         destinationType.Kind() == semantic::SemanticTypeKind::Pointer &&
         semantic::IsAssignable(destinationType, sourceType))
+        return value;
+    if (sourceType.Kind() == semantic::SemanticTypeKind::Pointer &&
+        destinationType.Kind() == semantic::SemanticTypeKind::Reference &&
+        sourceType.Target()->Kind() == semantic::SemanticTypeKind::Structure &&
+        sourceType.Target()->WithoutConst() ==
+            destinationType.Target()->WithoutConst())
         return value;
     if (semantic::CanReborrow(destinationType, sourceType)) return value;
     if (sourceType.WithoutConst() == destinationType.WithoutConst())
@@ -748,10 +863,14 @@ llvm::Value* LlvmCodeGenerator::EmitStringViewOperation(
 
 llvm::FunctionType* LlvmCodeGenerator::MapFunctionType(
     const semantic::FunctionSymbol& function) {
-    llvm::Type* returnType = MapType(function.ReturnType());
+    llvm::Type* returnType = function.ReturnType().ContainsStructure()
+                                 ? llvm::Type::getVoidTy(_context)
+                                 : MapType(function.ReturnType());
     if (returnType == nullptr) return nullptr;
     std::vector<llvm::Type*> parameters;
-    parameters.reserve(function.ParameterTypes().size());
+    parameters.reserve(function.ParameterTypes().size() + 1);
+    if (function.ReturnType().ContainsStructure())
+        parameters.push_back(llvm::PointerType::getUnqual(_context));
     for (semantic::SemanticType parameter : function.ParameterTypes()) {
         llvm::Type* parameterType = MapType(parameter);
         if (parameterType == nullptr) return nullptr;
@@ -793,6 +912,8 @@ bool LlvmCodeGenerator::EmitFunction(
     const lowering::BoundFunction& boundFunction) {
     _currentFunction = _functions.at(&boundFunction.Symbol());
     _variables.clear();
+    _lifetimeFlags.clear();
+    _returnStorage = nullptr;
     _positions.clear();
     _positionScopePaths.clear();
     _proceedTargets.clear();
@@ -812,6 +933,12 @@ bool LlvmCodeGenerator::EmitFunction(
 
     std::size_t index = 0;
     for (llvm::Argument& argument : _currentFunction->args()) {
+        if (_currentReturnType.ContainsStructure() &&
+            _returnStorage == nullptr) {
+            _returnStorage = &argument;
+            argument.setName("result.storage");
+            continue;
+        }
         const semantic::VariableSymbol& parameter =
             *boundFunction.Parameters()[index++];
         argument.setName(parameter.Name());
@@ -825,6 +952,9 @@ bool LlvmCodeGenerator::EmitFunction(
                 {storage, parameter.Type()});
         }
         _builder.CreateStore(parameterValue, storage);
+        if (parameter.Type().ContainsStructure())
+            _builder.CreateStore(llvm::ConstantInt::getTrue(_context),
+                                 LifetimeFlag(storage));
         _variables.emplace(&parameter, storage);
     }
 
@@ -840,9 +970,15 @@ bool LlvmCodeGenerator::EmitFunction(
     }
     for (const CleanupRequest& request : _cleanupRequests) {
         llvm::BasicBlock* continuation = nullptr;
-        const bool hasDefers = std::any_of(
-            request.scopes.begin(), request.scopes.end(),
-            [](const auto& scope) { return scope->deferredHead != nullptr; });
+        const bool hasDefers =
+            std::any_of(request.scopes.begin(), request.scopes.end(),
+                        [](const auto& scope) {
+                            if (scope->deferredHead != nullptr) return true;
+                            for (const auto& storage : scope->ownedValues)
+                                if (storage.type.ContainsStructure())
+                                    return true;
+                            return false;
+                        });
         if (hasDefers) {
             // Move the original continuation (return, jump, or fallthrough)
             // before emitting cleanup loops. It may initialize a jump target.
@@ -1011,6 +1147,22 @@ bool LlvmCodeGenerator::EmitStatement(
             const lowering::BoundVariableDeclarationStatement& declaration =
                 static_cast<const lowering::BoundVariableDeclarationStatement&>(
                     statement);
+            if (declaration.Variable().Type().ContainsStructure()) {
+                auto* storage = CreateEntryAlloca(declaration.Variable());
+                _variables[&declaration.Variable()] = storage;
+                LifetimeFlag(storage);
+                EmitValueStorageCleanup(storage, declaration.Variable().Type());
+                _cleanupScopes.back()->ownedValues.push_back(
+                    {storage, declaration.Variable().Type()});
+                if (declaration.Initializer()) {
+                    if (!EmitInto(*declaration.Initializer(), storage,
+                                  declaration.Variable().Type()))
+                        return false;
+                    _builder.CreateStore(llvm::ConstantInt::getTrue(_context),
+                                         LifetimeFlag(storage));
+                }
+                return true;
+            }
             llvm::Value* value = nullptr;
             if (declaration.Initializer() != nullptr) {
                 value = EmitExpression(*declaration.Initializer());
@@ -1057,6 +1209,14 @@ bool LlvmCodeGenerator::EmitStatement(
             const lowering::BoundReturnStatement& returnStatement =
                 static_cast<const lowering::BoundReturnStatement&>(statement);
             if (returnStatement.Expression() == nullptr) {
+                EmitCleanupsTo(0);
+                _builder.CreateRetVoid();
+                return true;
+            }
+            if (_currentReturnType.ContainsStructure()) {
+                if (!EmitInto(*returnStatement.Expression(), _returnStorage,
+                              _currentReturnType))
+                    return false;
                 EmitCleanupsTo(0);
                 _builder.CreateRetVoid();
                 return true;
@@ -1606,7 +1766,8 @@ llvm::Value* LlvmCodeGenerator::EmitArrayStorage(
     const lowering::BoundExpression& expression) {
     if (expression.Kind() == lowering::BoundNodeKind::VariableExpression ||
         expression.Kind() == lowering::BoundNodeKind::DereferenceExpression ||
-        expression.Kind() == lowering::BoundNodeKind::ArrayElementExpression)
+        expression.Kind() == lowering::BoundNodeKind::ArrayElementExpression ||
+        expression.Kind() == lowering::BoundNodeKind::FieldExpression)
         return EmitAddress(
             static_cast<const lowering::BoundPlaceExpression&>(expression));
     llvm::Value* value = EmitExpression(expression);
@@ -1679,6 +1840,19 @@ llvm::Value* LlvmCodeGenerator::EmitAddress(
             &static_cast<const lowering::BoundVariableExpression&>(place)
                  .Symbol());
     }
+    if (place.Kind() == lowering::BoundNodeKind::FieldExpression) {
+        const auto& field =
+            static_cast<const lowering::BoundFieldExpression&>(place);
+        const auto type = field.Indirect() ? *field.Receiver().Type().Target()
+                                           : field.Receiver().Type();
+        llvm::Value* storage = field.Indirect()
+                                   ? EmitExpression(field.Receiver())
+                                   : EmitArrayStorage(field.Receiver());
+        return storage
+                   ? _builder.CreateStructGEP(MapType(type), storage,
+                                              field.Index(), "field.address")
+                   : nullptr;
+    }
     if (place.Kind() == lowering::BoundNodeKind::ArrayElementExpression) {
         const auto& index =
             static_cast<const lowering::BoundArrayElementExpression&>(place);
@@ -1726,6 +1900,21 @@ llvm::Value* LlvmCodeGenerator::EmitAddress(
 llvm::Value* LlvmCodeGenerator::EmitExpression(
     const lowering::BoundExpression& expression) {
     switch (expression.Kind()) {
+        case lowering::BoundNodeKind::BuildExpression:
+        case lowering::BoundNodeKind::DefaultExpression: {
+            if (expression.Type().ContainsStructure()) {
+                auto* storage = CreateOwnedValueTemporary(expression.Type(),
+                                                          "build.temporary");
+                EmitValueStorageCleanup(storage, expression.Type());
+                if (!EmitInto(expression, storage, expression.Type()))
+                    return nullptr;
+                _builder.CreateStore(llvm::ConstantInt::getTrue(_context),
+                                     LifetimeFlag(storage));
+                return _builder.CreateLoad(MapType(expression.Type()), storage);
+            }
+            return llvm::Constant::getNullValue(MapType(expression.Type()));
+        }
+
         case lowering::BoundNodeKind::SliceExpression:
             return EmitSlice(
                 static_cast<const lowering::BoundSliceExpression&>(expression));
@@ -1767,6 +1956,7 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
             return EmitAddress(
                 static_cast<const lowering::BoundAddressExpression&>(expression)
                     .Place());
+        case lowering::BoundNodeKind::FieldExpression:
         case lowering::BoundNodeKind::ArrayElementExpression:
         case lowering::BoundNodeKind::DereferenceExpression: {
             llvm::Value* address = EmitAddress(
@@ -1785,8 +1975,8 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
                 static_cast<const lowering::BoundVariableExpression&>(
                     expression)
                     .Symbol();
-            llvm::AllocaInst* storage = _variables.at(&symbol);
-            return _builder.CreateLoad(storage->getAllocatedType(), storage,
+            llvm::Value* storage = _variables.at(&symbol);
+            return _builder.CreateLoad(MapType(symbol.Type()), storage,
                                        symbol.Name());
         }
         case lowering::BoundNodeKind::IncrementExpression: {
@@ -1839,6 +2029,15 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
         case lowering::BoundNodeKind::CallExpression: {
             const lowering::BoundCallExpression& call =
                 static_cast<const lowering::BoundCallExpression&>(expression);
+            if (call.Type().ContainsStructure()) {
+                auto* storage = CreateOwnedValueTemporary(
+                    call.Type(), "structure.call.result");
+                EmitValueStorageCleanup(storage, call.Type());
+                if (!EmitInto(call, storage, call.Type())) return nullptr;
+                _builder.CreateStore(llvm::ConstantInt::getTrue(_context),
+                                     LifetimeFlag(storage));
+                return _builder.CreateLoad(MapType(call.Type()), storage);
+            }
             std::vector<llvm::Value*> arguments;
             arguments.reserve(call.Arguments().size());
             std::size_t argumentIndex = 0;
@@ -1903,10 +2102,213 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
     }
 }
 
+llvm::AllocaInst* LlvmCodeGenerator::LifetimeFlag(llvm::Value* storage) {
+    const auto found = _lifetimeFlags.find(storage);
+    if (found != _lifetimeFlags.end()) return found->second;
+    llvm::IRBuilder<> entry(&_currentFunction->getEntryBlock(),
+                            _currentFunction->getEntryBlock().begin());
+    auto* flag = entry.CreateAlloca(llvm::Type::getInt1Ty(_context), nullptr,
+                                    "structure.live");
+    entry.CreateStore(llvm::ConstantInt::getFalse(_context), flag);
+    _lifetimeFlags[storage] = flag;
+    return flag;
+}
+
+void LlvmCodeGenerator::EmitArrayElements(
+    llvm::Value* storage, semantic::SemanticType type, bool reverse,
+    const std::function<void(llvm::Value*)>& action) {
+    auto* countType = llvm::Type::getInt64Ty(_context);
+    auto* before = _builder.GetInsertBlock();
+    auto* check =
+        llvm::BasicBlock::Create(_context, "fields.check", _currentFunction);
+    auto* body =
+        llvm::BasicBlock::Create(_context, "fields.body", _currentFunction);
+    auto* done =
+        llvm::BasicBlock::Create(_context, "fields.done", _currentFunction);
+    _builder.CreateBr(check);
+    _builder.SetInsertPoint(check);
+    auto* index = _builder.CreatePHI(countType, 2, "fields.index");
+    index->addIncoming(
+        llvm::ConstantInt::get(countType, reverse ? type.Length() : 0), before);
+    llvm::Value* valid =
+        reverse
+            ? _builder.CreateICmpNE(index, llvm::ConstantInt::get(countType, 0))
+            : _builder.CreateICmpULT(
+                  index, llvm::ConstantInt::get(countType, type.Length()));
+    _builder.CreateCondBr(valid, body, done);
+    _builder.SetInsertPoint(body);
+    llvm::Value* offset =
+        reverse
+            ? _builder.CreateSub(index, llvm::ConstantInt::get(countType, 1))
+            : index;
+    action(_builder.CreateInBoundsGEP(
+        MapType(type), storage,
+        {llvm::ConstantInt::get(countType, 0), offset}));
+    llvm::Value* next =
+        reverse
+            ? offset
+            : _builder.CreateAdd(index, llvm::ConstantInt::get(countType, 1));
+    index->addIncoming(next, _builder.GetInsertBlock());
+    _builder.CreateBr(check);
+    _builder.SetInsertPoint(done);
+}
+
+void LlvmCodeGenerator::EmitDestroyAt(llvm::Value* storage,
+                                      semantic::SemanticType type) {
+    using Kind = semantic::SemanticTypeKind;
+    if (type.Kind() == Kind::Structure) {
+        if (type.Structure()->tear)
+            _builder.CreateCall(_functions.at(type.Structure()->tear),
+                                {storage});
+        const auto& fields = type.Structure()->fields;
+        for (std::size_t i = fields.size(); i > 0; --i)
+            if (fields[i - 1].type.OwnsStorage())
+                EmitDestroyAt(
+                    _builder.CreateStructGEP(MapType(type), storage, i - 1),
+                    fields[i - 1].type);
+    } else if (type.Kind() == Kind::Tuple) {
+        for (std::size_t i = type.Elements().size(); i > 0; --i)
+            if (type.Elements()[i - 1].OwnsStorage())
+                EmitDestroyAt(
+                    _builder.CreateStructGEP(MapType(type), storage, i - 1),
+                    type.Elements()[i - 1]);
+    } else if (type.Kind() == Kind::Array && type.Target()->OwnsStorage()) {
+        EmitArrayElements(storage, type, true, [&](llvm::Value* slot) {
+            EmitDestroyAt(slot, *type.Target());
+        });
+    } else if (type.Kind() == Kind::String)
+        EmitStringDestroy(_builder.CreateLoad(MapType(type), storage));
+}
+
+bool LlvmCodeGenerator::EmitDefaultInto(llvm::Value* destination,
+                                        semantic::SemanticType type) {
+    using Kind = semantic::SemanticTypeKind;
+    if (type.Kind() == Kind::Structure) {
+        if (!type.Structure()->init)
+            return Fail("missing structure initializer");
+        if (!type.Structure()->init->ParameterTypes().empty())
+            return Fail(
+                "default construction requires a zero-argument initializer");
+        _builder.CreateCall(_functions.at(type.Structure()->init),
+                            {destination});
+    } else if (type.Kind() == Kind::Array && type.ContainsStructure()) {
+        bool success = true;
+        EmitArrayElements(destination, type, false, [&](llvm::Value* slot) {
+            success &= EmitDefaultInto(slot, *type.Target());
+        });
+        return success;
+    } else if (type.Kind() == Kind::Tuple && type.ContainsStructure()) {
+        for (std::size_t i = 0; i < type.Elements().size(); ++i)
+            if (!EmitDefaultInto(
+                    _builder.CreateStructGEP(MapType(type), destination, i),
+                    type.Elements()[i]))
+                return false;
+    } else
+        _builder.CreateStore(llvm::Constant::getNullValue(MapType(type)),
+                             destination);
+    return true;
+}
+
+bool LlvmCodeGenerator::EmitInto(const lowering::BoundExpression& expression,
+                                 llvm::Value* destination,
+                                 semantic::SemanticType type) {
+    using Node = lowering::BoundNodeKind;
+    using Kind = semantic::SemanticTypeKind;
+    if (expression.Kind() == Node::DefaultExpression)
+        return EmitDefaultInto(destination, type);
+    if (expression.Kind() == Node::BuildExpression) {
+        const auto& build =
+            static_cast<const lowering::BoundBuildExpression&>(expression);
+        for (std::size_t i = 0; i < build.Defaults().size(); ++i) {
+            llvm::Value* field =
+                _builder.CreateStructGEP(MapType(type), destination, i);
+            if (!EmitInto(*build.Defaults()[i], field,
+                          type.Structure()->fields[i].type))
+                return false;
+        }
+        _variables[&build.Self()] = destination;
+        DeclarePositions(build.Body());
+        std::vector<const lowering::BoundBlockStatement*> path;
+        for (const auto& scope : _cleanupScopes)
+            if (scope->block) path.push_back(scope->block);
+        CollectPositionScopePaths(build.Body(), path);
+        if (!EmitBlock(build.Body())) return false;
+        return true;
+    }
+    if (expression.Kind() == Node::CallExpression && type.ContainsStructure()) {
+        const auto& call =
+            static_cast<const lowering::BoundCallExpression&>(expression);
+        std::vector<llvm::Value*> arguments{destination};
+        for (std::size_t i = 0; i < call.Arguments().size(); ++i) {
+            llvm::Value* argument = EmitExpression(*call.Arguments()[i]);
+            if (!argument) return false;
+            argument = CoerceValue(argument, call.Arguments()[i]->Type(),
+                                   call.Function().ParameterTypes()[i]);
+            if (!argument) return false;
+            arguments.push_back(argument);
+        }
+        _builder.CreateCall(_functions.at(&call.Function()), arguments);
+        return true;
+    }
+    if (expression.Kind() == Node::TupleExpression &&
+        type.ContainsStructure()) {
+        const auto& tuple =
+            static_cast<const lowering::BoundTupleExpression&>(expression);
+        for (std::size_t i = 0; i < tuple.Elements().size(); ++i)
+            if (!EmitInto(
+                    *tuple.Elements()[i],
+                    _builder.CreateStructGEP(MapType(type), destination, i),
+                    type.Elements()[i]))
+                return false;
+        return true;
+    }
+    if (expression.Kind() == Node::ArrayExpression &&
+        type.ContainsStructure()) {
+        const auto& array =
+            static_cast<const lowering::BoundArrayExpression&>(expression);
+        if (array.IsRepeat() && !type.Target()->IsCopyable() &&
+            type.Length() == 1) {
+            auto* indexType = llvm::Type::getInt64Ty(_context);
+            auto* zero = llvm::ConstantInt::get(indexType, 0);
+            return EmitInto(*array.Elements()[0],
+                            _builder.CreateInBoundsGEP(
+                                MapType(type), destination, {zero, zero}),
+                            *type.Target());
+        }
+        if (array.IsRepeat()) {
+            // Only copyable elements may repeat; evaluate the source once.
+            llvm::Value* value = EmitExpression(*array.Elements()[0]);
+            if (!value) return false;
+            EmitArrayElements(destination, type, false, [&](llvm::Value* slot) {
+                llvm::Value* copy = EmitValueCopy(value, *type.Target(), false);
+                if (copy) _builder.CreateStore(copy, slot);
+            });
+        } else
+            for (std::size_t i = 0; i < array.Elements().size(); ++i) {
+                auto* indexType = llvm::Type::getInt64Ty(_context);
+                llvm::Value* slot = _builder.CreateInBoundsGEP(
+                    MapType(type), destination,
+                    {llvm::ConstantInt::get(indexType, 0),
+                     llvm::ConstantInt::get(indexType, i)});
+                if (!EmitInto(*array.Elements()[i], slot, *type.Target()))
+                    return false;
+            }
+        return true;
+    }
+    llvm::Value* value = EmitExpression(expression);
+    if (!value) return false;
+    value = CoerceValue(value, expression.Type(), type);
+    if (value && type.OwnsStorage()) value = EmitValueCopy(value, type, false);
+    if (!value) return false;
+    _builder.CreateStore(value, destination);
+    return true;
+}
+
 std::unique_ptr<llvm::Module> LlvmCodeGenerator::Generate(
     const lowering::BoundProgram& program, std::string moduleName) {
     _error.clear();
     _functions.clear();
+    _structureTypes.clear();
     _variables.clear();
     _module = std::make_unique<llvm::Module>(moduleName, _context);
     if (!_targetTriple.empty()) {

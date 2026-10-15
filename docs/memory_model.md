@@ -117,8 +117,9 @@ when necessary. Null storage suffices for the existing string representation;
 other owning types may need explicit live flags.
 
 Destruction cannot fail or transfer control. Immediate process termination
-from a runtime safety failure need not unwind scopes. General user-defined
-destructors and their temporary-order rules are deferred.
+from a runtime safety failure need not unwind scopes. Structure teardown is
+implemented as described in [structures.md](structures.md).
+General moves and partial construction remain future work.
 
 ## 5. Borrowed access — recommended initial checking policy
 
@@ -368,9 +369,8 @@ unsafe void forward(*const u8 ptr) {
 }
 
 i32 caller() {
-    allocator := system_allocator();
     unsafe {
-        (*u8 ptr, error err) = allocator.alloc<u8>(10);
+        (*u8 ptr, error err) = new<u8>(10);
         if err != none {
             return 1;
         }
@@ -418,37 +418,39 @@ are not silently changed by the proposed `usize` slice length.
 
 ## 8. Allocation and failure — agreed direction
 
-`system_allocator()` returns an `Allocator` handle to a process-wide allocator.
-Repeated calls refer to the same service, which lives for the program's
-lifetime. Copying or dropping a handle neither allocates memory nor releases
-outstanding allocations. Custom allocator interfaces remain future work.
+The planned `new<T>(value)` and `free(ptr)` built-ins use the process-wide
+system allocation service. They replace the earlier `Allocator` handle and
+`system_allocator()` proposal. `new<T>` returns `(*T, error)`, supporting both
+`(*u8 ptr, error err) = new<u8>(10);` and `ptr, err := new<u8>(10);`.
+Custom allocator interfaces remain future work. These built-ins are not yet
+implemented.
 
 The raw API under discussion uses typed tuple bindings and explicit failure:
 
 ```flecha
-Allocator allocator = system_allocator();
 unsafe {
-    (*u8 ptr, error err) = allocator.alloc<u8>(10);
+    (*u8 ptr, error err) = new<u8>(10);
     if err != none {
         return 1;
     }
-    defer allocator.free(ptr);
+    defer free(ptr);
     *ptr = 42;
 }
 ```
 
-`alloc<T>(value)` allocates one element and initializes it with `value`.
-`alloc<T>(none)` initializes to T's defined zero value, when one exists; it
+`new<T>(value)` allocates one element and initializes it with `value`.
+`new<T>(none)` initializes to T's defined zero value, when one exists; it
 does not mean uninitialized storage. Success produces a live allocation and
 no error; failure assigns null and an error. Tuple/error values are implemented;
-generic member calls require implementation work. Array allocation spelling is still
-provisional.
+generic allocation calls require implementation work. Array allocation spelling
+is still provisional.
 
 Raw allocation and free require an unsafe function or block. Allocations are
 not implicitly freed at the end of an unsafe block: allocation lifetime is
 independent of unsafe permission. Explicit free, executed deferred free, or an
 ownership-consuming function must discharge the allocation's cleanup obligation.
-The allocator used to release an allocation must match the one that created it.
+Only matching live system allocations may be passed to `free`; arbitrary stack
+addresses and interior pointers are not valid allocation handles.
 
 A pointer may be initialized in one unsafe block and released in a later block.
 It can be passed across unsafe function calls. A function that frees the
@@ -465,17 +467,17 @@ remains to be chosen. Arbitrary raw-pointer manipulation is still the programmer
 responsibility inside unsafe code; complete static leak detection is not promised.
 
 A null-aware operation such as the proposed
-`ptr->safe_set(allocator, value)` can allocate and initialize when ptr is null,
+`ptr->safe_set(value)` can allocate and initialize when ptr is null,
 updating the pointer binding only on success. Otherwise it writes through the
-existing pointer. Failure leaves a null binding unchanged. An omitted allocator
-would select the system allocator. This operation still requires unsafe access:
+existing pointer. Failure leaves a null binding unchanged. Allocation would use
+the system allocation service. This operation still requires unsafe access:
 non-null does not establish that a pointer is live, aligned, or writable.
 The special pointer-operation syntax and naming remain to be finalized.
 
 ### 8.1 Deferred cleanup
 
 The direct-call implementation is documented in [defer.md](defer.md). The
-allocator member-call example and allocation-effect rules below remain design
+allocation example and allocation-effect rules below remain design
 contracts for future milestones.
 
 A deferred call registers when execution reaches it and executes when its
@@ -484,7 +486,7 @@ cleanup before work that can exit early:
 
 ```flecha
 unsafe void perform(*const u8 ptr) {
-    defer system_allocator().free(ptr);
+    defer free(ptr);
     // Work with the still-live allocation.
 }
 ```
@@ -510,9 +512,9 @@ Deferred-call rules and planned allocator integration:
   Deferred calls must not return from their enclosing function or redirect its
   control flow.
 - Traps and immediate process termination do not execute defers. Registered
-  calls run before lexical owning-string destruction; string and view captures
-  are independent snapshots destroyed after invocation. General owner
-  destructors still need their own contract.
+  calls run before lexical string and structure destruction; string, view,
+  and copyable structure captures are independent snapshots destroyed after
+  invocation. Structure lifecycle rules are in [structures.md](structures.md).
 
 Defer helps ensure cleanup. It does not prove pointer validity, prevent all
 raw-pointer aliasing, or turn an unsafe function into a safe function.
@@ -573,7 +575,7 @@ Next proposals to settle:
 2. Reference borrowing of strings/views and nested reference storage.
 3. Lifetime contracts for returned borrowed values; local slice lifetime and
    alias checking is implemented in [checked_slices.md](checked_slices.md).
-4. Ownership-effect contracts on functions and deferred allocator member calls.
+4. Ownership-effect contracts on functions and deferred `free` calls.
 5. Any migration of existing string copies to moves. No such migration is
    agreed or implemented by this document.
 

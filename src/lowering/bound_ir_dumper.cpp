@@ -207,6 +207,24 @@ class Dumper final {
 
     void WriteExpression(const BoundExpression& expression) {
         switch (expression.Kind()) {
+            case BoundNodeKind::DefaultExpression:
+                _stream << "default " << expression.Type().Name();
+                break;
+            case BoundNodeKind::FieldExpression: {
+                const auto& field =
+                    static_cast<const BoundFieldExpression&>(expression);
+                WriteExpression(field.Receiver());
+                _stream << (field.Indirect() ? "->" : ".") << field.Index();
+                break;
+            }
+            case BoundNodeKind::BuildExpression: {
+                const auto& build =
+                    static_cast<const BoundBuildExpression&>(expression);
+                _stream << "build " << expression.Type().Name() << " ";
+                WriteBlock(build.Body());
+                break;
+            }
+
             case BoundNodeKind::SliceExpression: {
                 const auto& slice =
                     static_cast<const BoundSliceExpression&>(expression);

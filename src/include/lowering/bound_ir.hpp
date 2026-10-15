@@ -24,6 +24,9 @@ enum class BoundNodeKind {
     BreakStatement,
     JumpToStatement,
     PositionStatement,
+    BuildExpression,
+    FieldExpression,
+    DefaultExpression,
     TupleExpression,
     DestructureStatement,
     ArrayExpression,
@@ -108,6 +111,35 @@ class BoundLiteralExpression final : public BoundExpression {
 class BoundPlaceExpression : public BoundExpression {
    public:
     using BoundExpression::BoundExpression;
+};
+
+class BoundDefaultExpression final : public BoundExpression {
+   public:
+    using BoundExpression::BoundExpression;
+    BoundNodeKind Kind() const override {
+        return BoundNodeKind::DefaultExpression;
+    }
+};
+class BoundFieldExpression final : public BoundPlaceExpression {
+   public:
+    BoundFieldExpression(source::SourceRange range, semantic::SemanticType type,
+                         std::unique_ptr<BoundExpression> receiver,
+                         std::size_t index, bool indirect)
+        : BoundPlaceExpression(range, type),
+          _receiver(std::move(receiver)),
+          _index(index),
+          _indirect(indirect) {}
+    BoundNodeKind Kind() const override {
+        return BoundNodeKind::FieldExpression;
+    }
+    const BoundExpression& Receiver() const { return *_receiver; }
+    std::size_t Index() const { return _index; }
+    bool Indirect() const { return _indirect; }
+
+   private:
+    std::unique_ptr<BoundExpression> _receiver;
+    std::size_t _index;
+    bool _indirect;
 };
 
 class BoundTupleExpression final : public BoundExpression {
@@ -630,6 +662,29 @@ class BoundPositionStatement final : public BoundStatement {
 
    private:
     std::string _name;
+};
+
+class BoundBuildExpression final : public BoundExpression {
+   public:
+    BoundBuildExpression(source::SourceRange range, semantic::SemanticType type,
+                         const semantic::VariableSymbol& self,
+                         std::vector<std::unique_ptr<BoundExpression>> defaults,
+                         std::unique_ptr<BoundBlockStatement> body)
+        : BoundExpression(range, type),
+          _self(self),
+          _defaults(std::move(defaults)),
+          _body(std::move(body)) {}
+    BoundNodeKind Kind() const override {
+        return BoundNodeKind::BuildExpression;
+    }
+    const semantic::VariableSymbol& Self() const { return _self; }
+    const auto& Defaults() const { return _defaults; }
+    const BoundBlockStatement& Body() const { return *_body; }
+
+   private:
+    const semantic::VariableSymbol& _self;
+    std::vector<std::unique_ptr<BoundExpression>> _defaults;
+    std::unique_ptr<BoundBlockStatement> _body;
 };
 
 class BoundFunction final {
