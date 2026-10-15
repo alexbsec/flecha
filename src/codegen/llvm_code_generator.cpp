@@ -390,6 +390,36 @@ llvm::Value* LlvmCodeGenerator::EmitUnary(
     }
 }
 
+llvm::Value* LlvmCodeGenerator::EmitCast(
+    const lowering::BoundCastExpression& expression) {
+    llvm::Value* value = EmitExpression(expression.Value());
+    if (value == nullptr) return nullptr;
+    llvm::Type* targetType = MapType(expression.Type());
+    if (targetType == nullptr) return nullptr;
+    const semantic::SemanticType sourceType = expression.Value().Type();
+    if (sourceType == expression.Type()) return value;
+
+    if (sourceType.IsInteger() && expression.Type().IsInteger()) {
+        return _builder.CreateIntCast(value, targetType,
+                                      !IsUnsigned(sourceType), "intcast");
+    }
+    if (sourceType.IsInteger() && expression.Type().IsFloating()) {
+        return IsUnsigned(sourceType)
+                   ? _builder.CreateUIToFP(value, targetType, "uitofp")
+                   : _builder.CreateSIToFP(value, targetType, "sitofp");
+    }
+    if (sourceType.IsFloating() && expression.Type().IsInteger()) {
+        return IsUnsigned(expression.Type())
+                   ? _builder.CreateFPToUI(value, targetType, "fptoui")
+                   : _builder.CreateFPToSI(value, targetType, "fptosi");
+    }
+    if (sourceType.IsFloating() && expression.Type().IsFloating()) {
+        return _builder.CreateFPCast(value, targetType, "fpcast");
+    }
+    Fail("unsupported LLVM cast");
+    return nullptr;
+}
+
 llvm::Value* LlvmCodeGenerator::EmitBooleanLogical(
     const lowering::BoundBinaryExpression& expression) {
     llvm::Value* left = EmitExpression(expression.Left());
@@ -500,6 +530,9 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
         case lowering::BoundNodeKind::UnaryExpression:
             return EmitUnary(
                 static_cast<const lowering::BoundUnaryExpression&>(expression));
+        case lowering::BoundNodeKind::CastExpression:
+            return EmitCast(
+                static_cast<const lowering::BoundCastExpression&>(expression));
         case lowering::BoundNodeKind::BinaryExpression:
             return EmitBinary(
                 static_cast<const lowering::BoundBinaryExpression&>(

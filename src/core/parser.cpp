@@ -629,8 +629,42 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
         return nullptr;
     }
 
-    while (Check(TokenType::LParen)) {
-        Advance();
+    while (true) {
+        if (Match(TokenType::As)) {
+            std::unique_ptr<TypeNode> targetType = ParseType();
+            if (targetType == nullptr) return expression;
+            const source::SourceLocation end = targetType->Range().end;
+            expression = std::make_unique<CastExpression>(
+                source::SourceRange{expression->Range().start, end},
+                std::move(expression), std::move(targetType));
+            continue;
+        }
+
+        if (Match(TokenType::Dot)) {
+            const Token* castName = Consume(TokenType::Identifier, "'cast'");
+            if (castName == nullptr) return expression;
+            if (castName->value != "cast") {
+                _diagnostics.Report(diagnostics::DiagnosticCode::UnexpectedToken,
+                                    castName->range,
+                                    "expected 'cast' after '.'");
+                return expression;
+            }
+            if (Consume(TokenType::Less, "'<' after 'cast'") == nullptr) {
+                return expression;
+            }
+            std::unique_ptr<TypeNode> targetType = ParseType();
+            if (targetType == nullptr) return expression;
+            const Token* close =
+                Consume(TokenType::Greater, "'>' after cast type");
+            const source::SourceLocation end =
+                close == nullptr ? targetType->Range().end : close->range.end;
+            expression = std::make_unique<CastExpression>(
+                source::SourceRange{expression->Range().start, end},
+                std::move(expression), std::move(targetType));
+            continue;
+        }
+
+        if (!Match(TokenType::LParen)) break;
         std::vector<std::unique_ptr<Expression>> arguments;
 
         while (!Check(TokenType::RParen) && !IsAtEnd()) {

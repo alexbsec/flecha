@@ -555,3 +555,42 @@ TEST(ParserLoopControlTests, ParsesProceedBreakJumpAndPosition) {
     EXPECT_EQ(loop.Body().Statements()[3]->Kind(),
               AstNodeKind::PositionStatement);
 }
+
+TEST(ParserCastTests, ParsesBothSpellingsAndChainsLeftToRight) {
+    DiagnosticBag diagnostics;
+    std::unique_ptr<CompilationUnit> unit = ParseSource(
+        "i32 Test() { value := (32 as i64).cast<u8> as i32; "
+        "return value; }",
+        diagnostics);
+
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const FunctionDeclaration& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    const VariableDeclarationStatement& declaration =
+        static_cast<const VariableDeclarationStatement&>(
+            *function.Body().Statements()[0]);
+    ASSERT_EQ(declaration.Initializer()->Kind(), AstNodeKind::CastExpression);
+    const CastExpression& outer =
+        static_cast<const CastExpression&>(*declaration.Initializer());
+    EXPECT_EQ(outer.TargetType().Type(), PrimitiveType::I32);
+    ASSERT_EQ(outer.Value().Kind(), AstNodeKind::CastExpression);
+    const CastExpression& middle =
+        static_cast<const CastExpression&>(outer.Value());
+    EXPECT_EQ(middle.TargetType().Type(), PrimitiveType::U8);
+    EXPECT_EQ(middle.Value().Kind(), AstNodeKind::ParenthesizedExpression);
+}
+
+TEST(ParserCastTests, CastBindsTighterThanBinaryOperators) {
+    DiagnosticBag diagnostics;
+    std::unique_ptr<CompilationUnit> unit = ParseSource(
+        "i64 Test() { return 10 + 32 as i64; }", diagnostics);
+
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const FunctionDeclaration& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    const ReturnStatement& statement = static_cast<const ReturnStatement&>(
+        *function.Body().Statements()[0]);
+    const BinaryExpression& binary =
+        static_cast<const BinaryExpression&>(*statement.Value());
+    EXPECT_EQ(binary.Right().Kind(), AstNodeKind::CastExpression);
+}

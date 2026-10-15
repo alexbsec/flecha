@@ -1,0 +1,10 @@
+i32 main() {
+    first := 32 as i32;
+    second := 10.cast<i32>;
+    base := first + second;
+    wide := base.cast<i64>;
+    narrow := wide.cast<u8>;
+    decimal := narrow.cast<f64>;
+    result := (decimal as f32) as i32;
+    return result;
+}

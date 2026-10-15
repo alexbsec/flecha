@@ -44,6 +44,8 @@ class LlvmCodeGenerator final {
         const lowering::BoundLiteralExpression& expression);
     [[nodiscard]] llvm::Value* EmitUnary(
         const lowering::BoundUnaryExpression& expression);
+    [[nodiscard]] llvm::Value* EmitCast(
+        const lowering::BoundCastExpression& expression);
     [[nodiscard]] llvm::Value* EmitBinary(
         const lowering::BoundBinaryExpression& expression);
     [[nodiscard]] llvm::Value* EmitBooleanLogical(

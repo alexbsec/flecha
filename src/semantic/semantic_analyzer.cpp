@@ -359,6 +359,10 @@ SemanticType SemanticAnalyzer::AnalyzeExpression(
             type = AnalyzeCall(
                 static_cast<const core::CallExpression&>(expression));
             break;
+        case core::AstNodeKind::CastExpression:
+            type = AnalyzeCast(
+                static_cast<const core::CastExpression&>(expression));
+            break;
         default:
             break;
     }
@@ -387,6 +391,21 @@ SemanticType SemanticAnalyzer::AnalyzeLiteral(
         default:
             return SemanticType::Error();
     }
+}
+
+SemanticType SemanticAnalyzer::AnalyzeCast(
+    const core::CastExpression& expression) {
+    const SemanticType source = AnalyzeExpression(expression.Value());
+    const SemanticType target =
+        SemanticType::FromSyntax(expression.TargetType().Type());
+    if (source.IsError() || target.IsError()) return SemanticType::Error();
+    if (!CanExplicitlyCast(source, target)) {
+        Report(diagnostics::DiagnosticCode::InvalidCast, expression.Range(),
+               "cannot cast '" + std::string(source.Name()) + "' to '" +
+                   std::string(target.Name()) + "'");
+        return SemanticType::Error();
+    }
+    return target;
 }
 
 SemanticType SemanticAnalyzer::AnalyzeName(

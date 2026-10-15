@@ -215,6 +215,12 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
             return LowerExpression(
                 static_cast<const core::ParenthesizedExpression&>(expression)
                     .Inner());
+        case core::AstNodeKind::CastExpression: {
+            const core::CastExpression& cast =
+                static_cast<const core::CastExpression&>(expression);
+            return std::make_unique<BoundCastExpression>(
+                expression.Range(), type, LowerExpression(cast.Value()));
+        }
         case core::AstNodeKind::UnaryExpression: {
             const core::UnaryExpression& unary =
                 static_cast<const core::UnaryExpression&>(expression);

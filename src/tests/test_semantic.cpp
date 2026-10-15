@@ -249,6 +249,43 @@ TEST(SemanticLoopControlTests, DiagnosesInvalidLoopControlAndPositions) {
               nullptr);
 }
 
+TEST(SemanticCastTests, TypesChainedNumericCasts) {
+    Analysis analysis = Analyze(
+        "i32 main() { value := 32.cast<i64>.cast<u8> as i32; "
+        "return value; }");
+
+    ASSERT_FALSE(analysis.diagnostics.HasErrors());
+    const FunctionDeclaration& function = FunctionAt(analysis, 0);
+    EXPECT_EQ(analysis.model.DeclaredSymbol(VariableAt(function, 0))
+                  ->Type()
+                  .Kind(),
+              SemanticTypeKind::I32);
+}
+
+TEST(SemanticCastTests, AllowsSameTypeCastsInBothForms) {
+    Analysis analysis = Analyze(
+        "i32 main() { first := 32 as i32; second := 32.cast<i32>; "
+        "return first + second; }");
+
+    EXPECT_FALSE(analysis.diagnostics.HasErrors());
+}
+
+TEST(SemanticCastTests, RejectsNonNumericCasts) {
+    Analysis analysis =
+        Analyze("i32 main() { value := true.cast<i32>; return 0; }");
+
+    EXPECT_NE(FindDiagnostic(analysis, DiagnosticCode::InvalidCast), nullptr);
+}
+
+TEST(SemanticCastTests, CentralizesExtensibleExplicitCastPolicy) {
+    EXPECT_TRUE(CanExplicitlyCast(
+        SemanticType(SemanticTypeKind::I32),
+        SemanticType(SemanticTypeKind::F64)));
+    EXPECT_FALSE(CanExplicitlyCast(
+        SemanticType(SemanticTypeKind::String),
+        SemanticType(SemanticTypeKind::I32)));
+}
+
 TEST(SemanticDiagnosticTests, ReportsDuplicateAtExactIdentifierRange) {
     const std::string source = "i32 main() { x := 1; x := 2; return x; }";
     Analysis analysis = Analyze(source);

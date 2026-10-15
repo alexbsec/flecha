@@ -135,6 +135,24 @@ TEST(LlvmCodeGeneratorTests, EmitsLoopControlAndCrossNestedJumps) {
     EXPECT_NE(ir.find("position.inner_position"), std::string::npos);
 }
 
+TEST(LlvmCodeGeneratorTests, EmitsChainedNumericConversions) {
+    GeneratedSource result = Generate(
+        "i32 main() { base := 42; wide := base.cast<i64>; "
+        "narrow := wide.cast<u8>; "
+        "decimal := narrow.cast<f64>; result := (decimal as f32) as i32; "
+        "return result; }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("sext i32"), std::string::npos);
+    EXPECT_NE(ir.find("trunc i64"), std::string::npos);
+    EXPECT_NE(ir.find("uitofp i8"), std::string::npos);
+    EXPECT_NE(ir.find("fptrunc double"), std::string::npos);
+    EXPECT_NE(ir.find("fptosi float"), std::string::npos);
+}
+
 TEST(LlvmCodeGeneratorTests, EmitsShortCircuitBooleanLogic) {
     GeneratedSource result =
         Generate("bool both(bool left, bool right) { return left and right; }");
@@ -167,6 +185,22 @@ TEST(LlvmCodeGeneratorTests, UsesTargetPointerWidthForSizeTypes) {
     ASSERT_NE(module, nullptr) << generator.Error();
     const std::string ir = ModuleText(*module);
     EXPECT_NE(ir.find("define i32 @identity(i32 %value)"), std::string::npos);
+}
+
+TEST(LlvmCodeGeneratorTests, UsesTargetPointerWidthForSizeCasts) {
+    GeneratedSource result =
+        Generate("usize Convert(i64 value) { return value.cast<usize>; }");
+    ASSERT_NE(result.boundProgram, nullptr);
+
+    LlvmCodeGenerator generator;
+    generator.ConfigureTarget("i386-unknown-linux-gnu",
+                              llvm::DataLayout("e-p:32:32"));
+    std::unique_ptr<llvm::Module> module =
+        generator.Generate(*result.boundProgram, "size_cast_test");
+    ASSERT_NE(module, nullptr) << generator.Error();
+    const std::string ir = ModuleText(*module);
+    EXPECT_NE(ir.find("trunc i64"), std::string::npos);
+    EXPECT_NE(ir.find("to i32"), std::string::npos);
 }
 
 TEST(NativeCompilerTests, EmitsObjectAndLinksExecutableForHost) {

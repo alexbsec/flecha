@@ -54,6 +54,8 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0015";
         case DiagnosticCode::UnknownPosition:
             return "FLECHA-S0016";
+        case DiagnosticCode::InvalidCast:
+            return "FLECHA-S0017";
     }
     return "FLECHA-UNKNOWN";
 }

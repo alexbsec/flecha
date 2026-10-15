@@ -110,6 +110,32 @@ TEST(LoweringTests, NormalizesWhileAlsoInsideLoopBody) {
               BoundNodeKind::IfStatement);
 }
 
+TEST(LoweringTests, PreservesEveryCastInAChain) {
+    LoweredSource result = Lower(
+        "i32 main() { value := 32.cast<i64>.cast<u8> as i32; "
+        "return value; }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    const BoundFunction& function = *result.program->Functions()[0];
+    const BoundVariableDeclarationStatement& declaration =
+        static_cast<const BoundVariableDeclarationStatement&>(
+            *function.Body().Statements()[0]);
+    ASSERT_EQ(declaration.Initializer().Kind(),
+              BoundNodeKind::CastExpression);
+    const BoundCastExpression& outer =
+        static_cast<const BoundCastExpression&>(declaration.Initializer());
+    EXPECT_EQ(outer.Type().Kind(), SemanticTypeKind::I32);
+    ASSERT_EQ(outer.Value().Kind(), BoundNodeKind::CastExpression);
+    const BoundCastExpression& middle =
+        static_cast<const BoundCastExpression&>(outer.Value());
+    EXPECT_EQ(middle.Type().Kind(), SemanticTypeKind::U8);
+    ASSERT_EQ(middle.Value().Kind(), BoundNodeKind::CastExpression);
+    EXPECT_EQ(static_cast<const BoundCastExpression&>(middle.Value())
+                  .Type()
+                  .Kind(),
+              SemanticTypeKind::I64);
+}
+
 TEST(LoweringTests, PreservesTypesAndSourceRanges) {
     const std::string source = "i32 main() { return 20 + 22; }";
     LoweredSource result = Lower(source);
