@@ -39,6 +39,7 @@ enum class TokenType {
     NotEqual,
     StrictEqual,
     StrictNotEqual,
+    Ampersand,
     And,
     Or,
     Less,
@@ -76,6 +77,8 @@ enum class TokenType {
     JumpTo,
     Error,
     Const,
+    ConstPtr,
+    ConstRef,
     Volatile,
     As,
 

@@ -18,6 +18,7 @@ class SemanticAnalyzer final {
     [[nodiscard]] SemanticModel Analyze(const core::CompilationUnit& unit);
 
    private:
+    SemanticType ResolveType(const core::TypeNode& type);
     void RegisterBuiltIns();
     void RegisterFunctions(const core::CompilationUnit& unit);
     void AnalyzeFunction(const core::FunctionDeclaration& function);

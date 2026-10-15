@@ -254,7 +254,8 @@ void LlvmCodeGenerator::EmitCleanupsTo(std::size_t retainedScopeCount) {
 llvm::Value* LlvmCodeGenerator::CoerceValue(
     llvm::Value* value, semantic::SemanticType sourceType,
     semantic::SemanticType destinationType) {
-    if (sourceType == destinationType) return value;
+    if (sourceType.WithoutConst() == destinationType.WithoutConst())
+        return value;
     if (destinationType.Kind() == semantic::SemanticTypeKind::String) {
         return EmitOwnedString(value, sourceType);
     }
@@ -798,6 +799,7 @@ llvm::Value* LlvmCodeGenerator::EmitLiteral(
     const lowering::BoundLiteralExpression& expression) {
     llvm::Type* type = MapType(expression.Type());
     if (type == nullptr) return nullptr;
+    if (expression.IsZeroValue()) return llvm::Constant::getNullValue(type);
     if (expression.Type().Kind() == semantic::SemanticTypeKind::Bool) {
         return llvm::ConstantInt::get(type, expression.Value() == "true");
     }
@@ -870,7 +872,8 @@ llvm::Value* LlvmCodeGenerator::EmitCast(
         expression.Type().Kind() == semantic::SemanticTypeKind::String) {
         return EmitOwnedString(value, sourceType);
     }
-    if (sourceType == expression.Type()) return value;
+    if (sourceType.WithoutConst() == expression.Type().WithoutConst())
+        return value;
 
     if (expression.Type().Kind() == semantic::SemanticTypeKind::String) {
         return EmitOwnedString(value, sourceType);

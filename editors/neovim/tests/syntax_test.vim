@@ -42,6 +42,12 @@ call assert_equal('flechaStatement', s:HighlightAt('proceed', 0))
 call assert_equal('flechaStatement', s:HighlightAt('break', 0))
 call assert_equal('flechaStatement', s:HighlightAt('return', 0))
 
+call assert_equal('flechaModifier', s:HighlightAt('constptr', 0))
+call assert_equal('flechaModifier', s:HighlightAt('constref', 0))
+call assert_equal('flechaModifier', s:HighlightAt('&const', 1))
+call assert_equal('flechaOperator', s:HighlightAt('&const', 0))
+call assert_notequal('flechaModifier', s:HighlightAt('constval', 0))
+
 if !empty(v:errors)
     for error in v:errors
         echomsg error

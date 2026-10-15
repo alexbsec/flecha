@@ -34,9 +34,11 @@ class Lowerer final {
         const core::ConditionalBranch& branch,
         std::unique_ptr<BoundBlockStatement> elseBlock);
     std::unique_ptr<BoundExpression> LowerExpression(
-        const core::Expression& expression);
+        const core::Expression& expression,
+        semantic::SemanticType expected = semantic::SemanticType::Error());
 
     const semantic::SemanticModel* _semanticModel = nullptr;
+    semantic::SemanticType _returnType = semantic::SemanticType::Error();
 };
 
 }  // namespace flecha::lowering

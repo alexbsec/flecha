@@ -27,6 +27,7 @@ class Parser {
     const Token& Advance();
     bool Match(TokenType type);
     const Token* Consume(TokenType type, std::string_view expectation);
+    [[nodiscard]] bool StartsType() const;
     [[nodiscard]] bool IsTypeToken(TokenType type) const;
     std::unique_ptr<Declaration> ParseDeclaration();
     std::unique_ptr<FunctionDeclaration> ParseFunctionDeclaration();

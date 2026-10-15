@@ -1,0 +1,44 @@
+const i32 add(const i32 input) {
+    const i32 increment = 2;
+    return input + increment;
+}
+
+const string echo(const string text) {
+    return text;
+}
+
+const i32 zero() {
+    return none;
+}
+
+i32 main() {
+    const i32 answer = add(40);
+    copy := answer;
+    copy = copy + 1;
+    const i32 empty = (none);
+    const bool disabled = none;
+    const string emptyText = none;
+    const stringv word = "none";
+    if disabled or emptyText.len() != (0 as u32) or word.len() != (4 as u32) { return 4; }
+    if add(none) != 2 or zero() != 0 { return 5; }
+    i32 reset = 1;
+    reset = none;
+    const i64 wide = answer as const i64;
+    const u8 byte = answer.cast<const u8>;
+    const f64 fraction = 1.5;
+    const bool valid = byte == (42 as u8) and wide == (42 as i64);
+    const char letter = 'i';
+    if valid and fraction > 1.0 and letter == 'i' {
+        i32 answer = 0;
+        answer = answer + 1;
+        if answer != 1 { return 1; }
+    } else { return 2; }
+
+    const string original = echo("initialized");
+    mutableCopy := original;
+    mutableCopy = "changed";
+    if original == mutableCopy { return 3; }
+    const stringv view = original.view();
+    stdoutln(view);
+    return copy - 1 + empty + reset;
+}

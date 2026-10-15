@@ -42,6 +42,8 @@ enum class DiagnosticCode {
     BorrowEscapesOwner,
     UninitializedVariable,
     BorrowRequiresInitializer,
+    ConstRequiresInitializer,
+    UnsupportedCompoundType,
     NativeTargetUnavailable,
     ObjectEmissionFailed,
     RuntimeUnavailable,

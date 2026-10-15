@@ -1,6 +1,7 @@
 #ifndef FLECHA_CORE_AST_HPP
 #define FLECHA_CORE_AST_HPP
 
+#include <cassert>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -93,18 +94,49 @@ enum class PrimitiveType {
     StringView,
 };
 
+enum class TypeKind { Primitive, Pointer, Reference };
+
 class TypeNode final : public AstNode {
    public:
-    TypeNode(source::SourceRange range, PrimitiveType type)
-        : AstNode(range), _type(type) {}
+    TypeNode(source::SourceRange range, PrimitiveType type,
+             bool isConst = false, source::SourceRange qualifierRange = {})
+        : AstNode(range),
+          _typeKind(TypeKind::Primitive),
+          _type(type),
+          _isConst(isConst),
+          _qualifierRange(qualifierRange) {}
+
+    TypeNode(source::SourceRange range, TypeKind typeKind,
+             std::unique_ptr<TypeNode> target, bool isConst = false,
+             source::SourceRange qualifierRange = {})
+        : AstNode(range),
+          _typeKind(typeKind),
+          _target(std::move(target)),
+          _isConst(isConst),
+          _qualifierRange(qualifierRange) {
+        assert(typeKind != TypeKind::Primitive && _target != nullptr);
+    }
 
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::Type;
     }
-    [[nodiscard]] PrimitiveType Type() const { return _type; }
+    [[nodiscard]] TypeKind TypeForm() const { return _typeKind; }
+    [[nodiscard]] PrimitiveType Type() const {
+        assert(_typeKind == TypeKind::Primitive);
+        return _type;
+    }
+    [[nodiscard]] const TypeNode* Target() const { return _target.get(); }
+    [[nodiscard]] bool IsConst() const { return _isConst; }
+    [[nodiscard]] const source::SourceRange& QualifierRange() const {
+        return _qualifierRange;
+    }
 
    private:
-    PrimitiveType _type;
+    TypeKind _typeKind;
+    PrimitiveType _type = PrimitiveType::Void;
+    std::unique_ptr<TypeNode> _target;
+    bool _isConst;
+    source::SourceRange _qualifierRange;
 };
 
 class Parameter final : public AstNode {

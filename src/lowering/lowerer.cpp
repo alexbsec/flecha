@@ -45,6 +45,7 @@ std::unique_ptr<BoundFunction> Lowerer::LowerFunction(
             static_cast<const semantic::VariableSymbol*>(parameterSymbol));
     }
 
+    _returnType = functionSymbol.ReturnType();
     return std::make_unique<BoundFunction>(
         functionSymbol, std::move(parameters), LowerBlock(function.Body()));
 }
@@ -78,7 +79,8 @@ std::unique_ptr<BoundStatement> Lowerer::LowerStatement(
                     *_semanticModel->DeclaredSymbol(declaration));
             std::unique_ptr<BoundExpression> initializer;
             if (declaration.Initializer() != nullptr) {
-                initializer = LowerExpression(*declaration.Initializer());
+                initializer =
+                    LowerExpression(*declaration.Initializer(), symbol.Type());
             }
             return std::make_unique<BoundVariableDeclarationStatement>(
                 declaration.Range(), symbol, std::move(initializer));
@@ -95,7 +97,8 @@ std::unique_ptr<BoundStatement> Lowerer::LowerStatement(
                 static_cast<const core::ReturnStatement&>(statement);
             std::unique_ptr<BoundExpression> expression;
             if (returnStatement.Value() != nullptr) {
-                expression = LowerExpression(*returnStatement.Value());
+                expression =
+                    LowerExpression(*returnStatement.Value(), _returnType);
             }
             return std::make_unique<BoundReturnStatement>(
                 statement.Range(), std::move(expression));
@@ -192,12 +195,19 @@ std::unique_ptr<BoundStatement> Lowerer::LowerWhile(
 }
 
 std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
-    const core::Expression& expression) {
+    const core::Expression& expression, semantic::SemanticType expected) {
     const semantic::SemanticType type = _semanticModel->TypeOf(expression);
     switch (expression.Kind()) {
         case core::AstNodeKind::LiteralExpression: {
             const core::LiteralExpression& literal =
                 static_cast<const core::LiteralExpression&>(expression);
+            if (literal.LiteralType() == TokenType::None &&
+                !expected.IsError() &&
+                expected.Kind() != semantic::SemanticTypeKind::None) {
+                return std::make_unique<BoundLiteralExpression>(
+                    expression.Range(), expected.WithoutConst(),
+                    literal.Value(), true);
+            }
             return std::make_unique<BoundLiteralExpression>(
                 expression.Range(), type, literal.Value());
         }
@@ -217,7 +227,8 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
         case core::AstNodeKind::ParenthesizedExpression:
             return LowerExpression(
                 static_cast<const core::ParenthesizedExpression&>(expression)
-                    .Inner());
+                    .Inner(),
+                expected);
         case core::AstNodeKind::CastExpression: {
             const core::CastExpression& cast =
                 static_cast<const core::CastExpression&>(expression);
@@ -248,7 +259,7 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                     *_semanticModel->SymbolFor(name));
             return std::make_unique<BoundAssignmentExpression>(
                 expression.Range(), target,
-                LowerExpression(assignment.Value()));
+                LowerExpression(assignment.Value(), target.Type()));
         }
         case core::AstNodeKind::CallExpression: {
             const core::CallExpression& call =
@@ -262,7 +273,11 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
             arguments.reserve(call.Arguments().size());
             for (const std::unique_ptr<core::Expression>& argument :
                  call.Arguments()) {
-                arguments.push_back(LowerExpression(*argument));
+                const semantic::SemanticType parameterType =
+                    function.BuiltIn() == semantic::BuiltInFunction::None
+                        ? function.ParameterTypes()[arguments.size()]
+                        : semantic::SemanticType::Error();
+                arguments.push_back(LowerExpression(*argument, parameterType));
             }
             return std::make_unique<BoundCallExpression>(
                 expression.Range(), function, std::move(arguments));

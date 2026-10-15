@@ -77,22 +77,28 @@ class BoundStatement : public BoundNode {
 class BoundLiteralExpression final : public BoundExpression {
    public:
     BoundLiteralExpression(source::SourceRange range,
-                           semantic::SemanticType type, std::string value)
-        : BoundExpression(range, type), _value(std::move(value)) {}
+                           semantic::SemanticType type, std::string value,
+                           bool isZeroValue = false)
+        : BoundExpression(range, type),
+          _value(std::move(value)),
+          _isZeroValue(isZeroValue) {}
     [[nodiscard]] BoundNodeKind Kind() const override {
         return BoundNodeKind::LiteralExpression;
     }
     [[nodiscard]] const std::string& Value() const { return _value; }
+    [[nodiscard]] bool IsZeroValue() const { return _isZeroValue; }
 
    private:
     std::string _value;
+    bool _isZeroValue;
 };
 
 class BoundVariableExpression final : public BoundExpression {
    public:
     BoundVariableExpression(source::SourceRange range,
                             const semantic::VariableSymbol& symbol)
-        : BoundExpression(range, symbol.Type()), _symbol(symbol) {}
+        : BoundExpression(range, symbol.Type().WithoutConst()),
+          _symbol(symbol) {}
     [[nodiscard]] BoundNodeKind Kind() const override {
         return BoundNodeKind::VariableExpression;
     }
@@ -108,7 +114,8 @@ class BoundFunctionExpression final : public BoundExpression {
    public:
     BoundFunctionExpression(source::SourceRange range,
                             const semantic::FunctionSymbol& symbol)
-        : BoundExpression(range, symbol.Type()), _symbol(symbol) {}
+        : BoundExpression(range, symbol.Type().WithoutConst()),
+          _symbol(symbol) {}
     [[nodiscard]] BoundNodeKind Kind() const override {
         return BoundNodeKind::FunctionExpression;
     }
@@ -205,7 +212,7 @@ class BoundCallExpression final : public BoundExpression {
     BoundCallExpression(source::SourceRange range,
                         const semantic::FunctionSymbol& function,
                         std::vector<std::unique_ptr<BoundExpression>> arguments)
-        : BoundExpression(range, function.ReturnType()),
+        : BoundExpression(range, function.ReturnType().WithoutConst()),
           _function(function),
           _arguments(std::move(arguments)) {}
     [[nodiscard]] BoundNodeKind Kind() const override {
