@@ -10,6 +10,7 @@
 #include <llvm/Support/raw_ostream.h>
 
 #include "codegen/llvm_code_generator.hpp"
+#include "codegen/native_compiler.hpp"
 #include "core/parser.hpp"
 #include "core/tokenizer.hpp"
 #include "diagnostics/diagnostic.hpp"
@@ -78,9 +79,58 @@ int EmitLlvm(const std::string& inputPath, const std::string& outputPath) {
     return 0;
 }
 
+int BuildNative(const std::string& inputPath, const std::string& outputPath,
+                bool objectOnly) {
+    std::ifstream input(inputPath);
+    if (!input) {
+        std::cerr << "unable to open input file '" << inputPath << "'\n";
+        return 1;
+    }
+    std::ostringstream sourceBuffer;
+    sourceBuffer << input.rdbuf();
+    const std::string source = sourceBuffer.str();
+
+    flecha::diagnostics::DiagnosticBag diagnostics;
+    flecha::core::Tokenizer tokenizer(source, diagnostics);
+    std::vector<flecha::core::Token> tokens = tokenizer.Tokenize();
+    flecha::core::Parser parser(std::move(tokens), diagnostics);
+    std::unique_ptr<flecha::core::CompilationUnit> unit = parser.Parse();
+    flecha::semantic::SemanticAnalyzer analyzer(diagnostics);
+    flecha::semantic::SemanticModel semanticModel = analyzer.Analyze(*unit);
+    flecha::lowering::Lowerer lowerer;
+    std::unique_ptr<flecha::lowering::BoundProgram> boundProgram =
+        lowerer.Lower(*unit, semanticModel, diagnostics);
+    if (boundProgram == nullptr) {
+        PrintDiagnostics(diagnostics);
+        return 1;
+    }
+
+    flecha::codegen::NativeCompiler compiler;
+    if (!compiler.Ready()) {
+        std::cerr << "native compiler initialization failed: "
+                  << compiler.Error() << "\n";
+        return 1;
+    }
+    const bool success =
+        objectOnly
+            ? compiler.EmitObject(*boundProgram, inputPath, outputPath)
+            : compiler.BuildExecutable(*boundProgram, inputPath, outputPath);
+    if (!success) {
+        std::cerr << "native compilation failed: " << compiler.Error()
+                  << "\n";
+        return 1;
+    }
+    return 0;
+}
+
 void PrintUsage(const char* executable) {
-    std::cerr << "usage: " << executable
-              << " --emit-llvm <input.fl> [-o <output.ll>]\n";
+    std::cerr << "usage:\n"
+              << "  " << executable
+              << " --emit-llvm <input.fl> [-o <output.ll>]\n"
+              << "  " << executable
+              << " --emit-object <input.fl> -o <output.o>\n"
+              << "  " << executable
+              << " build <input.fl> -o <executable>\n";
 }
 
 }  // namespace
@@ -90,7 +140,9 @@ int main(int argumentCount, char** arguments) {
         PrintUsage(arguments[0]);
         return 1;
     }
-    if (std::string(arguments[1]) != "--emit-llvm") {
+    const std::string command = arguments[1];
+    if (command != "--emit-llvm" && command != "--emit-object" &&
+        command != "build") {
         PrintUsage(arguments[0]);
         return 1;
     }
@@ -102,5 +154,13 @@ int main(int argumentCount, char** arguments) {
         }
         outputPath = arguments[4];
     }
-    return EmitLlvm(arguments[2], outputPath);
+    if (command == "--emit-llvm") {
+        return EmitLlvm(arguments[2], outputPath);
+    }
+    if (outputPath.empty()) {
+        PrintUsage(arguments[0]);
+        return 1;
+    }
+    return BuildNative(arguments[2], outputPath,
+                       command == "--emit-object");
 }

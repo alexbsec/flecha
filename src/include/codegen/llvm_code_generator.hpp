@@ -2,10 +2,12 @@
 #define FLECHA_CODEGEN_LLVM_CODE_GENERATOR_HPP
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/DataLayout.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
 
@@ -16,6 +18,9 @@ namespace flecha::codegen {
 class LlvmCodeGenerator final {
    public:
     LlvmCodeGenerator();
+
+    void ConfigureTarget(std::string targetTriple,
+                         llvm::DataLayout dataLayout);
 
     [[nodiscard]] std::unique_ptr<llvm::Module> Generate(
         const lowering::BoundProgram& program, std::string moduleName);
@@ -47,6 +52,8 @@ class LlvmCodeGenerator final {
     llvm::LLVMContext _context;
     llvm::IRBuilder<> _builder;
     std::unique_ptr<llvm::Module> _module;
+    std::string _targetTriple;
+    std::optional<llvm::DataLayout> _dataLayout;
     std::unordered_map<const semantic::FunctionSymbol*, llvm::Function*>
         _functions;
     std::unordered_map<const semantic::VariableSymbol*, llvm::AllocaInst*>
