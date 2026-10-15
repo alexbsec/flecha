@@ -14,8 +14,7 @@ namespace flecha::core {
 
 class Parser {
    public:
-    Parser(std::vector<Token> tokens,
-           diagnostics::DiagnosticBag& diagnostics);
+    Parser(std::vector<Token> tokens, diagnostics::DiagnosticBag& diagnostics);
 
     [[nodiscard]] std::unique_ptr<CompilationUnit> Parse();
 
@@ -39,6 +38,7 @@ class Parser {
     ParseVariableDeclarationStatement();
     std::unique_ptr<ReturnStatement> ParseReturnStatement();
     std::unique_ptr<IfStatement> ParseIfStatement();
+    std::unique_ptr<WhileStatement> ParseWhileStatement();
     std::unique_ptr<ConditionalBranch> ParseConditionalBranch(
         source::SourceLocation start);
     std::unique_ptr<AlsoClause> ParseAlsoClause();

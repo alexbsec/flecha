@@ -6,8 +6,8 @@
 
 #include "core/parser.hpp"
 #include "core/tokenizer.hpp"
-#include "lowering/lowerer.hpp"
 #include "lowering/bound_ir_dumper.hpp"
+#include "lowering/lowerer.hpp"
 #include "semantic/semantic_analyzer.hpp"
 
 using namespace flecha::core;
@@ -33,8 +33,8 @@ LoweredSource Lower(const std::string& source) {
     SemanticAnalyzer analyzer(result.diagnostics);
     result.semanticModel = analyzer.Analyze(*result.unit);
     Lowerer lowerer;
-    result.program = lowerer.Lower(*result.unit, result.semanticModel,
-                                   result.diagnostics);
+    result.program =
+        lowerer.Lower(*result.unit, result.semanticModel, result.diagnostics);
     return result;
 }
 
@@ -81,8 +81,8 @@ TEST(LoweringTests, NormalizesElseIfAndAlsoToNestedConditionals) {
 
     ASSERT_FALSE(result.diagnostics.HasErrors());
     const BoundFunction& function = *result.program->Functions()[0];
-    const BoundIfStatement& primary = static_cast<const BoundIfStatement&>(
-        *function.Body().Statements()[1]);
+    const BoundIfStatement& primary =
+        static_cast<const BoundIfStatement&>(*function.Body().Statements()[1]);
     ASSERT_EQ(primary.ThenBlock().Statements().size(), 2);
     EXPECT_EQ(primary.ThenBlock().Statements()[1]->Kind(),
               BoundNodeKind::IfStatement);
@@ -92,6 +92,22 @@ TEST(LoweringTests, NormalizesElseIfAndAlsoToNestedConditionals) {
         *primary.ElseBlock()->Statements()[0]);
     ASSERT_NE(elseIf.ElseBlock(), nullptr);
     EXPECT_EQ(elseIf.ElseBlock()->Statements().size(), 1);
+}
+
+TEST(LoweringTests, NormalizesWhileAlsoInsideLoopBody) {
+    LoweredSource result = Lower(
+        "i32 main() { value := 0; while value < 2 { value = value + 1; } "
+        "also value == 1 { value = value + 10; } return value; }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    const BoundFunction& function = *result.program->Functions()[0];
+    const BoundWhileStatement& whileStatement =
+        static_cast<const BoundWhileStatement&>(
+            *function.Body().Statements()[1]);
+    EXPECT_EQ(whileStatement.Kind(), BoundNodeKind::WhileStatement);
+    ASSERT_EQ(whileStatement.Body().Statements().size(), 2);
+    EXPECT_EQ(whileStatement.Body().Statements()[1]->Kind(),
+              BoundNodeKind::IfStatement);
 }
 
 TEST(LoweringTests, PreservesTypesAndSourceRanges) {
@@ -109,8 +125,7 @@ TEST(LoweringTests, PreservesTypesAndSourceRanges) {
 }
 
 TEST(LoweringTests, RejectsProgramsWithSemanticErrors) {
-    LoweredSource result = Lower(
-        "i32 main() { missing = 1; return false; }");
+    LoweredSource result = Lower("i32 main() { missing = 1; return false; }");
 
     EXPECT_TRUE(result.diagnostics.HasErrors());
     EXPECT_EQ(result.program, nullptr);
@@ -131,8 +146,8 @@ TEST(LoweringTests, DumpsDeterministicHumanReadableIr) {
 }
 
 TEST(LoweringTests, SafelyRepresentsFunctionReferences) {
-    LoweredSource result = Lower(
-        "i32 helper() { return 1; } i32 main() { helper; return 0; }");
+    LoweredSource result =
+        Lower("i32 helper() { return 1; } i32 main() { helper; return 0; }");
 
     ASSERT_FALSE(result.diagnostics.HasErrors());
     ASSERT_NE(result.program, nullptr);

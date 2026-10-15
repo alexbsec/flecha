@@ -13,8 +13,7 @@ using namespace flecha::source;
 
 namespace {
 
-std::vector<Token> Lex(const std::string& source,
-                       DiagnosticBag& diagnostics) {
+std::vector<Token> Lex(const std::string& source, DiagnosticBag& diagnostics) {
     Tokenizer tokenizer(source, diagnostics);
     return tokenizer.Tokenize();
 }
@@ -29,8 +28,8 @@ std::unique_ptr<CompilationUnit> ParseSource(const std::string& source,
 const Expression& ReturnedExpression(const CompilationUnit& unit) {
     const FunctionDeclaration& function =
         static_cast<const FunctionDeclaration&>(*unit.Declarations()[0]);
-    const ReturnStatement& statement = static_cast<const ReturnStatement&>(
-        *function.Body().Statements()[0]);
+    const ReturnStatement& statement =
+        static_cast<const ReturnStatement&>(*function.Body().Statements()[0]);
     return *statement.Value();
 }
 
@@ -97,8 +96,7 @@ TEST(ParserTests, ParsesCompleteFunctionWithReturnStatement) {
     const ReturnStatement& returnStatement =
         static_cast<const ReturnStatement&>(*function.Body().Statements()[0]);
     ASSERT_NE(returnStatement.Value(), nullptr);
-    EXPECT_EQ(returnStatement.Value()->Kind(),
-              AstNodeKind::LiteralExpression);
+    EXPECT_EQ(returnStatement.Value()->Kind(), AstNodeKind::LiteralExpression);
     EXPECT_EQ(unit->Range().start.offset, 0);
     EXPECT_EQ(unit->Range().end.offset, 24);
 }
@@ -120,8 +118,8 @@ TEST(ParserTests, ParsesTypedParametersAndBareReturn) {
     EXPECT_EQ(function.Parameters()[0]->Type().Type(), PrimitiveType::I32);
     EXPECT_EQ(function.Parameters()[1]->Name(), "enabled");
     EXPECT_EQ(function.Parameters()[1]->Type().Type(), PrimitiveType::Bool);
-    const ReturnStatement& returnStatement = static_cast<const ReturnStatement&>(
-        *function.Body().Statements()[0]);
+    const ReturnStatement& returnStatement =
+        static_cast<const ReturnStatement&>(*function.Body().Statements()[0]);
     EXPECT_EQ(returnStatement.Value(), nullptr);
 }
 
@@ -154,9 +152,9 @@ TEST(ParserTests, AppendsMissingEndOfFileTokenSafely) {
 
 TEST(ParserExpressionTests, AppliesCompletePrecedenceTable) {
     DiagnosticBag diagnostics;
-    std::unique_ptr<CompilationUnit> unit = ParseSource(
-        "bool test() { return a or b and c ^ d == e < f + g * h; }",
-        diagnostics);
+    std::unique_ptr<CompilationUnit> unit =
+        ParseSource("bool test() { return a or b and c ^ d == e < f + g * h; }",
+                    diagnostics);
 
     ASSERT_FALSE(diagnostics.HasErrors());
     const BinaryExpression& logicalOr =
@@ -258,9 +256,9 @@ TEST(ParserAssignmentTests, AssignmentsHaveLowestPrecedence) {
         static_cast<const AssignmentExpression&>(ReturnedExpression(*unit));
     EXPECT_EQ(assignment.Target().Kind(), AstNodeKind::NameExpression);
     ASSERT_EQ(assignment.Value().Kind(), AstNodeKind::BinaryExpression);
-    EXPECT_EQ(static_cast<const BinaryExpression&>(assignment.Value())
-                  .OperatorType(),
-              TokenType::Or);
+    EXPECT_EQ(
+        static_cast<const BinaryExpression&>(assignment.Value()).OperatorType(),
+        TokenType::Or);
 }
 
 TEST(ParserAssignmentTests, AssignmentsAssociateRight) {
@@ -290,8 +288,8 @@ TEST(ParserAssignmentTests, ReportsInvalidAssignmentTarget) {
 
 TEST(ParserVariableDeclarationTests, ParsesTypedInitializedVariables) {
     DiagnosticBag diagnostics;
-    std::unique_ptr<CompilationUnit> unit = ParseSource(
-        "void test() { i32 x = 32; bool y = false; }", diagnostics);
+    std::unique_ptr<CompilationUnit> unit =
+        ParseSource("void test() { i32 x = 32; bool y = false; }", diagnostics);
 
     ASSERT_FALSE(diagnostics.HasErrors());
     const FunctionDeclaration& function =
@@ -314,9 +312,9 @@ TEST(ParserVariableDeclarationTests, ParsesTypedInitializedVariables) {
     EXPECT_EQ(y.ExplicitType()->Type(), PrimitiveType::Bool);
     EXPECT_EQ(y.Name(), "y");
     ASSERT_NE(y.Initializer(), nullptr);
-    EXPECT_EQ(static_cast<const LiteralExpression&>(*y.Initializer())
-                  .LiteralType(),
-              TokenType::False);
+    EXPECT_EQ(
+        static_cast<const LiteralExpression&>(*y.Initializer()).LiteralType(),
+        TokenType::False);
 }
 
 TEST(ParserVariableDeclarationTests, RequiresInitializer) {
@@ -332,8 +330,8 @@ TEST(ParserVariableDeclarationTests, RequiresInitializer) {
 
 TEST(ParserVariableDeclarationTests, ParsesInferredVariables) {
     DiagnosticBag diagnostics;
-    std::unique_ptr<CompilationUnit> unit = ParseSource(
-        "void test() { x := 32; y := false; }", diagnostics);
+    std::unique_ptr<CompilationUnit> unit =
+        ParseSource("void test() { x := 32; y := false; }", diagnostics);
 
     ASSERT_FALSE(diagnostics.HasErrors());
     const FunctionDeclaration& function =
@@ -355,9 +353,9 @@ TEST(ParserVariableDeclarationTests, ParsesInferredVariables) {
     EXPECT_FALSE(y.HasExplicitType());
     EXPECT_EQ(y.Name(), "y");
     ASSERT_NE(y.Initializer(), nullptr);
-    EXPECT_EQ(static_cast<const LiteralExpression&>(*y.Initializer())
-                  .LiteralType(),
-              TokenType::False);
+    EXPECT_EQ(
+        static_cast<const LiteralExpression&>(*y.Initializer()).LiteralType(),
+        TokenType::False);
 }
 
 TEST(ParserVariableDeclarationTests, InferredVariablesRequireInitializer) {
@@ -367,8 +365,7 @@ TEST(ParserVariableDeclarationTests, InferredVariablesRequireInitializer) {
 
     ASSERT_NE(unit, nullptr);
     ASSERT_EQ(diagnostics.Diagnostics().size(), 1);
-    EXPECT_EQ(diagnostics.Diagnostics()[0].message,
-              "expected an expression");
+    EXPECT_EQ(diagnostics.Diagnostics()[0].message, "expected an expression");
 }
 
 TEST(ParserCallTests, ParsesNestedFunctionCalls) {
@@ -406,8 +403,8 @@ TEST(ParserCallTests, ParsesEmptyAndChainedCalls) {
 
 TEST(ParserCallTests, CallsBindTighterThanUnaryAndBinaryOperators) {
     DiagnosticBag diagnostics;
-    std::unique_ptr<CompilationUnit> unit = ParseSource(
-        "i32 test() { return -value(1) * other(2); }", diagnostics);
+    std::unique_ptr<CompilationUnit> unit =
+        ParseSource("i32 test() { return -value(1) * other(2); }", diagnostics);
 
     ASSERT_FALSE(diagnostics.HasErrors());
     const BinaryExpression& multiplication =
@@ -457,13 +454,13 @@ TEST(ParserConditionalTests, ParsesConditionalAlsoClauses) {
     ASSERT_NE(ifStatement.PrimaryBranch().Also(), nullptr);
     const AlsoClause& primaryAlso = *ifStatement.PrimaryBranch().Also();
     EXPECT_EQ(primaryAlso.Condition().Kind(), AstNodeKind::NameExpression);
-    EXPECT_EQ(static_cast<const NameExpression&>(primaryAlso.Condition()).Name(),
-              "y");
+    EXPECT_EQ(
+        static_cast<const NameExpression&>(primaryAlso.Condition()).Name(),
+        "y");
 
     ASSERT_EQ(ifStatement.ElseIfBranches().size(), 1);
     ASSERT_NE(ifStatement.ElseIfBranches()[0]->Also(), nullptr);
-    const AlsoClause& secondaryAlso =
-        *ifStatement.ElseIfBranches()[0]->Also();
+    const AlsoClause& secondaryAlso = *ifStatement.ElseIfBranches()[0]->Also();
     EXPECT_EQ(
         static_cast<const NameExpression&>(secondaryAlso.Condition()).Name(),
         "w");
@@ -502,4 +499,37 @@ TEST(ParserConditionalTests, RejectsBareAlsoClause) {
     EXPECT_EQ(diagnostics.Diagnostics()[0].code, DiagnosticCode::ExpectedToken);
     EXPECT_EQ(diagnostics.Diagnostics()[0].message,
               "expected a condition after 'also'");
+}
+
+TEST(ParserWhileTests, ParsesConditionalAlsoClause) {
+    DiagnosticBag diagnostics;
+    std::unique_ptr<CompilationUnit> unit = ParseSource(
+        "void Test() { while running {} also ready {} }", diagnostics);
+
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const FunctionDeclaration& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    ASSERT_EQ(function.Body().Statements().size(), 1);
+    const WhileStatement& whileStatement =
+        static_cast<const WhileStatement&>(*function.Body().Statements()[0]);
+    EXPECT_EQ(whileStatement.Condition().Kind(), AstNodeKind::NameExpression);
+    ASSERT_NE(whileStatement.Also(), nullptr);
+    EXPECT_EQ(
+        static_cast<const NameExpression&>(whileStatement.Also()->Condition())
+            .Name(),
+        "ready");
+}
+
+TEST(ParserWhileTests, RejectsMultipleAlsoClauses) {
+    DiagnosticBag diagnostics;
+    std::unique_ptr<CompilationUnit> unit = ParseSource(
+        "void Test() { while running {} also first {} also second {} }",
+        diagnostics);
+
+    ASSERT_NE(unit, nullptr);
+    ASSERT_EQ(diagnostics.Diagnostics().size(), 1);
+    EXPECT_EQ(diagnostics.Diagnostics()[0].code,
+              DiagnosticCode::UnexpectedToken);
+    EXPECT_EQ(diagnostics.Diagnostics()[0].message,
+              "a while loop may have only one 'also' clause");
 }

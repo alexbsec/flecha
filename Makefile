@@ -6,7 +6,8 @@ TEST_BUILD_DIR ?= build-tests
 .DEFAULT_GOAL := build
 
 .PHONY: help configure build configure-tests build-tests test \
-	test-semantic llvm-poc native-poc native-if-also native-functions clean
+	test-semantic llvm-poc native-poc native-if-also native-functions \
+	native-while clean
 
 help:
 	@echo "Flecha build targets:"
@@ -17,6 +18,7 @@ help:
 	@echo "  make native-poc     Build and execute a native Flecha program"
 	@echo "  make native-if-also Build and test the if/also native example"
 	@echo "  make native-functions Build and test calls and recursion"
+	@echo "  make native-while   Build and test while/also loops"
 	@echo "  make clean          Clean generated build artifacts"
 	@echo ""
 	@echo "Overrides: CMAKE, CMAKE_GENERATOR, BUILD_DIR, TEST_BUILD_DIR"
@@ -71,6 +73,13 @@ native-functions: build
 	@test -f $(BUILD_DIR)/native_functions.o
 	@$(BUILD_DIR)/native_functions; result=$$?; test $$result -eq 42
 	@echo "Native function example returned 42"
+
+native-while: build
+	$(BUILD_DIR)/flecha build examples/while_also.fl \
+		-o $(BUILD_DIR)/while_also
+	@test -f $(BUILD_DIR)/while_also.o
+	@$(BUILD_DIR)/while_also; result=$$?; test $$result -eq 42
+	@echo "Native while/also example returned 42"
 
 clean:
 	@if test -f $(BUILD_DIR)/CMakeCache.txt; then \

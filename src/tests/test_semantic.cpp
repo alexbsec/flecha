@@ -208,6 +208,25 @@ TEST(SemanticScopeTests, AllowsNestedShadowingAndRestoresOuterBinding) {
     EXPECT_GE(analysis.model.Scopes().size(), 3);
 }
 
+TEST(SemanticScopeTests, AnalyzesWhileAndAlsoScopes) {
+    Analysis analysis = Analyze(
+        "i32 main() { value := 0; while value < 2 { inner := value; "
+        "value = inner + 1; } also value == 1 { extra := value; "
+        "value = extra + 1; } return value; }");
+
+    EXPECT_FALSE(analysis.diagnostics.HasErrors());
+}
+
+TEST(SemanticDiagnosticTests, RequiresBooleanWhileAndAlsoConditions) {
+    Analysis analysis = Analyze("void Test() { while 1 {} also 2 {} }");
+
+    ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 2);
+    EXPECT_EQ(analysis.diagnostics.Diagnostics()[0].code,
+              DiagnosticCode::InvalidCondition);
+    EXPECT_EQ(analysis.diagnostics.Diagnostics()[1].code,
+              DiagnosticCode::InvalidCondition);
+}
+
 TEST(SemanticDiagnosticTests, ReportsDuplicateAtExactIdentifierRange) {
     const std::string source = "i32 main() { x := 1; x := 2; return x; }";
     Analysis analysis = Analyze(source);

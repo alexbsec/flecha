@@ -20,6 +20,7 @@ enum class AstNodeKind {
     BlockStatement,
     ReturnStatement,
     IfStatement,
+    WhileStatement,
     ConditionalBranch,
     AlsoClause,
     VariableDeclarationStatement,
@@ -294,6 +295,30 @@ class IfStatement final : public Statement {
     std::unique_ptr<ConditionalBranch> _primaryBranch;
     std::vector<std::unique_ptr<ConditionalBranch>> _elseIfBranches;
     std::unique_ptr<BlockStatement> _elseBody;
+};
+
+class WhileStatement final : public Statement {
+   public:
+    WhileStatement(source::SourceRange range,
+                   std::unique_ptr<Expression> condition,
+                   std::unique_ptr<BlockStatement> body,
+                   std::unique_ptr<AlsoClause> alsoClause)
+        : Statement(range),
+          _condition(std::move(condition)),
+          _body(std::move(body)),
+          _alsoClause(std::move(alsoClause)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::WhileStatement;
+    }
+    [[nodiscard]] const Expression& Condition() const { return *_condition; }
+    [[nodiscard]] const BlockStatement& Body() const { return *_body; }
+    [[nodiscard]] const AlsoClause* Also() const { return _alsoClause.get(); }
+
+   private:
+    std::unique_ptr<Expression> _condition;
+    std::unique_ptr<BlockStatement> _body;
+    std::unique_ptr<AlsoClause> _alsoClause;
 };
 
 class VariableDeclarationStatement final : public Statement {

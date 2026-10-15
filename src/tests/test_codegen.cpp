@@ -1,13 +1,12 @@
 #include <gtest/gtest.h>
+#include <llvm/IR/Module.h>
+#include <llvm/Support/Program.h>
+#include <llvm/Support/raw_ostream.h>
 
-#include <memory>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
-
-#include <llvm/IR/Module.h>
-#include <llvm/Support/raw_ostream.h>
-#include <llvm/Support/Program.h>
 
 #include "codegen/llvm_code_generator.hpp"
 #include "codegen/native_compiler.hpp"
@@ -42,12 +41,12 @@ GeneratedSource Generate(const std::string& source) {
     SemanticAnalyzer analyzer(result.diagnostics);
     result.semanticModel = analyzer.Analyze(*result.unit);
     Lowerer lowerer;
-    result.boundProgram = lowerer.Lower(
-        *result.unit, result.semanticModel, result.diagnostics);
+    result.boundProgram =
+        lowerer.Lower(*result.unit, result.semanticModel, result.diagnostics);
     if (result.boundProgram != nullptr) {
         result.generator = std::make_unique<LlvmCodeGenerator>();
-        result.module = result.generator->Generate(*result.boundProgram,
-                                                   "test_module");
+        result.module =
+            result.generator->Generate(*result.boundProgram, "test_module");
     }
     return result;
 }
@@ -105,9 +104,24 @@ TEST(LlvmCodeGeneratorTests, EmitsAssignmentsAndConditionalControlFlow) {
     EXPECT_NE(ir.find("store i32"), std::string::npos);
 }
 
-TEST(LlvmCodeGeneratorTests, EmitsShortCircuitBooleanLogic) {
+TEST(LlvmCodeGeneratorTests, EmitsWhileAndConditionalAlsoControlFlow) {
     GeneratedSource result = Generate(
-        "bool both(bool left, bool right) { return left and right; }");
+        "i32 main() { value := 0; counter := 0; while counter < 4 { "
+        "value = value + 10; counter = counter + 1; } "
+        "also counter % 2 == 0 { value = value + 1; } return value; }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("while.condition"), std::string::npos);
+    EXPECT_NE(ir.find("while.body"), std::string::npos);
+    EXPECT_NE(ir.find("while.end"), std::string::npos);
+    EXPECT_NE(ir.find("if.then"), std::string::npos);
+}
+
+TEST(LlvmCodeGeneratorTests, EmitsShortCircuitBooleanLogic) {
+    GeneratedSource result =
+        Generate("bool both(bool left, bool right) { return left and right; }");
 
     ASSERT_NE(result.module, nullptr) << result.generator->Error();
     const std::string ir = ModuleText(*result.module);
@@ -116,8 +130,8 @@ TEST(LlvmCodeGeneratorTests, EmitsShortCircuitBooleanLogic) {
 }
 
 TEST(LlvmCodeGeneratorTests, RejectsDeferredLiteralRepresentations) {
-    GeneratedSource result = Generate(
-        "i32 main() { text := \"hello\"; return 0; }");
+    GeneratedSource result =
+        Generate("i32 main() { text := \"hello\"; return 0; }");
 
     ASSERT_NE(result.generator, nullptr);
     EXPECT_EQ(result.module, nullptr);
@@ -125,8 +139,8 @@ TEST(LlvmCodeGeneratorTests, RejectsDeferredLiteralRepresentations) {
 }
 
 TEST(LlvmCodeGeneratorTests, UsesTargetPointerWidthForSizeTypes) {
-    GeneratedSource result = Generate(
-        "isize identity(isize value) { return value; }");
+    GeneratedSource result =
+        Generate("isize identity(isize value) { return value; }");
     ASSERT_NE(result.boundProgram, nullptr);
 
     LlvmCodeGenerator generator;
@@ -136,8 +150,7 @@ TEST(LlvmCodeGeneratorTests, UsesTargetPointerWidthForSizeTypes) {
         generator.Generate(*result.boundProgram, "pointer_width_test");
     ASSERT_NE(module, nullptr) << generator.Error();
     const std::string ir = ModuleText(*module);
-    EXPECT_NE(ir.find("define i32 @identity(i32 %value)"),
-              std::string::npos);
+    EXPECT_NE(ir.find("define i32 @identity(i32 %value)"), std::string::npos);
 }
 
 TEST(NativeCompilerTests, EmitsObjectAndLinksExecutableForHost) {
@@ -193,9 +206,8 @@ TEST(NativeCompilerTests, RunsForwardAndRecursiveCalls) {
 
     NativeCompiler compiler;
     ASSERT_TRUE(compiler.Ready()) << compiler.Error();
-    ASSERT_TRUE(compiler.BuildExecutable(*result.boundProgram,
-                                         "native_functions_test",
-                                         executablePath.string()))
+    ASSERT_TRUE(compiler.BuildExecutable(
+        *result.boundProgram, "native_functions_test", executablePath.string()))
         << compiler.Error();
 
     const std::string executablePathText = executablePath.string();

@@ -8,25 +8,44 @@ namespace {
 
 std::string OperatorText(TokenType type) {
     switch (type) {
-        case TokenType::Assign: return "=";
-        case TokenType::Add: return "+";
-        case TokenType::Sub: return "-";
-        case TokenType::Mul: return "*";
-        case TokenType::Div: return "/";
-        case TokenType::Mod: return "%";
-        case TokenType::Xor: return "^";
-        case TokenType::Bang: return "!";
-        case TokenType::Equal: return "==";
-        case TokenType::NotEqual: return "!=";
-        case TokenType::StrictEqual: return "===";
-        case TokenType::StrictNotEqual: return "!==";
-        case TokenType::And: return "and";
-        case TokenType::Or: return "or";
-        case TokenType::Less: return "<";
-        case TokenType::LessEqual: return "<=";
-        case TokenType::Greater: return ">";
-        case TokenType::GreaterEqual: return ">=";
-        default: return "?";
+        case TokenType::Assign:
+            return "=";
+        case TokenType::Add:
+            return "+";
+        case TokenType::Sub:
+            return "-";
+        case TokenType::Mul:
+            return "*";
+        case TokenType::Div:
+            return "/";
+        case TokenType::Mod:
+            return "%";
+        case TokenType::Xor:
+            return "^";
+        case TokenType::Bang:
+            return "!";
+        case TokenType::Equal:
+            return "==";
+        case TokenType::NotEqual:
+            return "!=";
+        case TokenType::StrictEqual:
+            return "===";
+        case TokenType::StrictNotEqual:
+            return "!==";
+        case TokenType::And:
+            return "and";
+        case TokenType::Or:
+            return "or";
+        case TokenType::Less:
+            return "<";
+        case TokenType::LessEqual:
+            return "<=";
+        case TokenType::Greater:
+            return ">";
+        case TokenType::GreaterEqual:
+            return ">=";
+        default:
+            return "?";
     }
 }
 
@@ -115,26 +134,39 @@ class Dumper final {
                 }
                 break;
             }
-            default: break;
+            case BoundNodeKind::WhileStatement: {
+                const BoundWhileStatement& whileStatement =
+                    static_cast<const BoundWhileStatement&>(statement);
+                _stream << "while ";
+                WriteExpression(whileStatement.Condition());
+                _stream << "\n";
+                WriteBlock(whileStatement.Body());
+                break;
+            }
+            default:
+                break;
         }
     }
 
     void WriteExpression(const BoundExpression& expression) {
         switch (expression.Kind()) {
             case BoundNodeKind::LiteralExpression:
-                _stream << static_cast<const BoundLiteralExpression&>(expression)
+                _stream << static_cast<const BoundLiteralExpression&>(
+                               expression)
                                .Value()
                         << ":" << expression.Type().Name();
                 break;
             case BoundNodeKind::VariableExpression:
                 _stream << "load "
-                        << static_cast<const BoundVariableExpression&>(expression)
+                        << static_cast<const BoundVariableExpression&>(
+                               expression)
                                .Symbol()
                                .Name();
                 break;
             case BoundNodeKind::FunctionExpression:
                 _stream << "function_ref "
-                        << static_cast<const BoundFunctionExpression&>(expression)
+                        << static_cast<const BoundFunctionExpression&>(
+                               expression)
                                .Symbol()
                                .Name();
                 break;
@@ -176,7 +208,8 @@ class Dumper final {
                 _stream << ")";
                 break;
             }
-            default: break;
+            default:
+                break;
         }
     }
 

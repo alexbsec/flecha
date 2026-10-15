@@ -63,7 +63,7 @@ std::vector<std::unique_ptr<BoundStatement>> Lowerer::LowerStatements(
 std::unique_ptr<BoundBlockStatement> Lowerer::LowerBlock(
     const core::BlockStatement& block) {
     return std::make_unique<BoundBlockStatement>(block.Range(),
-                                                  LowerStatements(block));
+                                                 LowerStatements(block));
 }
 
 std::unique_ptr<BoundStatement> Lowerer::LowerStatement(
@@ -99,7 +99,11 @@ std::unique_ptr<BoundStatement> Lowerer::LowerStatement(
         }
         case core::AstNodeKind::IfStatement:
             return LowerIf(static_cast<const core::IfStatement&>(statement));
-        default: return nullptr;
+        case core::AstNodeKind::WhileStatement:
+            return LowerWhile(
+                static_cast<const core::WhileStatement&>(statement));
+        default:
+            return nullptr;
     }
 }
 
@@ -114,9 +118,9 @@ std::unique_ptr<BoundIfStatement> Lowerer::LowerBranch(
             alsoClause.Range(), LowerExpression(alsoClause.Condition()),
             LowerBlock(alsoClause.Body()), nullptr));
     }
-    const source::SourceLocation thenEnd =
-        branch.Also() == nullptr ? branch.Body().Range().end
-                                 : branch.Also()->Range().end;
+    const source::SourceLocation thenEnd = branch.Also() == nullptr
+                                               ? branch.Body().Range().end
+                                               : branch.Also()->Range().end;
     std::unique_ptr<BoundBlockStatement> thenBlock =
         std::make_unique<BoundBlockStatement>(
             source::SourceRange{branch.Body().Range().start, thenEnd},
@@ -144,6 +148,28 @@ std::unique_ptr<BoundStatement> Lowerer::LowerIf(
             branches[index - 1]->Range(), std::move(statements));
     }
     return LowerBranch(statement.PrimaryBranch(), std::move(alternative));
+}
+
+std::unique_ptr<BoundStatement> Lowerer::LowerWhile(
+    const core::WhileStatement& statement) {
+    std::vector<std::unique_ptr<BoundStatement>> bodyStatements =
+        LowerStatements(statement.Body());
+    if (statement.Also() != nullptr) {
+        const core::AlsoClause& alsoClause = *statement.Also();
+        bodyStatements.push_back(std::make_unique<BoundIfStatement>(
+            alsoClause.Range(), LowerExpression(alsoClause.Condition()),
+            LowerBlock(alsoClause.Body()), nullptr));
+    }
+    const source::SourceLocation bodyEnd = statement.Also() == nullptr
+                                               ? statement.Body().Range().end
+                                               : statement.Also()->Range().end;
+    std::unique_ptr<BoundBlockStatement> body =
+        std::make_unique<BoundBlockStatement>(
+            source::SourceRange{statement.Body().Range().start, bodyEnd},
+            std::move(bodyStatements));
+    return std::make_unique<BoundWhileStatement>(
+        statement.Range(), LowerExpression(statement.Condition()),
+        std::move(body));
 }
 
 std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
@@ -216,7 +242,8 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
             return std::make_unique<BoundCallExpression>(
                 expression.Range(), function, std::move(arguments));
         }
-        default: return nullptr;
+        default:
+            return nullptr;
     }
 }
 

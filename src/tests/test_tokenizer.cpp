@@ -1,6 +1,8 @@
-#include "core/tokenizer.hpp"
 #include <gtest/gtest.h>
+
 #include <vector>
+
+#include "core/tokenizer.hpp"
 
 using namespace flecha::diagnostics;
 using namespace flecha::core;
@@ -8,15 +10,15 @@ using namespace flecha::core;
 std::vector<Token> Tokenize(const std::string& source,
                             DiagnosticBag* diagnostics = nullptr) {
     DiagnosticBag localDiagnostics;
-    Tokenizer tokenizer(source,
-                        diagnostics == nullptr ? localDiagnostics : *diagnostics);
-    std::vector<Token> tokens = tokenizer.Tokenize(); 
+    Tokenizer tokenizer(
+        source, diagnostics == nullptr ? localDiagnostics : *diagnostics);
+    std::vector<Token> tokens = tokenizer.Tokenize();
     return tokens;
 }
 
-
 TEST(TokenizerTests, RecognizesKeywords) {
-    std::vector<Token> tokens = Tokenize("i32 u8 f64 char bool void unsafe return none");
+    std::vector<Token> tokens =
+        Tokenize("i32 u8 f64 char bool void unsafe return none");
     ASSERT_EQ(tokens.size(), 10);
 
     EXPECT_EQ(tokens[0].type, TokenType::I32);
@@ -35,15 +37,17 @@ TEST(TokenizerTests, RecognizesKeywords) {
 
 TEST(TokenizerTests, RecognizesFunctionModifiersAndReservedWords) {
     std::vector<Token> tokens = Tokenize(
-        "export extern inline comptime yield if else error const volatile as "
+        "export extern inline comptime yield if else while error const "
+        "volatile as "
         "null true false");
 
     const std::vector<TokenType> expected = {
-        TokenType::Export, TokenType::Extern, TokenType::Inline,
-        TokenType::Comptime, TokenType::Yield, TokenType::If,
-        TokenType::Else, TokenType::Error, TokenType::Const,
-        TokenType::Volatile, TokenType::As, TokenType::Null,
-        TokenType::True, TokenType::False, TokenType::EOF_TOKEN,
+        TokenType::Export,    TokenType::Extern,   TokenType::Inline,
+        TokenType::Comptime,  TokenType::Yield,    TokenType::If,
+        TokenType::Else,      TokenType::While,    TokenType::Error,
+        TokenType::Const,     TokenType::Volatile, TokenType::As,
+        TokenType::Null,      TokenType::True,     TokenType::False,
+        TokenType::EOF_TOKEN,
     };
     ASSERT_EQ(tokens.size(), expected.size());
     for (size_t index = 0; index < expected.size(); ++index) {
@@ -88,7 +92,7 @@ TEST(TokenizerTests, RecognizesAlsoKeyword) {
 
 TEST(TokenizerTests, RecognizesIdentifiers) {
     std::vector<Token> tokens = Tokenize("variable1 _v_ar2");
-    ASSERT_EQ(tokens.size(), 3); // 2 identifiers + EOF
+    ASSERT_EQ(tokens.size(), 3);  // 2 identifiers + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::Identifier);
     EXPECT_EQ(tokens[0].value, "variable1");
@@ -101,7 +105,7 @@ TEST(TokenizerTests, RecognizesIdentifiers) {
 
 TEST(TokenizerTests, RecognizesNumbers) {
     std::vector<Token> tokens = Tokenize("123 0 3.14");
-    ASSERT_EQ(tokens.size(), 4); // 3 numbers + EOF
+    ASSERT_EQ(tokens.size(), 4);  // 3 numbers + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::NumberLiteral);
     EXPECT_EQ(tokens[0].value, "123");
@@ -109,7 +113,9 @@ TEST(TokenizerTests, RecognizesNumbers) {
     EXPECT_EQ(tokens[1].type, TokenType::NumberLiteral);
     EXPECT_EQ(tokens[1].value, "0");
 
-    EXPECT_EQ(tokens[2].type, TokenType::FloatLiteral); // If floating-point numbers are supported
+    EXPECT_EQ(
+        tokens[2].type,
+        TokenType::FloatLiteral);  // If floating-point numbers are supported
     EXPECT_EQ(tokens[2].value, "3.14");
 
     EXPECT_EQ(tokens[3].type, TokenType::EOF_TOKEN);
@@ -185,8 +191,9 @@ TEST(TokenizerTests, RejectsUnterminatedBlockComment) {
 }
 
 TEST(TokenizerTests, RecognizesStringLiterals) {
-    std::vector<Token> tokens = Tokenize("\"Hello, World!\" \"This is a test.\" \"Escape \\\"quote\\\"\"");
-    ASSERT_EQ(tokens.size(), 4); // 3 string literals + EOF
+    std::vector<Token> tokens = Tokenize(
+        "\"Hello, World!\" \"This is a test.\" \"Escape \\\"quote\\\"\"");
+    ASSERT_EQ(tokens.size(), 4);  // 3 string literals + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::StringLiteral);
     EXPECT_EQ(tokens[0].value, "Hello, World!");
@@ -202,7 +209,8 @@ TEST(TokenizerTests, RecognizesStringLiterals) {
 
 TEST(TokenizerTests, UnterminatedStringLiteral) {
     DiagnosticBag diagnostics;
-    std::vector<Token> tokens = Tokenize("\"This string is not terminated", &diagnostics);
+    std::vector<Token> tokens =
+        Tokenize("\"This string is not terminated", &diagnostics);
 
     ASSERT_TRUE(diagnostics.HasErrors());
     EXPECT_EQ(diagnostics.Diagnostics()[0].code,
@@ -212,7 +220,7 @@ TEST(TokenizerTests, UnterminatedStringLiteral) {
 
 TEST(TokenizerTests, RecognizesEmptyStringLiteral) {
     std::vector<Token> tokens = Tokenize("\"\"");
-    ASSERT_EQ(tokens.size(), 2); // 1 empty string + EOF
+    ASSERT_EQ(tokens.size(), 2);  // 1 empty string + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::StringLiteral);
     EXPECT_EQ(tokens[0].value, "");
@@ -222,7 +230,7 @@ TEST(TokenizerTests, RecognizesEmptyStringLiteral) {
 
 TEST(TokenizerTests, StringWithNewlineEscape) {
     std::vector<Token> tokens = Tokenize("\"Line1\\nLine2\"");
-    ASSERT_EQ(tokens.size(), 2); // 1 string + EOF
+    ASSERT_EQ(tokens.size(), 2);  // 1 string + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::StringLiteral);
     EXPECT_EQ(tokens[0].value, "Line1\nLine2");
@@ -232,7 +240,7 @@ TEST(TokenizerTests, StringWithNewlineEscape) {
 
 TEST(TokenizerTests, RecognizesCharacterLiterals) {
     std::vector<Token> tokens = Tokenize("'a' '\\n' '\\''");
-    ASSERT_EQ(tokens.size(), 4); // 3 char literals + EOF
+    ASSERT_EQ(tokens.size(), 4);  // 3 char literals + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::CharLiteral);
     EXPECT_EQ(tokens[0].value, "a");
@@ -271,8 +279,9 @@ TEST(TokenizerTests, EmptyCharacterLiteral) {
 }
 
 TEST(TokenizerTests, StringWithEscapedCharacters) {
-    std::vector<Token> tokens = Tokenize("\"This is a \\\"test\\\" with \\n and \\t.\"");
-    ASSERT_EQ(tokens.size(), 2); // 1 string + EOF
+    std::vector<Token> tokens =
+        Tokenize("\"This is a \\\"test\\\" with \\n and \\t.\"");
+    ASSERT_EQ(tokens.size(), 2);  // 1 string + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::StringLiteral);
     EXPECT_EQ(tokens[0].value, "This is a \"test\" with \n and \t.");

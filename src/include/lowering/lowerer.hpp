@@ -27,8 +27,9 @@ class Lowerer final {
         const core::BlockStatement& block);
     std::unique_ptr<BoundStatement> LowerStatement(
         const core::Statement& statement);
-    std::unique_ptr<BoundStatement> LowerIf(
-        const core::IfStatement& statement);
+    std::unique_ptr<BoundStatement> LowerIf(const core::IfStatement& statement);
+    std::unique_ptr<BoundStatement> LowerWhile(
+        const core::WhileStatement& statement);
     std::unique_ptr<BoundIfStatement> LowerBranch(
         const core::ConditionalBranch& branch,
         std::unique_ptr<BoundBlockStatement> elseBlock);

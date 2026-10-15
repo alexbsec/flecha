@@ -67,6 +67,7 @@ enum class TokenType {
     If,
     Else,
     Also,
+    While,
     Error,
     Const,
     Volatile,
@@ -77,7 +78,7 @@ enum class TokenType {
     Null,
     True,
     False,
-    
+
     // Identifiers
     Identifier,
     NumberLiteral,

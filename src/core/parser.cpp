@@ -268,6 +268,9 @@ std::unique_ptr<Statement> Parser::ParseStatement() {
     if (Check(TokenType::If)) {
         return ParseIfStatement();
     }
+    if (Check(TokenType::While)) {
+        return ParseWhileStatement();
+    }
     if (IsTypeToken(Current().type) || IsInferredVariableDeclaration()) {
         return ParseVariableDeclarationStatement();
     }
@@ -416,6 +419,34 @@ std::unique_ptr<IfStatement> Parser::ParseIfStatement() {
     return std::make_unique<IfStatement>(
         source::SourceRange{ifToken.range.start, end}, std::move(primaryBranch),
         std::move(elseIfBranches), std::move(elseBody));
+}
+
+std::unique_ptr<WhileStatement> Parser::ParseWhileStatement() {
+    const Token& whileToken = Advance();
+    std::unique_ptr<Expression> condition = ParseExpression();
+    if (condition == nullptr) return nullptr;
+
+    std::unique_ptr<BlockStatement> body = ParseBlockStatement();
+    if (body == nullptr) return nullptr;
+
+    source::SourceLocation end = body->Range().end;
+    std::unique_ptr<AlsoClause> alsoClause;
+    if (Check(TokenType::Also)) {
+        alsoClause = ParseAlsoClause();
+        if (alsoClause != nullptr) end = alsoClause->Range().end;
+    }
+
+    while (Check(TokenType::Also)) {
+        _diagnostics.Report(diagnostics::DiagnosticCode::UnexpectedToken,
+                            Current().range,
+                            "a while loop may have only one 'also' clause");
+        std::unique_ptr<AlsoClause> extraClause = ParseAlsoClause();
+        if (extraClause != nullptr) end = extraClause->Range().end;
+    }
+
+    return std::make_unique<WhileStatement>(
+        source::SourceRange{whileToken.range.start, end}, std::move(condition),
+        std::move(body), std::move(alsoClause));
 }
 
 std::unique_ptr<ReturnStatement> Parser::ParseReturnStatement() {

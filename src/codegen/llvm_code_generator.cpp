@@ -1,10 +1,5 @@
 #include "codegen/llvm_code_generator.hpp"
 
-#include <cstdlib>
-#include <memory>
-#include <string>
-#include <utility>
-
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
@@ -13,6 +8,11 @@
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/TargetParser/Triple.h>
+
+#include <cstdlib>
+#include <memory>
+#include <string>
+#include <utility>
 
 namespace flecha::codegen {
 namespace {
@@ -23,8 +23,10 @@ bool IsUnsigned(semantic::SemanticType type) {
         case semantic::SemanticTypeKind::U16:
         case semantic::SemanticTypeKind::U32:
         case semantic::SemanticTypeKind::U64:
-        case semantic::SemanticTypeKind::USize: return true;
-        default: return false;
+        case semantic::SemanticTypeKind::USize:
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -150,8 +152,7 @@ bool LlvmCodeGenerator::EmitFunction(
     return true;
 }
 
-bool LlvmCodeGenerator::EmitBlock(
-    const lowering::BoundBlockStatement& block) {
+bool LlvmCodeGenerator::EmitBlock(const lowering::BoundBlockStatement& block) {
     for (const std::unique_ptr<lowering::BoundStatement>& statement :
          block.Statements()) {
         if (_builder.GetInsertBlock()->getTerminator() != nullptr) break;
@@ -188,8 +189,7 @@ bool LlvmCodeGenerator::EmitStatement(
                 _builder.CreateRetVoid();
                 return true;
             }
-            llvm::Value* value =
-                EmitExpression(*returnStatement.Expression());
+            llvm::Value* value = EmitExpression(*returnStatement.Expression());
             if (value == nullptr) return false;
             _builder.CreateRet(value);
             return true;
@@ -197,22 +197,24 @@ bool LlvmCodeGenerator::EmitStatement(
         case lowering::BoundNodeKind::IfStatement:
             return EmitIf(
                 static_cast<const lowering::BoundIfStatement&>(statement));
-        default: return Fail("unsupported bound statement");
+        case lowering::BoundNodeKind::WhileStatement:
+            return EmitWhile(
+                static_cast<const lowering::BoundWhileStatement&>(statement));
+        default:
+            return Fail("unsupported bound statement");
     }
 }
 
-bool LlvmCodeGenerator::EmitIf(
-    const lowering::BoundIfStatement& statement) {
+bool LlvmCodeGenerator::EmitIf(const lowering::BoundIfStatement& statement) {
     llvm::Value* condition = EmitExpression(statement.Condition());
     if (condition == nullptr) return false;
 
     llvm::BasicBlock* thenBlock =
         llvm::BasicBlock::Create(_context, "if.then", _currentFunction);
-    llvm::BasicBlock* elseBlock = statement.ElseBlock() == nullptr
-                                      ? nullptr
-                                      : llvm::BasicBlock::Create(
-                                            _context, "if.else",
-                                            _currentFunction);
+    llvm::BasicBlock* elseBlock =
+        statement.ElseBlock() == nullptr
+            ? nullptr
+            : llvm::BasicBlock::Create(_context, "if.else", _currentFunction);
     llvm::BasicBlock* mergeBlock =
         llvm::BasicBlock::Create(_context, "if.end", _currentFunction);
     _builder.CreateCondBr(condition, thenBlock,
@@ -235,6 +237,31 @@ bool LlvmCodeGenerator::EmitIf(
     return true;
 }
 
+bool LlvmCodeGenerator::EmitWhile(
+    const lowering::BoundWhileStatement& statement) {
+    llvm::BasicBlock* conditionBlock =
+        llvm::BasicBlock::Create(_context, "while.condition", _currentFunction);
+    llvm::BasicBlock* bodyBlock =
+        llvm::BasicBlock::Create(_context, "while.body", _currentFunction);
+    llvm::BasicBlock* endBlock =
+        llvm::BasicBlock::Create(_context, "while.end", _currentFunction);
+    _builder.CreateBr(conditionBlock);
+
+    _builder.SetInsertPoint(conditionBlock);
+    llvm::Value* condition = EmitExpression(statement.Condition());
+    if (condition == nullptr) return false;
+    _builder.CreateCondBr(condition, bodyBlock, endBlock);
+
+    _builder.SetInsertPoint(bodyBlock);
+    if (!EmitBlock(statement.Body())) return false;
+    if (_builder.GetInsertBlock()->getTerminator() == nullptr) {
+        _builder.CreateBr(conditionBlock);
+    }
+
+    _builder.SetInsertPoint(endBlock);
+    return true;
+}
+
 llvm::Value* LlvmCodeGenerator::EmitLiteral(
     const lowering::BoundLiteralExpression& expression) {
     llvm::Type* type = MapType(expression.Type());
@@ -243,16 +270,16 @@ llvm::Value* LlvmCodeGenerator::EmitLiteral(
         return llvm::ConstantInt::get(type, expression.Value() == "true");
     }
     if (expression.Type().Kind() == semantic::SemanticTypeKind::Char) {
-        const unsigned char value = expression.Value().empty()
-                                        ? 0
-                                        : static_cast<unsigned char>(
-                                              expression.Value().front());
+        const unsigned char value =
+            expression.Value().empty()
+                ? 0
+                : static_cast<unsigned char>(expression.Value().front());
         return llvm::ConstantInt::get(type, value);
     }
     if (expression.Type().IsInteger()) {
         return llvm::ConstantInt::get(
-            type, llvm::APInt(type->getIntegerBitWidth(), expression.Value(),
-                              10));
+            type,
+            llvm::APInt(type->getIntegerBitWidth(), expression.Value(), 10));
     }
     if (expression.Type().IsFloating()) {
         char* end = nullptr;
@@ -272,12 +299,14 @@ llvm::Value* LlvmCodeGenerator::EmitUnary(
     llvm::Value* operand = EmitExpression(expression.Operand());
     if (operand == nullptr) return nullptr;
     switch (expression.OperatorType()) {
-        case TokenType::Add: return operand;
+        case TokenType::Add:
+            return operand;
         case TokenType::Sub:
             return expression.Type().IsFloating()
                        ? _builder.CreateFNeg(operand, "fneg")
                        : _builder.CreateNeg(operand, "neg");
-        case TokenType::Bang: return _builder.CreateNot(operand, "not");
+        case TokenType::Bang:
+            return _builder.CreateNot(operand, "not");
         default:
             Fail("unsupported LLVM unary operator");
             return nullptr;
@@ -302,8 +331,8 @@ llvm::Value* LlvmCodeGenerator::EmitBooleanLogical(
     llvm::BasicBlock* completedRightBlock = _builder.GetInsertBlock();
     _builder.CreateBr(mergeBlock);
     _builder.SetInsertPoint(mergeBlock);
-    llvm::PHINode* result = _builder.CreatePHI(
-        llvm::Type::getInt1Ty(_context), 2, "logic");
+    llvm::PHINode* result =
+        _builder.CreatePHI(llvm::Type::getInt1Ty(_context), 2, "logic");
     result->addIncoming(llvm::ConstantInt::getBool(_context, !isAnd),
                         leftBlock);
     result->addIncoming(right, completedRightBlock);
@@ -339,9 +368,12 @@ llvm::Value* LlvmCodeGenerator::EmitBinary(
         case TokenType::Mod:
             return unsignedValue ? _builder.CreateURem(left, right, "urem")
                                  : _builder.CreateSRem(left, right, "srem");
-        case TokenType::And: return _builder.CreateAnd(left, right, "and");
-        case TokenType::Or: return _builder.CreateOr(left, right, "or");
-        case TokenType::Xor: return _builder.CreateXor(left, right, "xor");
+        case TokenType::And:
+            return _builder.CreateAnd(left, right, "and");
+        case TokenType::Or:
+            return _builder.CreateOr(left, right, "or");
+        case TokenType::Xor:
+            return _builder.CreateXor(left, right, "xor");
         case TokenType::Equal:
         case TokenType::StrictEqual:
             return floating ? _builder.CreateFCmpOEQ(left, right, "feq")
@@ -393,7 +425,8 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
                 static_cast<const lowering::BoundUnaryExpression&>(expression));
         case lowering::BoundNodeKind::BinaryExpression:
             return EmitBinary(
-                static_cast<const lowering::BoundBinaryExpression&>(expression));
+                static_cast<const lowering::BoundBinaryExpression&>(
+                    expression));
         case lowering::BoundNodeKind::AssignmentExpression: {
             const lowering::BoundAssignmentExpression& assignment =
                 static_cast<const lowering::BoundAssignmentExpression&>(
@@ -415,10 +448,9 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
                 arguments.push_back(value);
             }
             llvm::Function* function = _functions.at(&call.Function());
-            return _builder.CreateCall(function, arguments,
-                                       function->getReturnType()->isVoidTy()
-                                           ? ""
-                                           : "call");
+            return _builder.CreateCall(
+                function, arguments,
+                function->getReturnType()->isVoidTy() ? "" : "call");
         }
         case lowering::BoundNodeKind::FunctionExpression:
             return _functions.at(

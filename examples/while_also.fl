@@ -1,0 +1,13 @@
+i32 main() {
+    value := 0;
+    counter := 0;
+
+    while counter < 4 {
+        value = value + 10;
+        counter = counter + 1;
+    } also counter % 2 == 0 {
+        value = value + 1;
+    }
+
+    return value;
+}

@@ -213,6 +213,31 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             }
             break;
         }
+        case core::AstNodeKind::WhileStatement: {
+            const core::WhileStatement& whileStatement =
+                static_cast<const core::WhileStatement&>(statement);
+            const SemanticType condition =
+                AnalyzeExpression(whileStatement.Condition());
+            if (!condition.IsError() &&
+                condition.Kind() != SemanticTypeKind::Bool) {
+                Report(diagnostics::DiagnosticCode::InvalidCondition,
+                       whileStatement.Condition().Range(),
+                       "condition must have type 'bool'");
+            }
+            AnalyzeBlock(whileStatement.Body(), true);
+            if (whileStatement.Also() != nullptr) {
+                const SemanticType alsoCondition =
+                    AnalyzeExpression(whileStatement.Also()->Condition());
+                if (!alsoCondition.IsError() &&
+                    alsoCondition.Kind() != SemanticTypeKind::Bool) {
+                    Report(diagnostics::DiagnosticCode::InvalidCondition,
+                           whileStatement.Also()->Condition().Range(),
+                           "condition must have type 'bool'");
+                }
+                AnalyzeBlock(whileStatement.Also()->Body(), true);
+            }
+            break;
+        }
         default:
             break;
     }

@@ -10,24 +10,42 @@ namespace {
 using KeywordMap = std::unordered_map<std::string_view, TokenType>;
 
 const KeywordMap KEYWORDS = {
-    {"i8", TokenType::I8},           {"i16", TokenType::I16},
-    {"i32", TokenType::I32},         {"i64", TokenType::I64},
-    {"isize", TokenType::ISize},     {"u8", TokenType::U8},
-    {"u16", TokenType::U16},         {"u32", TokenType::U32},
-    {"u64", TokenType::U64},         {"usize", TokenType::USize},
-    {"f32", TokenType::F32},         {"f64", TokenType::F64},
-    {"bool", TokenType::Bool},       {"char", TokenType::Char},
-    {"void", TokenType::Void},       {"unsafe", TokenType::Unsafe},
-    {"export", TokenType::Export},   {"extern", TokenType::Extern},
-    {"inline", TokenType::Inline},   {"comptime", TokenType::Comptime},
-    {"return", TokenType::Return},   {"yield", TokenType::Yield},
-    {"if", TokenType::If},           {"else", TokenType::Else},
+    {"i8", TokenType::I8},
+    {"i16", TokenType::I16},
+    {"i32", TokenType::I32},
+    {"i64", TokenType::I64},
+    {"isize", TokenType::ISize},
+    {"u8", TokenType::U8},
+    {"u16", TokenType::U16},
+    {"u32", TokenType::U32},
+    {"u64", TokenType::U64},
+    {"usize", TokenType::USize},
+    {"f32", TokenType::F32},
+    {"f64", TokenType::F64},
+    {"bool", TokenType::Bool},
+    {"char", TokenType::Char},
+    {"void", TokenType::Void},
+    {"unsafe", TokenType::Unsafe},
+    {"export", TokenType::Export},
+    {"extern", TokenType::Extern},
+    {"inline", TokenType::Inline},
+    {"comptime", TokenType::Comptime},
+    {"return", TokenType::Return},
+    {"yield", TokenType::Yield},
+    {"if", TokenType::If},
+    {"else", TokenType::Else},
     {"also", TokenType::Also},
-    {"error", TokenType::Error},     {"const", TokenType::Const},
-    {"volatile", TokenType::Volatile}, {"as", TokenType::As},
-    {"none", TokenType::None},       {"null", TokenType::Null},
-    {"true", TokenType::True},       {"false", TokenType::False},
-    {"and", TokenType::And},         {"or", TokenType::Or},
+    {"while", TokenType::While},
+    {"error", TokenType::Error},
+    {"const", TokenType::Const},
+    {"volatile", TokenType::Volatile},
+    {"as", TokenType::As},
+    {"none", TokenType::None},
+    {"null", TokenType::Null},
+    {"true", TokenType::True},
+    {"false", TokenType::False},
+    {"and", TokenType::And},
+    {"or", TokenType::Or},
 };
 
 bool IsIdentifierStart(char character) {
@@ -46,8 +64,7 @@ source::SourceLocation Tokenizer::Location() const {
     return {_index, _line, _column};
 }
 
-source::SourceRange Tokenizer::RangeFrom(
-    source::SourceLocation start) const {
+source::SourceRange Tokenizer::RangeFrom(source::SourceLocation start) const {
     return {start, Location()};
 }
 
@@ -136,42 +153,57 @@ Token Tokenizer::NextToken() {
     };
 
     switch (character) {
-        case ';': return makeToken(TokenType::SemiColon);
-        case ',': return makeToken(TokenType::Comma);
-        case '.': return makeToken(TokenType::Dot);
-        case '(': return makeToken(TokenType::LParen);
-        case ')': return makeToken(TokenType::RParen);
-        case '[': return makeToken(TokenType::LBracket);
-        case ']': return makeToken(TokenType::RBracket);
-        case '{': return makeToken(TokenType::LCurly);
-        case '}': return makeToken(TokenType::RCurly);
-        case '+': return makeToken(TokenType::Add);
-        case '-': return makeToken(TokenType::Sub);
-        case '*': return makeToken(TokenType::Mul);
-        case '/': return makeToken(TokenType::Div);
-        case '%': return makeToken(TokenType::Mod);
-        case '^': return makeToken(TokenType::Xor);
+        case ';':
+            return makeToken(TokenType::SemiColon);
+        case ',':
+            return makeToken(TokenType::Comma);
+        case '.':
+            return makeToken(TokenType::Dot);
+        case '(':
+            return makeToken(TokenType::LParen);
+        case ')':
+            return makeToken(TokenType::RParen);
+        case '[':
+            return makeToken(TokenType::LBracket);
+        case ']':
+            return makeToken(TokenType::RBracket);
+        case '{':
+            return makeToken(TokenType::LCurly);
+        case '}':
+            return makeToken(TokenType::RCurly);
+        case '+':
+            return makeToken(TokenType::Add);
+        case '-':
+            return makeToken(TokenType::Sub);
+        case '*':
+            return makeToken(TokenType::Mul);
+        case '/':
+            return makeToken(TokenType::Div);
+        case '%':
+            return makeToken(TokenType::Mod);
+        case '^':
+            return makeToken(TokenType::Xor);
         case ':':
             return makeToken(Match('=') ? TokenType::DeclareAssign
-                                          : TokenType::Colon);
+                                        : TokenType::Colon);
         case '=':
             if (Match('=')) {
                 return makeToken(Match('=') ? TokenType::StrictEqual
-                                              : TokenType::Equal);
+                                            : TokenType::Equal);
             }
             return makeToken(TokenType::Assign);
         case '!':
             if (Match('=')) {
                 return makeToken(Match('=') ? TokenType::StrictNotEqual
-                                              : TokenType::NotEqual);
+                                            : TokenType::NotEqual);
             }
             return makeToken(TokenType::Bang);
         case '<':
             return makeToken(Match('=') ? TokenType::LessEqual
-                                          : TokenType::Less);
+                                        : TokenType::Less);
         case '>':
             return makeToken(Match('=') ? TokenType::GreaterEqual
-                                          : TokenType::Greater);
+                                        : TokenType::Greater);
         case '&':
             if (Match('&')) return makeToken(TokenType::And);
             break;
@@ -186,10 +218,10 @@ Token Tokenizer::NextToken() {
                     _diagnostics.Report(
                         diagnostics::DiagnosticCode::UnterminatedStringLiteral,
                         RangeFrom(start), "unterminated string literal");
-                    return Token(TokenType::Invalid,
-                                 _source.substr(startIndex,
-                                                _index - startIndex),
-                                 RangeFrom(start));
+                    return Token(
+                        TokenType::Invalid,
+                        _source.substr(startIndex, _index - startIndex),
+                        RangeFrom(start));
                 }
                 if (Peek() != '\\') {
                     value += Advance();
@@ -200,11 +232,21 @@ Token Tokenizer::NextToken() {
                 Advance();
                 if (IsAtEnd()) break;
                 switch (Advance()) {
-                    case 'n': value += '\n'; break;
-                    case 't': value += '\t'; break;
-                    case 'r': value += '\r'; break;
-                    case '\\': value += '\\'; break;
-                    case '"': value += '"'; break;
+                    case 'n':
+                        value += '\n';
+                        break;
+                    case 't':
+                        value += '\t';
+                        break;
+                    case 'r':
+                        value += '\r';
+                        break;
+                    case '\\':
+                        value += '\\';
+                        break;
+                    case '"':
+                        value += '"';
+                        break;
                     default:
                         valid = false;
                         _diagnostics.Report(
@@ -243,22 +285,33 @@ Token Tokenizer::NextToken() {
                         RangeFrom(start), "unterminated character literal");
                     return Token(TokenType::Invalid, "", RangeFrom(start));
                 }
-                const source::SourceLocation escapeStart{
-                    _index - 1, _line, _column - 1};
+                const source::SourceLocation escapeStart{_index - 1, _line,
+                                                         _column - 1};
                 switch (Advance()) {
-                    case 'n': value = '\n'; break;
-                    case 't': value = '\t'; break;
-                    case 'r': value = '\r'; break;
-                    case '0': value = '\0'; break;
-                    case '\\': value = '\\'; break;
-                    case '\'': value = '\''; break;
+                    case 'n':
+                        value = '\n';
+                        break;
+                    case 't':
+                        value = '\t';
+                        break;
+                    case 'r':
+                        value = '\r';
+                        break;
+                    case '0':
+                        value = '\0';
+                        break;
+                    case '\\':
+                        value = '\\';
+                        break;
+                    case '\'':
+                        value = '\'';
+                        break;
                     default:
                         _diagnostics.Report(
                             diagnostics::DiagnosticCode::InvalidCharacterEscape,
                             RangeFrom(escapeStart),
                             "invalid escape sequence in character literal");
-                        while (!IsAtEnd() && Peek() != '\'' &&
-                               Peek() != '\n') {
+                        while (!IsAtEnd() && Peek() != '\'' && Peek() != '\n') {
                             Advance();
                         }
                         Match('\'');
@@ -279,7 +332,8 @@ Token Tokenizer::NextToken() {
             return Token(TokenType::CharLiteral, string(1, value),
                          RangeFrom(start));
         }
-        default: break;
+        default:
+            break;
     }
 
     const unsigned char unsignedCharacter =
@@ -307,9 +361,9 @@ Token Tokenizer::NextToken() {
         }
         const string word = _source.substr(startIndex, _index - startIndex);
         const KeywordMap::const_iterator keyword = KEYWORDS.find(word);
-        return Token(keyword == KEYWORDS.end() ? TokenType::Identifier
-                                               : keyword->second,
-                     word, RangeFrom(start));
+        return Token(
+            keyword == KEYWORDS.end() ? TokenType::Identifier : keyword->second,
+            word, RangeFrom(start));
     }
 
     _diagnostics.Report(diagnostics::DiagnosticCode::UnexpectedCharacter,

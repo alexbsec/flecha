@@ -1,15 +1,15 @@
 #ifndef FLECHA_CODEGEN_LLVM_CODE_GENERATOR_HPP
 #define FLECHA_CODEGEN_LLVM_CODE_GENERATOR_HPP
 
+#include <llvm/IR/DataLayout.h>
+#include <llvm/IR/IRBuilder.h>
+#include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Module.h>
+
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
-
-#include <llvm/IR/IRBuilder.h>
-#include <llvm/IR/DataLayout.h>
-#include <llvm/IR/LLVMContext.h>
-#include <llvm/IR/Module.h>
 
 #include "lowering/bound_ir.hpp"
 
@@ -19,8 +19,7 @@ class LlvmCodeGenerator final {
    public:
     LlvmCodeGenerator();
 
-    void ConfigureTarget(std::string targetTriple,
-                         llvm::DataLayout dataLayout);
+    void ConfigureTarget(std::string targetTriple, llvm::DataLayout dataLayout);
 
     [[nodiscard]] std::unique_ptr<llvm::Module> Generate(
         const lowering::BoundProgram& program, std::string moduleName);
@@ -35,6 +34,7 @@ class LlvmCodeGenerator final {
     bool EmitBlock(const lowering::BoundBlockStatement& block);
     bool EmitStatement(const lowering::BoundStatement& statement);
     bool EmitIf(const lowering::BoundIfStatement& statement);
+    bool EmitWhile(const lowering::BoundWhileStatement& statement);
     [[nodiscard]] llvm::Value* EmitExpression(
         const lowering::BoundExpression& expression);
     [[nodiscard]] llvm::Value* EmitLiteral(

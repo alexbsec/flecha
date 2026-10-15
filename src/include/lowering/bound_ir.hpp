@@ -18,6 +18,7 @@ enum class BoundNodeKind {
     ExpressionStatement,
     ReturnStatement,
     IfStatement,
+    WhileStatement,
     LiteralExpression,
     VariableExpression,
     FunctionExpression,
@@ -183,7 +184,9 @@ class BoundCallExpression final : public BoundExpression {
         return _function;
     }
     [[nodiscard]] const std::vector<std::unique_ptr<BoundExpression>>&
-    Arguments() const { return _arguments; }
+    Arguments() const {
+        return _arguments;
+    }
 
    private:
     const semantic::FunctionSymbol& _function;
@@ -199,7 +202,9 @@ class BoundBlockStatement final : public BoundStatement {
         return BoundNodeKind::BlockStatement;
     }
     [[nodiscard]] const std::vector<std::unique_ptr<BoundStatement>>&
-    Statements() const { return _statements; }
+    Statements() const {
+        return _statements;
+    }
 
    private:
     std::vector<std::unique_ptr<BoundStatement>> _statements;
@@ -289,6 +294,27 @@ class BoundIfStatement final : public BoundStatement {
     std::unique_ptr<BoundBlockStatement> _elseBlock;
 };
 
+class BoundWhileStatement final : public BoundStatement {
+   public:
+    BoundWhileStatement(source::SourceRange range,
+                        std::unique_ptr<BoundExpression> condition,
+                        std::unique_ptr<BoundBlockStatement> body)
+        : BoundStatement(range),
+          _condition(std::move(condition)),
+          _body(std::move(body)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::WhileStatement;
+    }
+    [[nodiscard]] const BoundExpression& Condition() const {
+        return *_condition;
+    }
+    [[nodiscard]] const BoundBlockStatement& Body() const { return *_body; }
+
+   private:
+    std::unique_ptr<BoundExpression> _condition;
+    std::unique_ptr<BoundBlockStatement> _body;
+};
+
 class BoundFunction final {
    public:
     BoundFunction(const semantic::FunctionSymbol& symbol,
@@ -301,7 +327,9 @@ class BoundFunction final {
         return _symbol;
     }
     [[nodiscard]] const std::vector<const semantic::VariableSymbol*>&
-    Parameters() const { return _parameters; }
+    Parameters() const {
+        return _parameters;
+    }
     [[nodiscard]] const BoundBlockStatement& Body() const { return *_body; }
 
    private:
@@ -319,7 +347,9 @@ class BoundProgram final {
     BoundProgram(BoundProgram&&) = default;
     BoundProgram& operator=(BoundProgram&&) = default;
     [[nodiscard]] const std::vector<std::unique_ptr<BoundFunction>>& Functions()
-        const { return _functions; }
+        const {
+        return _functions;
+    }
 
    private:
     std::vector<std::unique_ptr<BoundFunction>> _functions;
