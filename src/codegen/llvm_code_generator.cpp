@@ -4,11 +4,13 @@
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
 #include <llvm/IR/Instructions.h>
+#include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Verifier.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/TargetParser/Triple.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <memory>
 #include <string>
@@ -286,6 +288,144 @@ void LlvmCodeGenerator::EmitCleanupsTo(std::size_t retainedScopeCount) {
          {_cleanupScopes.begin() + retainedScopeCount, _cleanupScopes.end()}});
 }
 
+void LlvmCodeGenerator::InitializeDeferredScope(const CleanupScope& scope) {
+    if (scope.deferredHead == nullptr) return;
+    llvm::Type* pointer = llvm::PointerType::getUnqual(_context);
+    _builder.CreateStore(llvm::Constant::getNullValue(pointer),
+                         scope.deferredHead);
+    llvm::Function* save = llvm::Intrinsic::getOrInsertDeclaration(
+        _module.get(), llvm::Intrinsic::stacksave, {pointer});
+    _builder.CreateStore(_builder.CreateCall(save), scope.stackMark);
+}
+
+bool LlvmCodeGenerator::EmitDefer(
+    const lowering::BoundDeferStatement& statement) {
+    const CleanupScope& scope = *_cleanupScopes.back();
+    std::size_t site = 0;
+    while (scope.deferredCalls[site].statement != &statement) ++site;
+    const DeferredCall& deferred = scope.deferredCalls[site];
+    const auto& call = statement.Call();
+    std::vector<llvm::Value*> captured;
+    for (std::size_t index = 0; index < call.Arguments().size(); ++index) {
+        const auto& argument = *call.Arguments()[index];
+        llvm::Value* value = EmitExpression(argument);
+        if (value == nullptr) return false;
+        const auto type = deferred.argumentTypes[index];
+        // Views also receive an owned snapshot, so later mutation/destruction
+        // of the original string cannot invalidate a pending deferred call.
+        if (type.Kind() == semantic::SemanticTypeKind::String ||
+            type.Kind() == semantic::SemanticTypeKind::StringView)
+            value = EmitOwnedString(value, argument.Type(), false);
+        else
+            value = CoerceValue(value, argument.Type(), type);
+        if (value == nullptr) return false;
+        captured.push_back(value);
+    }
+    // This alloca is deliberately at registration, not in the entry block:
+    // backward jumps preserve every instance, each with its own argument
+    // values.
+    llvm::AllocaInst* record =
+        _builder.CreateAlloca(deferred.recordType, nullptr, "defer.record");
+    llvm::Type* pointer = llvm::PointerType::getUnqual(_context);
+    _builder.CreateStore(
+        _builder.CreateLoad(pointer, scope.deferredHead),
+        _builder.CreateStructGEP(deferred.recordType, record, 0));
+    _builder.CreateStore(
+        llvm::ConstantInt::get(llvm::Type::getInt32Ty(_context), site),
+        _builder.CreateStructGEP(deferred.recordType, record, 1));
+    for (std::size_t index = 0; index < captured.size(); ++index)
+        _builder.CreateStore(
+            captured[index],
+            _builder.CreateStructGEP(deferred.recordType, record, index + 2));
+    _builder.CreateStore(record, scope.deferredHead);
+    return true;
+}
+
+bool LlvmCodeGenerator::EmitDeferredCalls(const CleanupScope& scope) {
+    if (scope.deferredHead == nullptr) return true;
+    llvm::Type* pointer = llvm::PointerType::getUnqual(_context);
+    llvm::Type* tagType = llvm::Type::getInt32Ty(_context);
+    llvm::StructType* header =
+        llvm::StructType::get(_context, {pointer, tagType});
+    llvm::BasicBlock* check =
+        llvm::BasicBlock::Create(_context, "defer.check", _currentFunction);
+    llvm::BasicBlock* dispatch =
+        llvm::BasicBlock::Create(_context, "defer.dispatch", _currentFunction);
+    llvm::BasicBlock* done =
+        llvm::BasicBlock::Create(_context, "defer.done", _currentFunction);
+    llvm::BasicBlock* invalid =
+        llvm::BasicBlock::Create(_context, "defer.invalid", _currentFunction);
+    _builder.CreateBr(check);
+    _builder.SetInsertPoint(check);
+    llvm::Value* record =
+        _builder.CreateLoad(pointer, scope.deferredHead, "defer.pending");
+    _builder.CreateCondBr(
+        _builder.CreateICmpNE(record, llvm::Constant::getNullValue(pointer)),
+        dispatch, done);
+    _builder.SetInsertPoint(dispatch);
+    llvm::Value* previous = _builder.CreateLoad(
+        pointer, _builder.CreateStructGEP(header, record, 0));
+    llvm::Value* tag = _builder.CreateLoad(
+        tagType, _builder.CreateStructGEP(header, record, 1));
+    _builder.CreateStore(previous, scope.deferredHead);
+    llvm::SwitchInst* select =
+        _builder.CreateSwitch(tag, invalid, scope.deferredCalls.size());
+    for (std::size_t site = 0; site < scope.deferredCalls.size(); ++site) {
+        const DeferredCall& deferred = scope.deferredCalls[site];
+        const auto& call = deferred.statement->Call();
+        llvm::BasicBlock* invoke = llvm::BasicBlock::Create(
+            _context, "defer.invoke", _currentFunction);
+        select->addCase(
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(_context), site),
+            invoke);
+        _builder.SetInsertPoint(invoke);
+        std::vector<llvm::Value*> arguments, strings;
+        for (std::size_t index = 0; index < deferred.argumentTypes.size();
+             ++index) {
+            const auto type = deferred.argumentTypes[index];
+            const bool string =
+                type.Kind() == semantic::SemanticTypeKind::String ||
+                type.Kind() == semantic::SemanticTypeKind::StringView;
+            llvm::Value* value =
+                _builder.CreateLoad(string ? StringType() : MapType(type),
+                                    _builder.CreateStructGEP(
+                                        deferred.recordType, record, index + 2),
+                                    "defer.argument");
+            if (string) {
+                strings.push_back(value);
+                if (type.Kind() == semantic::SemanticTypeKind::StringView)
+                    value = EmitStringView(
+                        value, semantic::SemanticType(
+                                   semantic::SemanticTypeKind::String));
+            }
+            arguments.push_back(value);
+        }
+        if (call.Function().BuiltIn() != semantic::BuiltInFunction::None) {
+            if (EmitRuntimeOutput(
+                    arguments.front(), deferred.argumentTypes.front(),
+                    call.Function().BuiltIn() ==
+                        semantic::BuiltInFunction::StdoutLine) == nullptr)
+                return false;
+        } else {
+            llvm::Value* result =
+                _builder.CreateCall(_functions.at(&call.Function()), arguments);
+            if (call.Type().Kind() == semantic::SemanticTypeKind::String)
+                EmitStringDestroy(result);
+        }
+        for (auto string = strings.rbegin(); string != strings.rend(); ++string)
+            EmitStringDestroy(*string);
+        _builder.CreateBr(check);
+    }
+    _builder.SetInsertPoint(invalid);
+    _builder.CreateUnreachable();
+    _builder.SetInsertPoint(done);
+    llvm::Function* restore = llvm::Intrinsic::getOrInsertDeclaration(
+        _module.get(), llvm::Intrinsic::stackrestore, {pointer});
+    _builder.CreateCall(restore,
+                        {_builder.CreateLoad(pointer, scope.stackMark)});
+    return true;
+}
+
 llvm::Value* LlvmCodeGenerator::CoerceValue(
     llvm::Value* value, semantic::SemanticType sourceType,
     semantic::SemanticType destinationType) {
@@ -515,6 +655,7 @@ bool LlvmCodeGenerator::EmitFunction(
     _breakTargets.clear();
     _cleanupScopes.clear();
     _cleanupRequests.clear();
+    _blockScopes.clear();
     _currentReturnType = boundFunction.Symbol().ReturnType();
     llvm::BasicBlock* entry =
         llvm::BasicBlock::Create(_context, "entry", _currentFunction);
@@ -553,14 +694,29 @@ bool LlvmCodeGenerator::EmitFunction(
         }
     }
     for (const CleanupRequest& request : _cleanupRequests) {
-        _builder.SetInsertPoint(request.block, request.block->begin());
+        llvm::BasicBlock* continuation = nullptr;
+        const bool hasDefers = std::any_of(
+            request.scopes.begin(), request.scopes.end(),
+            [](const auto& scope) { return scope->deferredHead != nullptr; });
+        if (hasDefers) {
+            // Move the original continuation (return, jump, or fallthrough)
+            // before emitting cleanup loops. It may initialize a jump target.
+            continuation = request.block->splitBasicBlock(
+                request.block->begin(), "cleanup.continue");
+            request.block->getTerminator()->eraseFromParent();
+            _builder.SetInsertPoint(request.block);
+        } else {
+            _builder.SetInsertPoint(request.block, request.block->begin());
+        }
         for (auto scope = request.scopes.rbegin();
              scope != request.scopes.rend(); ++scope) {
+            if (!EmitDeferredCalls(**scope)) return false;
             for (auto storage = (*scope)->ownedStrings.rbegin();
                  storage != (*scope)->ownedStrings.rend(); ++storage) {
                 EmitStringStorageCleanup(*storage);
             }
         }
+        if (continuation != nullptr) _builder.CreateBr(continuation);
     }
     _cleanupRequests.clear();
     _cleanupScopes.clear();
@@ -569,8 +725,8 @@ bool LlvmCodeGenerator::EmitFunction(
 }
 
 bool LlvmCodeGenerator::EmitBlock(const lowering::BoundBlockStatement& block) {
-    _cleanupScopes.push_back(std::make_shared<CleanupScope>(
-        &block, std::vector<llvm::AllocaInst*>{}));
+    _cleanupScopes.push_back(_blockScopes.at(&block));
+    InitializeDeferredScope(*_cleanupScopes.back());
     for (const std::unique_ptr<lowering::BoundStatement>& statement :
          block.Statements()) {
         if (_builder.GetInsertBlock()->getTerminator() != nullptr &&
@@ -595,6 +751,40 @@ void LlvmCodeGenerator::CollectPositionScopePaths(
     const lowering::BoundBlockStatement& block,
     std::vector<const lowering::BoundBlockStatement*>& path) {
     path.push_back(&block);
+    auto scope = std::make_shared<CleanupScope>(
+        &block, std::vector<llvm::AllocaInst*>{});
+    _blockScopes.emplace(&block, scope);
+    for (const auto& statement : block.Statements()) {
+        if (statement->Kind() != lowering::BoundNodeKind::DeferStatement)
+            continue;
+        const auto& deferred =
+            static_cast<const lowering::BoundDeferStatement&>(*statement);
+        const auto& call = deferred.Call();
+        std::vector<semantic::SemanticType> argumentTypes;
+        std::vector<llvm::Type*> fields{llvm::PointerType::getUnqual(_context),
+                                        llvm::Type::getInt32Ty(_context)};
+        for (std::size_t index = 0; index < call.Arguments().size(); ++index) {
+            const semantic::SemanticType type =
+                call.Function().BuiltIn() == semantic::BuiltInFunction::None
+                    ? call.Function().ParameterTypes()[index]
+                    : call.Arguments()[index]->Type();
+            argumentTypes.push_back(type);
+            fields.push_back(
+                type.Kind() == semantic::SemanticTypeKind::String ||
+                        type.Kind() == semantic::SemanticTypeKind::StringView
+                    ? StringType()
+                    : MapType(type));
+        }
+        scope->deferredCalls.push_back({&deferred,
+                                        llvm::StructType::get(_context, fields),
+                                        std::move(argumentTypes)});
+    }
+    if (!scope->deferredCalls.empty()) {
+        scope->deferredHead = CreateTemporaryAlloca(
+            llvm::PointerType::getUnqual(_context), "defer.head");
+        scope->stackMark = CreateTemporaryAlloca(
+            llvm::PointerType::getUnqual(_context), "defer.stack");
+    }
     for (const std::unique_ptr<lowering::BoundStatement>& statement :
          block.Statements()) {
         if (statement->Kind() == lowering::BoundNodeKind::PositionStatement) {
@@ -706,6 +896,9 @@ bool LlvmCodeGenerator::EmitStatement(
             }
             return true;
         }
+        case lowering::BoundNodeKind::DeferStatement:
+            return EmitDefer(
+                static_cast<const lowering::BoundDeferStatement&>(statement));
         case lowering::BoundNodeKind::ExpressionStatement:
             return EmitExpression(
                        static_cast<const lowering::BoundExpressionStatement&>(
@@ -762,6 +955,11 @@ bool LlvmCodeGenerator::EmitStatement(
                 ++common;
             }
             EmitCleanupsTo(common + 1);
+            // A jump may enter a lexical scope without visiting its opening
+            // brace. Initialize only newly entered scopes, retaining common
+            // ancestors and their pending registrations.
+            for (std::size_t index = common; index < targetPath.size(); ++index)
+                InitializeDeferredScope(*_blockScopes.at(targetPath[index]));
             _builder.CreateBr(_positions.at(jump.Position()));
             return true;
         }

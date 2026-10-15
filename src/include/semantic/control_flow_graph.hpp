@@ -2,6 +2,7 @@
 #define FLECHA_SEMANTIC_CONTROL_FLOW_GRAPH_HPP
 
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "semantic_model.hpp"
@@ -20,6 +21,7 @@ struct FlowNode final {
     // corresponding ordered events; each pass consumes only its own events.
     const core::Expression* evaluation = nullptr;
     const core::VariableDeclarationStatement* declaration = nullptr;
+    const core::DeferStatement* deferRegistration = nullptr;
     bool reachable = false;
 };
 struct ControlFlowGraph final {
@@ -27,6 +29,7 @@ struct ControlFlowGraph final {
     std::unordered_map<const Symbol*, const core::BlockStatement*> symbolScopes;
     std::unordered_map<const core::BlockStatement*, const core::BlockStatement*>
         scopeParents;
+    std::unordered_set<const Symbol*> deferredCaptures;
     NodeId entry = 0;
 };
 [[nodiscard]] ControlFlowGraph BuildControlFlowGraph(

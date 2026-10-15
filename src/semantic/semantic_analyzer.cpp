@@ -464,6 +464,53 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             }
             break;
         }
+        case core::AstNodeKind::DeferStatement: {
+            const auto& deferred =
+                static_cast<const core::DeferStatement&>(statement);
+            const core::Expression* expression = &deferred.Call();
+            while (expression->Kind() ==
+                   core::AstNodeKind::ParenthesizedExpression)
+                expression = &static_cast<const core::ParenthesizedExpression&>(
+                                  *expression)
+                                  .Inner();
+            AnalyzeExpression(deferred.Call());
+            if (expression->Kind() != core::AstNodeKind::CallExpression) {
+                Report(diagnostics::DiagnosticCode::InvalidDefer,
+                       expression->Range(),
+                       "defer requires a statically resolved function call");
+                break;
+            }
+            const auto& call =
+                static_cast<const core::CallExpression&>(*expression);
+            if (call.Callee().Kind() != core::AstNodeKind::NameExpression)
+                break;
+            const Symbol* symbol = _model.SymbolFor(
+                static_cast<const core::NameExpression&>(call.Callee()));
+            if (symbol == nullptr || symbol->Kind() != SymbolKind::Function)
+                break;
+            const auto& function = static_cast<const FunctionSymbol&>(*symbol);
+            std::vector<const Symbol*>& captures =
+                _model._deferredCaptures[&deferred];
+            for (std::size_t index = 0; index < call.Arguments().size();
+                 ++index) {
+                const SemanticType type =
+                    function.BuiltIn() == BuiltInFunction::None &&
+                            index < function.ParameterTypes().size()
+                        ? function.ParameterTypes()[index]
+                        : _model.TypeOf(*call.Arguments()[index]);
+                const Symbol* capture = nullptr;
+                if (type.IsBorrowed()) {
+                    auto owned = std::make_unique<VariableSymbol>(
+                        SymbolKind::LocalVariable,
+                        "deferred argument " + std::to_string(index + 1), type,
+                        call.Arguments()[index]->Range(), false);
+                    capture = owned.get();
+                    _model._symbols.push_back(std::move(owned));
+                }
+                captures.push_back(capture);
+            }
+            break;
+        }
         case core::AstNodeKind::ExpressionStatement:
             AnalyzeExpression(
                 static_cast<const core::ExpressionStatement&>(statement)

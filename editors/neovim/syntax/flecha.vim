@@ -11,7 +11,7 @@ syntax keyword flechaType f32 f64 bool char void string stringv
 syntax keyword flechaModifier unsafe export extern inline comptime const constptr constref volatile
 syntax keyword flechaConditional if else also
 syntax keyword flechaRepeat while for loop range
-syntax keyword flechaStatement return yield proceed break
+syntax keyword flechaStatement return yield proceed break defer
 syntax keyword flechaJump jumpto nextgroup=flechaJumpTarget skipwhite
 syntax keyword flechaCast as
 syntax keyword flechaDeclaration error

@@ -164,3 +164,17 @@ add_test(
         "-DFLECHA_TRAP_MODES=r;w;b;o;e;n;f;k;u;m"
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_fixed_arrays.cmake
 )
+
+add_test(
+    NAME NativeSemanticTests.Defer
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/defer_api.fl
+        -DFLECHA_HARNESS=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/defer_harness.cpp
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/defer_test
+        -DFLECHA_RUNTIME=$<TARGET_FILE:runtime>
+        -DFLECHA_LINKER=${CMAKE_CXX_COMPILER}
+        -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
+        "-DFLECHA_TRAP_MODES=t;a;c"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_fixed_arrays.cmake
+)

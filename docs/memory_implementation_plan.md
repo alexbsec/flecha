@@ -1,8 +1,8 @@
 # Memory feature implementation order
 
 Status: const types, unsafe pointers, checked references, fixed arrays, and
-iteration are merged. Checked slices are implemented on `feat/checked-slices`;
-see [checked_slices.md](checked_slices.md). Allocation and ownership work remains.
+iteration, and checked slices are merged. Deferred calls are implemented on
+`feat/defer`; see [defer.md](defer.md). Allocation and ownership work remains.
 
 Based on the agreed rules in [memory_model.md](memory_model.md), with the
 const-type milestone merged into `master` at `c9e6ee4`. Each milestone should be a separate feature
@@ -131,12 +131,15 @@ The first milestone may conservatively reject otherwise valid lifetime patterns.
 
 ## 4. Defer and scope-exit execution
 
-Proposed branch: `feat/defer`. Depends on: 2 and 3.
+Implementation branch: `feat/defer`. Depends on: 2 and 3.
+
+Implemented behavior and limits: [deferred calls](defer.md). Direct function
+calls are supported; deferred receiver/member calls remain future work.
 
 - Add `defer call(...);`, initially limited to statically resolved calls. Define
-  receiver/argument capture at registration, reverse registration order, and
+  argument capture at registration, reverse registration order, and
   failure/termination behavior before implementing lowering.
-- Capture receiver and arguments exactly once when reached. Registration is
+- Capture arguments exactly once when reached. Registration is
   conditional on execution, not on lexical presence in a block.
 - Execute registrations on normal exit, return, break, proceed, and outward
   jumps. Inner scopes run first. A jump within the same scope retains its

@@ -92,6 +92,12 @@ std::unique_ptr<BoundStatement> Lowerer::LowerStatement(
             return std::make_unique<BoundVariableDeclarationStatement>(
                 declaration.Range(), symbol, std::move(initializer));
         }
+        case core::AstNodeKind::DeferStatement:
+            return std::make_unique<BoundDeferStatement>(
+                statement.Range(),
+                LowerExpression(
+                    static_cast<const core::DeferStatement&>(statement)
+                        .Call()));
         case core::AstNodeKind::ExpressionStatement: {
             const core::ExpressionStatement& expressionStatement =
                 static_cast<const core::ExpressionStatement&>(statement);

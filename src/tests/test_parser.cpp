@@ -932,3 +932,34 @@ TEST(ParserSliceTests, RecoversFromMalformedSliceExpressions) {
         EXPECT_TRUE(diagnostics.HasErrors());
     }
 }
+
+TEST(ParserDeferTests, ParsesDeferredCallsAndTheirSourceRanges) {
+    const std::string source = "void f() { defer stdoutln(42); defer (f()); }";
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource(source, diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const auto& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    ASSERT_EQ(function.Body().Statements().size(), 2);
+    const auto& deferred =
+        static_cast<const DeferStatement&>(*function.Body().Statements()[0]);
+    EXPECT_EQ(deferred.Kind(), AstNodeKind::DeferStatement);
+    EXPECT_EQ(deferred.Call().Kind(), AstNodeKind::CallExpression);
+    EXPECT_EQ(source.substr(
+                  deferred.Range().start.offset,
+                  deferred.Range().end.offset - deferred.Range().start.offset),
+              "defer stdoutln(42);");
+}
+
+TEST(ParserDeferTests, RecoversFromMissingCallsAndTerminators) {
+    for (const std::string& statement :
+         {"defer;", "defer stdoutln(1)", "defer { stdoutln(1); }",
+          "defer defer f();"}) {
+        SCOPED_TRACE(statement);
+        DiagnosticBag diagnostics;
+        EXPECT_NE(ParseSource("void f() { " + statement + " } void g() {}",
+                              diagnostics),
+                  nullptr);
+        EXPECT_TRUE(diagnostics.HasErrors());
+    }
+}

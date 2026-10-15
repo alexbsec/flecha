@@ -132,3 +132,11 @@ slice handles using the same origins, moves, reborrow parents, last uses, and
 scope constraints as references. Slice range sources receive shared reborrows.
 `FLECHA-S0037` reports statically invalid slice bounds; dynamic bounds trap in
 native code. See [checked_slices.md](checked_slices.md).
+
+### Deferred calls
+
+`defer` requires a statically resolved direct call (`FLECHA-S0038` otherwise).
+Argument typing, definite assignment, and unsafe permission apply at
+registration. Synthetic capture symbols keep reference/slice loans live until
+their enclosing scope exits, including across backward jumps and control-flow
+joins. See [defer.md](defer.md) for capture and cleanup rules.

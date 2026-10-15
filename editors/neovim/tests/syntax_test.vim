@@ -41,6 +41,7 @@ call assert_equal('flechaLabel', s:HighlightAt('#final_position', 0))
 call assert_equal('flechaStatement', s:HighlightAt('proceed', 0))
 call assert_equal('flechaStatement', s:HighlightAt('break', 0))
 call assert_equal('flechaStatement', s:HighlightAt('return', 0))
+call assert_equal('flechaStatement', s:HighlightAt('defer', 0))
 
 call assert_equal('flechaModifier', s:HighlightAt('constptr', 0))
 call assert_equal('flechaModifier', s:HighlightAt('constref', 0))

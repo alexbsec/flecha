@@ -17,6 +17,7 @@ enum class BoundNodeKind {
     VariableDeclarationStatement,
     ExpressionStatement,
     ReturnStatement,
+    DeferStatement,
     IfStatement,
     WhileStatement,
     ProceedStatement,
@@ -444,6 +445,22 @@ class BoundVariableDeclarationStatement final : public BoundStatement {
    private:
     const semantic::VariableSymbol& _variable;
     std::unique_ptr<BoundExpression> _initializer;
+};
+
+class BoundDeferStatement final : public BoundStatement {
+   public:
+    BoundDeferStatement(source::SourceRange range,
+                        std::unique_ptr<BoundExpression> call)
+        : BoundStatement(range), _call(std::move(call)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::DeferStatement;
+    }
+    [[nodiscard]] const BoundCallExpression& Call() const {
+        return static_cast<const BoundCallExpression&>(*_call);
+    }
+
+   private:
+    std::unique_ptr<BoundExpression> _call;
 };
 
 class BoundExpressionStatement final : public BoundStatement {

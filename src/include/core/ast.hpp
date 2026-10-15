@@ -20,6 +20,7 @@ enum class AstNodeKind {
     Type,
     BlockStatement,
     ReturnStatement,
+    DeferStatement,
     IfStatement,
     WhileStatement,
     RangeStatement,
@@ -472,6 +473,19 @@ class VariableDeclarationStatement final : public Statement {
     std::unique_ptr<Expression> _initializer;
     source::SourceRange _nameRange;
     bool _isRangeSource;
+};
+
+class DeferStatement final : public Statement {
+   public:
+    DeferStatement(source::SourceRange range, std::unique_ptr<Expression> call)
+        : Statement(range), _call(std::move(call)) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::DeferStatement;
+    }
+    [[nodiscard]] const Expression& Call() const { return *_call; }
+
+   private:
+    std::unique_ptr<Expression> _call;
 };
 
 class ExpressionStatement final : public Statement {

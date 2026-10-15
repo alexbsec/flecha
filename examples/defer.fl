@@ -1,0 +1,40 @@
+// Build: build/flecha build examples/defer.fl -o /tmp/flecha-defer
+void report(i32 value) { stdoutln(value); }
+void set_answer(&i32 value) { *value = 42; }
+unsafe void write_pointer(*i32 value, i32 next) { *value = next; }
+
+i32 main() {
+    i32 captured = 10;
+    defer report(captured);
+    captured = 20;
+
+    {
+        defer report(1);
+        defer report(2);
+    } // Prints 2, then 1.
+
+    loop i := 0; i < 2; i++ {
+        defer report(i + 3);
+        proceed; // Prints 3 on the first iteration, then 4.
+    }
+
+    i32 answer = 0;
+    {
+        defer set_answer(&answer);
+        // The mutable borrow holds until this block ends.
+    }
+    stdoutln(answer); // 42.
+
+    unsafe {
+        defer write_pointer(&raw captured, 99);
+    }
+    stdoutln(captured); // 99; raw-pointer operations still require unsafe.
+
+    string text = "snapshot";
+    {
+        defer stdoutln(text.view());
+        text = "changed";
+    } // Prints snapshot: string/view arguments are copied at registration.
+
+    return answer; // Prints the captured 10, then exits with 42.
+}

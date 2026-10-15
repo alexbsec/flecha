@@ -29,9 +29,17 @@ class LlvmCodeGenerator final {
     [[nodiscard]] const std::string& Error() const { return _error; }
 
    private:
+    struct DeferredCall final {
+        const lowering::BoundDeferStatement* statement;
+        llvm::StructType* recordType;
+        std::vector<semantic::SemanticType> argumentTypes;
+    };
     struct CleanupScope final {
         const lowering::BoundBlockStatement* block;
         std::vector<llvm::AllocaInst*> ownedStrings;
+        std::vector<DeferredCall> deferredCalls;
+        llvm::AllocaInst* deferredHead = nullptr;
+        llvm::AllocaInst* stackMark = nullptr;
     };
 
     struct CleanupRequest final {
@@ -101,6 +109,9 @@ class LlvmCodeGenerator final {
     [[nodiscard]] llvm::AllocaInst* CreateOwnedStringTemporary(
         std::string_view name);
     void EmitCleanupsTo(std::size_t retainedScopeCount);
+    void InitializeDeferredScope(const CleanupScope& scope);
+    bool EmitDefer(const lowering::BoundDeferStatement& statement);
+    bool EmitDeferredCalls(const CleanupScope& scope);
     void CollectPositionScopePaths(
         const lowering::BoundBlockStatement& block,
         std::vector<const lowering::BoundBlockStatement*>& path);
@@ -128,6 +139,9 @@ class LlvmCodeGenerator final {
     std::vector<LoopTarget> _breakTargets;
     std::vector<std::shared_ptr<CleanupScope>> _cleanupScopes;
     std::vector<CleanupRequest> _cleanupRequests;
+    std::unordered_map<const lowering::BoundBlockStatement*,
+                       std::shared_ptr<CleanupScope>>
+        _blockScopes;
     llvm::Function* _currentFunction = nullptr;
     semantic::SemanticType _currentReturnType{semantic::SemanticTypeKind::Void};
     std::string _error;

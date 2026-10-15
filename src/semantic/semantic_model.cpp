@@ -18,6 +18,13 @@ const Symbol* SemanticModel::DeclaredSymbol(
     return found == _declarations.end() ? nullptr : found->second;
 }
 
+const std::vector<const Symbol*>& SemanticModel::DeferredCaptures(
+    const core::DeferStatement& statement) const {
+    static const std::vector<const Symbol*> EMPTY;
+    const auto found = _deferredCaptures.find(&statement);
+    return found == _deferredCaptures.end() ? EMPTY : found->second;
+}
+
 SemanticType SemanticModel::TypeOf(const core::Expression& expression) const {
     const std::unordered_map<const core::Expression*,
                              SemanticType>::const_iterator found =

@@ -399,3 +399,15 @@ TEST(LoweringTests, RejectsInvalidSlicesBeforeCodeGeneration) {
         EXPECT_EQ(result.program, nullptr);
     }
 }
+
+TEST(LoweringTests, RetainsDeferredCallInsteadOfAnImmediateExpression) {
+    LoweredSource result = Lower("void f() { defer stdoutln(42); }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.program, nullptr);
+    EXPECT_EQ(result.program->Functions()[0]->Body().Statements()[0]->Kind(),
+              BoundNodeKind::DeferStatement);
+    EXPECT_NE(DumpBoundProgram(*result.program).find("defer "),
+              std::string::npos);
+    LoweredSource invalid = Lower("void f() { defer 42; }");
+    EXPECT_EQ(invalid.program, nullptr);
+}
