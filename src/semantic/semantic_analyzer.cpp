@@ -383,7 +383,7 @@ SemanticType SemanticAnalyzer::AnalyzeLiteral(
         case TokenType::CharLiteral:
             return SemanticType(SemanticTypeKind::Char);
         case TokenType::StringLiteral:
-            return SemanticType(SemanticTypeKind::String);
+            return SemanticType(SemanticTypeKind::StringView);
         case TokenType::Null:
             return SemanticType(SemanticTypeKind::Null);
         case TokenType::None:

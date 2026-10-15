@@ -87,6 +87,7 @@ enum class PrimitiveType {
     Bool,
     Char,
     Void,
+    StringView,
 };
 
 class TypeNode final : public AstNode {

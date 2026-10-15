@@ -71,6 +71,8 @@ TEST(SemanticTypeTests, RepresentsEverySyntaxPrimitive) {
     EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::Bool).Name(), "bool");
     EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::Char).Name(), "char");
     EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::Void).Name(), "void");
+    EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::StringView).Name(),
+              "stringv");
     EXPECT_TRUE(IsAssignable(SemanticType(SemanticTypeKind::I32),
                              SemanticType(SemanticTypeKind::None)));
     EXPECT_FALSE(IsAssignable(SemanticType(SemanticTypeKind::I32),
@@ -174,7 +176,7 @@ TEST(SemanticInferenceTests, InfersEverySupportedLiteralCategory) {
     const SemanticTypeKind expected[] = {
         SemanticTypeKind::I32,    SemanticTypeKind::F64,
         SemanticTypeKind::Bool,   SemanticTypeKind::Char,
-        SemanticTypeKind::String, SemanticTypeKind::Null,
+        SemanticTypeKind::StringView, SemanticTypeKind::Null,
         SemanticTypeKind::None};
     for (std::size_t index = 0; index < 7; ++index) {
         EXPECT_EQ(analysis.model.DeclaredSymbol(VariableAt(function, index))
@@ -282,8 +284,27 @@ TEST(SemanticCastTests, CentralizesExtensibleExplicitCastPolicy) {
         SemanticType(SemanticTypeKind::I32),
         SemanticType(SemanticTypeKind::F64)));
     EXPECT_FALSE(CanExplicitlyCast(
-        SemanticType(SemanticTypeKind::String),
+        SemanticType(SemanticTypeKind::StringView),
         SemanticType(SemanticTypeKind::I32)));
+}
+
+TEST(SemanticStringViewTests, SupportsExplicitAndInferredViews) {
+    Analysis analysis = Analyze(
+        "stringv Identity(stringv value) { return value; } "
+        "i32 main() { stringv explicitValue = \"Flecha\"; "
+        "inferred := Identity(explicitValue); "
+        "if inferred == \"Flecha\" { return 42; } return 0; }");
+
+    ASSERT_FALSE(analysis.diagnostics.HasErrors());
+    const FunctionDeclaration& mainFunction = FunctionAt(analysis, 1);
+    EXPECT_EQ(analysis.model.DeclaredSymbol(VariableAt(mainFunction, 0))
+                  ->Type()
+                  .Kind(),
+              SemanticTypeKind::StringView);
+    EXPECT_EQ(analysis.model.DeclaredSymbol(VariableAt(mainFunction, 1))
+                  ->Type()
+                  .Kind(),
+              SemanticTypeKind::StringView);
 }
 
 TEST(SemanticDiagnosticTests, ReportsDuplicateAtExactIdentifierRange) {

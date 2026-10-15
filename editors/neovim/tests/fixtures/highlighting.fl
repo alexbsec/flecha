@@ -1,0 +1,21 @@
+stringv Echo(stringv value) {
+    // NOTE: exercise current Flecha syntax.
+    count := 42;
+    ratio := 4.2;
+    letter := '\n';
+    message := "flecha\n";
+
+    while true and count > 0 && count != 7 {
+        if count == 2 or false {
+            count = count.cast<i64> as i32;
+            jumpto final_position;
+        } also count % 2 == 0 || count == 4 {
+            proceed;
+        } else {
+            break;
+        }
+    }
+
+    #final_position
+    return value;
+}
