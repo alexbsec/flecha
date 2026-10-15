@@ -36,6 +36,7 @@ enum class DiagnosticCode {
     LoopControlOutsideLoop,
     DuplicatePosition,
     UnknownPosition,
+    InvalidCast,
 };
 
 [[nodiscard]] std::string_view DiagnosticCodeName(DiagnosticCode code);

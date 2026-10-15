@@ -30,6 +30,7 @@ enum class BoundNodeKind {
     BinaryExpression,
     AssignmentExpression,
     CallExpression,
+    CastExpression,
 };
 
 class BoundNode {
@@ -126,6 +127,22 @@ class BoundUnaryExpression final : public BoundExpression {
    private:
     TokenType _operatorType;
     std::unique_ptr<BoundExpression> _operand;
+};
+
+class BoundCastExpression final : public BoundExpression {
+   public:
+    BoundCastExpression(source::SourceRange range,
+                        semantic::SemanticType targetType,
+                        std::unique_ptr<BoundExpression> expression)
+        : BoundExpression(range, targetType),
+          _expression(std::move(expression)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::CastExpression;
+    }
+    [[nodiscard]] const BoundExpression& Value() const { return *_expression; }
+
+   private:
+    std::unique_ptr<BoundExpression> _expression;
 };
 
 class BoundBinaryExpression final : public BoundExpression {

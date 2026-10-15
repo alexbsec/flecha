@@ -7,7 +7,7 @@ TEST_BUILD_DIR ?= build-tests
 
 .PHONY: help configure build configure-tests build-tests test \
 	test-semantic llvm-poc native-poc native-if-also native-functions \
-	native-while native-loop-control clean
+	native-while native-loop-control native-casts clean
 
 help:
 	@echo "Flecha build targets:"
@@ -20,6 +20,7 @@ help:
 	@echo "  make native-functions Build and test calls and recursion"
 	@echo "  make native-while   Build and test while/also loops"
 	@echo "  make native-loop-control Build and test loop control"
+	@echo "  make native-casts   Build and test numeric casts"
 	@echo "  make clean          Clean generated build artifacts"
 	@echo ""
 	@echo "Overrides: CMAKE, CMAKE_GENERATOR, BUILD_DIR, TEST_BUILD_DIR"
@@ -88,6 +89,13 @@ native-loop-control: build
 	@test -f $(BUILD_DIR)/loop_control.o
 	@$(BUILD_DIR)/loop_control; result=$$?; test $$result -eq 42
 	@echo "Native loop-control example returned 42"
+
+native-casts: build
+	$(BUILD_DIR)/flecha build examples/numeric_casts.fl \
+		-o $(BUILD_DIR)/numeric_casts
+	@test -f $(BUILD_DIR)/numeric_casts.o
+	@$(BUILD_DIR)/numeric_casts; result=$$?; test $$result -eq 42
+	@echo "Native numeric-cast example returned 42"
 
 clean:
 	@if test -f $(BUILD_DIR)/CMakeCache.txt; then \

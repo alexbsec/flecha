@@ -69,4 +69,6 @@ TEST(DiagnosticTests, SemanticCodesAreStableAndContiguous) {
               "FLECHA-S0015");
     EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::UnknownPosition),
               "FLECHA-S0016");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::InvalidCast),
+              "FLECHA-S0017");
 }

@@ -102,4 +102,9 @@ bool IsAssignable(SemanticType destination, SemanticType source) {
            destination.Kind() != SemanticTypeKind::Function;
 }
 
+bool CanExplicitlyCast(SemanticType source, SemanticType destination) {
+    if (source.IsError() || destination.IsError()) return true;
+    return source.IsNumeric() && destination.IsNumeric();
+}
+
 }  // namespace flecha::semantic

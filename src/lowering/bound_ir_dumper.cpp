@@ -196,6 +196,14 @@ class Dumper final {
                 _stream << ")";
                 break;
             }
+            case BoundNodeKind::CastExpression: {
+                const BoundCastExpression& cast =
+                    static_cast<const BoundCastExpression&>(expression);
+                _stream << "(cast " << cast.Type().Name() << " ";
+                WriteExpression(cast.Value());
+                _stream << ")";
+                break;
+            }
             case BoundNodeKind::BinaryExpression: {
                 const BoundBinaryExpression& binary =
                     static_cast<const BoundBinaryExpression&>(expression);

@@ -36,6 +36,7 @@ enum class AstNodeKind {
     BinaryExpression,
     AssignmentExpression,
     CallExpression,
+    CastExpression,
 };
 
 class AstNode {
@@ -475,6 +476,26 @@ class ParenthesizedExpression final : public Expression {
 
    private:
     std::unique_ptr<Expression> _expression;
+};
+
+class CastExpression final : public Expression {
+   public:
+    CastExpression(source::SourceRange range,
+                   std::unique_ptr<Expression> expression,
+                   std::unique_ptr<TypeNode> targetType)
+        : Expression(range),
+          _expression(std::move(expression)),
+          _targetType(std::move(targetType)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::CastExpression;
+    }
+    [[nodiscard]] const Expression& Value() const { return *_expression; }
+    [[nodiscard]] const TypeNode& TargetType() const { return *_targetType; }
+
+   private:
+    std::unique_ptr<Expression> _expression;
+    std::unique_ptr<TypeNode> _targetType;
 };
 
 class UnaryExpression final : public Expression {
