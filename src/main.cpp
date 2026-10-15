@@ -31,6 +31,13 @@ void PrintDiagnostics(
     }
 }
 
+void PrintDiagnostic(const flecha::diagnostics::Diagnostic& diagnostic) {
+    std::cerr << flecha::diagnostics::DiagnosticCodeName(diagnostic.code)
+              << ":" << diagnostic.range.start.line << ":"
+              << diagnostic.range.start.column << ": " << diagnostic.message
+              << "\n";
+}
+
 int EmitLlvm(const std::string& inputPath, const std::string& outputPath) {
     std::ifstream input(inputPath);
     if (!input) {
@@ -107,8 +114,9 @@ int BuildNative(const std::string& inputPath, const std::string& outputPath,
 
     flecha::codegen::NativeCompiler compiler;
     if (!compiler.Ready()) {
-        std::cerr << "native compiler initialization failed: "
-                  << compiler.Error() << "\n";
+        if (compiler.LastDiagnostic().has_value()) {
+            PrintDiagnostic(*compiler.LastDiagnostic());
+        }
         return 1;
     }
     const bool success =
@@ -116,8 +124,9 @@ int BuildNative(const std::string& inputPath, const std::string& outputPath,
             ? compiler.EmitObject(*boundProgram, inputPath, outputPath)
             : compiler.BuildExecutable(*boundProgram, inputPath, outputPath);
     if (!success) {
-        std::cerr << "native compilation failed: " << compiler.Error()
-                  << "\n";
+        if (compiler.LastDiagnostic().has_value()) {
+            PrintDiagnostic(*compiler.LastDiagnostic());
+        }
         return 1;
     }
     return 0;

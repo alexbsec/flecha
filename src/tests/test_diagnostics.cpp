@@ -72,3 +72,14 @@ TEST(DiagnosticTests, SemanticCodesAreStableAndContiguous) {
     EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::InvalidCast),
               "FLECHA-S0017");
 }
+
+TEST(DiagnosticTests, CompilerCodesAreStableAndContiguous) {
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::NativeTargetUnavailable),
+              "FLECHA-C0001");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::ObjectEmissionFailed),
+              "FLECHA-C0002");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::RuntimeUnavailable),
+              "FLECHA-C0003");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::LinkerFailed),
+              "FLECHA-C0004");
+}

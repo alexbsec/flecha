@@ -2,23 +2,29 @@
 #define FLECHA_CODEGEN_NATIVE_COMPILER_HPP
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include <llvm/Target/TargetMachine.h>
 
+#include "diagnostics/diagnostic.hpp"
 #include "lowering/bound_ir.hpp"
 
 namespace flecha::codegen {
 
 class NativeCompiler final {
    public:
-    NativeCompiler();
+    explicit NativeCompiler(std::string runtimeLibraryPath = {});
 
     [[nodiscard]] bool Ready() const { return _targetMachine != nullptr; }
     [[nodiscard]] const std::string& TargetTriple() const {
         return _targetTriple;
     }
     [[nodiscard]] const std::string& Error() const { return _error; }
+    [[nodiscard]] const std::optional<diagnostics::Diagnostic>&
+    LastDiagnostic() const {
+        return _diagnostic;
+    }
 
     bool EmitObject(const lowering::BoundProgram& program,
                     const std::string& moduleName,
@@ -30,11 +36,13 @@ class NativeCompiler final {
                          const std::string& outputPath);
 
    private:
-    bool Fail(std::string message);
+    bool Fail(diagnostics::DiagnosticCode code, std::string message);
 
     std::string _targetTriple;
+    std::string _runtimeLibraryPath;
     std::unique_ptr<llvm::TargetMachine> _targetMachine;
     std::string _error;
+    std::optional<diagnostics::Diagnostic> _diagnostic;
 };
 
 }  // namespace flecha::codegen

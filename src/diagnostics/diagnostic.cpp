@@ -56,6 +56,14 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0016";
         case DiagnosticCode::InvalidCast:
             return "FLECHA-S0017";
+        case DiagnosticCode::NativeTargetUnavailable:
+            return "FLECHA-C0001";
+        case DiagnosticCode::ObjectEmissionFailed:
+            return "FLECHA-C0002";
+        case DiagnosticCode::RuntimeUnavailable:
+            return "FLECHA-C0003";
+        case DiagnosticCode::LinkerFailed:
+            return "FLECHA-C0004";
     }
     return "FLECHA-UNKNOWN";
 }

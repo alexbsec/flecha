@@ -193,13 +193,18 @@ TEST(LlvmCodeGeneratorTests, EmitsLengthAwareStandardOutput) {
     ASSERT_NE(result.module, nullptr) << result.generator->Error();
     EXPECT_TRUE(VerifyModule(*result.module).empty());
     const std::string ir = ModuleText(*result.module);
-    EXPECT_NE(ir.find("@flecha.stdout"), std::string::npos);
-    EXPECT_NE(ir.find("@write"), std::string::npos);
-    EXPECT_NE(ir.find("i32 1"), std::string::npos);
-    EXPECT_NE(ir.find("stdout.newline"), std::string::npos);
-    EXPECT_NE(ir.find("@snprintf"), std::string::npos);
-    EXPECT_NE(ir.find("stdout.true"), std::string::npos);
-    EXPECT_NE(ir.find("stdout.char"), std::string::npos);
+    const std::string suffixes[] = {
+        "string_view", "i8",    "i16",  "i32",  "i64",
+        "isize",       "u8",    "u16",  "u32",  "u64",
+        "usize",       "f32",   "f64",  "bool", "char",
+        "newline"};
+    for (const std::string& suffix : suffixes) {
+        EXPECT_NE(ir.find("@flecha_runtime_v1_stdout_" + suffix),
+                  std::string::npos)
+            << suffix;
+    }
+    EXPECT_EQ(ir.find("@write"), std::string::npos);
+    EXPECT_EQ(ir.find("@snprintf"), std::string::npos);
 }
 
 TEST(LlvmCodeGeneratorTests, UsesTargetPointerWidthForSizeTypes) {
@@ -296,4 +301,51 @@ TEST(NativeCompilerTests, RunsForwardAndRecursiveCalls) {
 
     std::filesystem::remove(executablePath);
     std::filesystem::remove(objectPath);
+}
+
+TEST(NativeCompilerTests, ObjectEmissionDoesNotRequireRuntimeLibrary) {
+    GeneratedSource result =
+        Generate("i32 main() { stdoutln(42); return 0; }");
+    ASSERT_NE(result.boundProgram, nullptr);
+
+    const std::filesystem::path objectPath =
+        std::filesystem::temp_directory_path() /
+        "flecha_object_without_runtime_test.o";
+    const std::filesystem::path executablePath =
+        std::filesystem::temp_directory_path() /
+        "flecha_missing_runtime_test";
+    std::filesystem::remove(objectPath);
+    std::filesystem::remove(executablePath);
+
+    NativeCompiler compiler("/missing/flecha/runtime/library.a");
+    ASSERT_TRUE(compiler.EmitObject(*result.boundProgram, "object_only_test",
+                                    objectPath.string()))
+        << compiler.Error();
+    EXPECT_TRUE(std::filesystem::is_regular_file(objectPath));
+    EXPECT_FALSE(
+        compiler.LinkExecutable(objectPath.string(), executablePath.string()));
+    ASSERT_TRUE(compiler.LastDiagnostic().has_value());
+    EXPECT_EQ(compiler.LastDiagnostic()->code,
+              DiagnosticCode::RuntimeUnavailable);
+
+    std::filesystem::remove(objectPath);
+    std::filesystem::remove(executablePath);
+}
+
+TEST(NativeCompilerTests, ReportsLinkerFailuresAsStructuredDiagnostics) {
+    const std::filesystem::path temporaryDirectory =
+        std::filesystem::temp_directory_path();
+    const std::filesystem::path missingObject =
+        temporaryDirectory / "flecha_intentionally_missing_object.o";
+    const std::filesystem::path executablePath =
+        temporaryDirectory / "flecha_failed_link_test";
+    std::filesystem::remove(missingObject);
+    std::filesystem::remove(executablePath);
+
+    NativeCompiler compiler;
+    EXPECT_FALSE(compiler.LinkExecutable(missingObject.string(),
+                                         executablePath.string()));
+    ASSERT_TRUE(compiler.LastDiagnostic().has_value());
+    EXPECT_EQ(compiler.LastDiagnostic()->code, DiagnosticCode::LinkerFailed);
+    EXPECT_FALSE(std::filesystem::exists(executablePath));
 }
