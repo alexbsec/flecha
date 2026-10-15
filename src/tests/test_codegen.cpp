@@ -668,3 +668,19 @@ TEST(LlvmCodeGeneratorTests, ConstructsStructureResultsInCallerStorage) {
     EXPECT_NE(ir.find("call void @factory(ptr"), std::string::npos);
     EXPECT_NE(ir.find("call void @pair(ptr"), std::string::npos);
 }
+
+TEST(LlvmCodeGeneratorTests, EmitsConditionalAllocationAndTypedFree) {
+    GeneratedSource result = Generate(
+        "structure Box { i32 x; }; unsafe void Box::tear(&self) override {} "
+        "unsafe void release(*Box p) { return free(p); } "
+        "i32 main() { unsafe { p, e := new<Box>(Box::init()); "
+        "if e != none { return 1; } defer free(p); return p->x; } }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("@flecha_runtime_v1_alloc"), std::string::npos);
+    EXPECT_NE(ir.find("@flecha_runtime_v1_free"), std::string::npos);
+    EXPECT_NE(ir.find("allocation.failure"), std::string::npos);
+    EXPECT_NE(ir.find("free.release"), std::string::npos);
+}

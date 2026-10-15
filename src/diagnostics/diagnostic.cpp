@@ -102,6 +102,8 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0044";
         case DiagnosticCode::InvalidLifecycle:
             return "FLECHA-S0045";
+        case DiagnosticCode::InvalidAllocation:
+            return "FLECHA-S0047";
         case DiagnosticCode::NonCopyableValue:
             return "FLECHA-S0046";
         case DiagnosticCode::UnknownType:

@@ -601,7 +601,11 @@ bool LlvmCodeGenerator::EmitDeferredCalls(const CleanupScope& scope) {
             }
             arguments.push_back(value);
         }
-        if (call.Function().BuiltIn() != semantic::BuiltInFunction::None) {
+        if (call.Function().BuiltIn() == semantic::BuiltInFunction::Free) {
+            EmitFree(arguments.front(),
+                     *call.Function().ParameterTypes()[0].Target());
+        } else if (call.Function().BuiltIn() !=
+                   semantic::BuiltInFunction::None) {
             if (EmitRuntimeOutput(
                     arguments.front(), deferred.argumentTypes.front(),
                     call.Function().BuiltIn() ==
@@ -1223,6 +1227,11 @@ bool LlvmCodeGenerator::EmitStatement(
             }
             llvm::Value* value = EmitExpression(*returnStatement.Expression());
             if (value == nullptr) return false;
+            if (_currentReturnType.Kind() == semantic::SemanticTypeKind::Void) {
+                EmitCleanupsTo(0);
+                _builder.CreateRetVoid();
+                return true;
+            }
             const semantic::SemanticType sourceType =
                 returnStatement.Expression()->Type();
             value = CoerceValue(value, sourceType, _currentReturnType);
@@ -2026,6 +2035,10 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
             _builder.CreateStore(value, storage);
             return value;
         }
+        case lowering::BoundNodeKind::AllocationExpression:
+            return EmitAllocation(
+                static_cast<const lowering::BoundAllocationExpression&>(
+                    expression));
         case lowering::BoundNodeKind::CallExpression: {
             const lowering::BoundCallExpression& call =
                 static_cast<const lowering::BoundCallExpression&>(expression);
@@ -2071,6 +2084,9 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
                 return EmitRuntimeOutput(
                     arguments.front(), call.Arguments().front()->Type(), true);
             }
+            if (call.Function().BuiltIn() == semantic::BuiltInFunction::Free)
+                return EmitFree(arguments.front(),
+                                *call.Function().ParameterTypes()[0].Target());
             llvm::Function* function = _functions.at(&call.Function());
             llvm::AllocaInst* ownedResult = nullptr;
             if (call.Type().OwnsStorage()) {
@@ -2302,6 +2318,80 @@ bool LlvmCodeGenerator::EmitInto(const lowering::BoundExpression& expression,
     if (!value) return false;
     _builder.CreateStore(value, destination);
     return true;
+}
+
+llvm::Value* LlvmCodeGenerator::EmitAllocation(
+    const lowering::BoundAllocationExpression& expression) {
+    llvm::Type* element = MapType(expression.ElementType());
+    const llvm::DataLayout& layout = _module->getDataLayout();
+    llvm::Type* sizeType =
+        MapType(semantic::SemanticType(semantic::SemanticTypeKind::USize));
+    llvm::Type* pointerType = llvm::PointerType::getUnqual(_context);
+    llvm::FunctionCallee allocate = _module->getOrInsertFunction(
+        "flecha_runtime_v1_alloc",
+        llvm::FunctionType::get(pointerType, {sizeType, sizeType}, false));
+    llvm::Value* pointer = _builder.CreateCall(
+        allocate,
+        {llvm::ConstantInt::get(
+             sizeType, layout.getTypeAllocSize(element).getFixedValue()),
+         llvm::ConstantInt::get(sizeType,
+                                layout.getABITypeAlign(element).value())},
+        "allocation");
+    auto* success = llvm::BasicBlock::Create(_context, "allocation.success",
+                                             _currentFunction);
+    auto* failure = llvm::BasicBlock::Create(_context, "allocation.failure",
+                                             _currentFunction);
+    auto* done =
+        llvm::BasicBlock::Create(_context, "allocation.done", _currentFunction);
+    _builder.CreateCondBr(
+        _builder.CreateICmpNE(pointer,
+                              llvm::Constant::getNullValue(pointerType)),
+        success, failure);
+    _builder.SetInsertPoint(success);
+    if (!EmitInto(expression.Initializer(), pointer, expression.ElementType()))
+        return nullptr;
+    llvm::Value* successful =
+        llvm::Constant::getNullValue(MapType(expression.Type()));
+    successful = _builder.CreateInsertValue(successful, pointer, 0);
+    llvm::BasicBlock* successEnd = _builder.GetInsertBlock();
+    _builder.CreateBr(done);
+    _builder.SetInsertPoint(failure);
+    llvm::Value* error = CoerceValue(
+        llvm::ConstantInt::get(MapType(expression.FailureType()), 1),
+        expression.FailureType(),
+        semantic::SemanticType(semantic::SemanticTypeKind::ErrorValue));
+    llvm::Value* failed = _builder.CreateInsertValue(
+        llvm::Constant::getNullValue(MapType(expression.Type())), error, 1);
+    _builder.CreateBr(done);
+    _builder.SetInsertPoint(done);
+    auto* result =
+        _builder.CreatePHI(MapType(expression.Type()), 2, "allocation.result");
+    result->addIncoming(successful, successEnd);
+    result->addIncoming(failed, failure);
+    return result;
+}
+
+llvm::Value* LlvmCodeGenerator::EmitFree(llvm::Value* pointer,
+                                         semantic::SemanticType target) {
+    auto* release =
+        llvm::BasicBlock::Create(_context, "free.release", _currentFunction);
+    auto* done =
+        llvm::BasicBlock::Create(_context, "free.done", _currentFunction);
+    _builder.CreateCondBr(
+        _builder.CreateICmpNE(pointer,
+                              llvm::Constant::getNullValue(pointer->getType())),
+        release, done);
+    _builder.SetInsertPoint(release);
+    EmitDestroyAt(pointer, target);
+    llvm::FunctionCallee deallocate = _module->getOrInsertFunction(
+        "flecha_runtime_v1_free",
+        llvm::FunctionType::get(llvm::Type::getVoidTy(_context),
+                                {pointer->getType()}, false));
+    _builder.CreateCall(deallocate, {pointer});
+    _builder.CreateBr(done);
+    _builder.SetInsertPoint(done);
+    // Expression statements need a non-null IR result even for void built-ins.
+    return llvm::UndefValue::get(llvm::Type::getInt1Ty(_context));
 }
 
 std::unique_ptr<llvm::Module> LlvmCodeGenerator::Generate(

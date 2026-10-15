@@ -121,3 +121,6 @@ tests cover syntax, resolution, conversion rules, qualifiers, and diagnostics.
 LLVM and native tests cover family identity, success normalization, tuple
 propagation, aggregates, references, raw writes, deferred captures, and strict
 comparison side effects. Native harnesses expose only scalar test entry points.
+
+The allocation built-in provides `AllocationError.OutOfMemory`, returned as
+generic `error` by `new<T>`. See [raw allocation](raw_allocation.md).

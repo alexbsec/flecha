@@ -440,12 +440,21 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
             const semantic::FunctionSymbol& function =
                 static_cast<const semantic::FunctionSymbol&>(
                     *_semanticModel->SymbolFor(callee));
+            if (function.BuiltIn() == semantic::BuiltInFunction::New)
+                return std::make_unique<BoundAllocationExpression>(
+                    expression.Range(), type, function.ParameterTypes()[0],
+                    _semanticModel->GlobalScope()
+                        .Lookup("AllocationError")
+                        ->Type(),
+                    LowerExpression(*call.Arguments()[0],
+                                    function.ParameterTypes()[0]));
             std::vector<std::unique_ptr<BoundExpression>> arguments;
             arguments.reserve(call.Arguments().size());
             for (const std::unique_ptr<core::Expression>& argument :
                  call.Arguments()) {
                 const semantic::SemanticType parameterType =
-                    function.BuiltIn() == semantic::BuiltInFunction::None
+                    (function.BuiltIn() == semantic::BuiltInFunction::None ||
+                     function.BuiltIn() == semantic::BuiltInFunction::Free)
                         ? function.ParameterTypes()[arguments.size()]
                         : semantic::SemanticType::Error();
                 arguments.push_back(LowerExpression(*argument, parameterType));

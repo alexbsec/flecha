@@ -2706,3 +2706,109 @@ TEST(SemanticStructureTests,
                   DiagnosticCode::InvalidStructure),
               nullptr);
 }
+
+TEST(SemanticAllocationTests, TypesNewFreeAndAllocationErrors) {
+    Analysis result = Analyze(
+        "unsafe void f() { (*u8 p, error err) = new<u8>(42); "
+        "if err == AllocationError.OutOfMemory { return; } defer free(p); "
+        "free(null); free(none); (fixed, failure) := new<const i32>(none); "
+        "free(fixed); }");
+    EXPECT_FALSE(result.diagnostics.HasErrors());
+    for (const std::string& body :
+         {"p, e := new<u8>(42);", "free(p);", "defer free(p);"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(Analyze("void f(*u8 p) { " + body + " }"),
+                                 DiagnosticCode::UnsafeOperation),
+                  nullptr);
+    }
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("unsafe void f() { (*u8 p, error e) = new<u8>(true); }"),
+            DiagnosticCode::IncompatibleArgument),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(
+                  Analyze("unsafe void f() { p := new<u8>(42); free(p); }"),
+                  DiagnosticCode::InvalidAllocation),
+              nullptr);
+}
+
+TEST(SemanticAllocationTests, RejectsUnsupportedStorageAndInvalidCalls) {
+    for (const std::string& body :
+         {"new(42);", "new<void>(none);", "new<stringv>(\"view\");",
+          "new<&i32>(none);", "new<[]i32>(none);", "free(42);",
+          "*void p = null; free(p);"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { " + body + " }"),
+                                 DiagnosticCode::InvalidAllocation),
+                  nullptr);
+    }
+    for (const std::string& body :
+         {"new<u8>();", "new<u8>(1, 2);", "free();", "free(null, null);"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { " + body + " }"),
+                                 DiagnosticCode::WrongArgumentCount),
+                  nullptr);
+    }
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { defer new<u8>(1); }"),
+                             DiagnosticCode::InvalidDefer),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("void free() {}"),
+                             DiagnosticCode::DuplicateDeclaration),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("error AllocationError { Other }"),
+                             DiagnosticCode::DuplicateDeclaration),
+              nullptr);
+    const std::string source = "unsafe void f() { new<stringv>(\"view\"); }";
+    Analysis result = Analyze(source);
+    const Diagnostic* diagnostic =
+        FindDiagnostic(result, DiagnosticCode::InvalidAllocation);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(diagnostic->range.start.offset, source.find("stringv"));
+    EXPECT_EQ(diagnostic->range.Length(), 7);
+}
+
+TEST(SemanticAllocationTests,
+     PreservesConstructionAndConditionalInitializationRules) {
+    const std::string prefix =
+        "structure Box { i32 x; }; unsafe void Box::tear(&self) override {} ";
+    EXPECT_FALSE(
+        Analyze(
+            prefix +
+            "unsafe void f() { p, e := new<Box>(Box::init()); defer free(p); }")
+            .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze(prefix +
+                    "unsafe void f() { Box b = Box::init(); new<Box>(b); }"),
+            DiagnosticCode::NonCopyableValue),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze(prefix + "unsafe void f() { new<Box>(none); }"),
+                       DiagnosticCode::IncompatibleArgument),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe i32 f() { i32 x; p, e := "
+                                     "new<i32>(x = 42); free(p); return x; }"),
+                             DiagnosticCode::UninitializedVariable),
+              nullptr);
+    EXPECT_FALSE(Analyze("unsafe i32 f() { i32 x = 0; p, e := new<i32>(x = "
+                         "42); free(p); return x; }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("unsafe void f() { const i32 x = 42; new<i32>(x = 1); }"),
+            DiagnosticCode::SymbolNotWritable),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { p, e := new<const "
+                                     "i32>(42); *p = 1; free(p); }"),
+                             DiagnosticCode::SymbolNotWritable),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(
+                  Analyze("unsafe void f() { i32 x = 1; i32 y = 2; r := &x; "
+                          "q := &y; p, e := new<i32>(*(r = q)); free(p); *q = 42; }"),
+                  DiagnosticCode::MovedReference),
+              nullptr);
+    EXPECT_FALSE(Analyze("unsafe void f() { i32 x = 1; q := &x; "
+                         "p, e := new<i32>(*q); *q = 42; free(p); }")
+                     .diagnostics.HasErrors());
+
+}

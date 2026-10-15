@@ -1,0 +1,164 @@
+structure HeapBox { i32 value; string label; };
+HeapBox HeapBox::init(i32 value, string label) override {
+    return build HeapBox { self.value = value; self.label = label; };
+}
+structure Empty {};
+unsafe void release_byte(*u8 pointer) { return free(pointer); }
+
+i32 allocation_values_test() {
+    unsafe {
+        (*u8 byte, error err) = new<u8>(none);
+        if err != none or byte == null { return 1; }
+        if *byte != 0 { return 2; }
+        *byte = 42;
+        release_byte(byte);
+        free(null);
+        free(none);
+        (box, e) := new<HeapBox>(HeapBox::init(42, "heap"));
+        if e != none { return 3; }
+        defer free(box);
+        if box->value != 42 or box->label != "heap" { return 4; }
+        original := "original".string();
+        (*string text, error failure) = new<string>(original);
+        if failure != none { return 5; }
+        defer free(text);
+        original = "modified";
+        if *text != "original" { return 6; }
+        (array, arrayError) := new<[2]HeapBox>([HeapBox::init(1, "one"), HeapBox::init(2, "two")]);
+        if arrayError != none { return 7; }
+        defer free(array);
+        if (*array)[1].label != "two" { return 8; }
+        (tuple, tupleError) := new<(string, i32)>(("tuple", 42));
+        if tupleError != none { return 9; }
+        defer free(tuple);
+        string name, i32 answer = *tuple;
+        if name != "tuple" or answer != 42 { return 10; }
+        (empty, emptyError) := new<Empty>(Empty::init());
+        if emptyError != none or empty == null { return 11; }
+        free(empty);
+        (fixed, fixedError) := new<const i32>(42);
+        if fixedError != none or *fixed != 42 { return 12; }
+        free(fixed);
+    }
+    return 42;
+}
+
+structure Tracked { *i32 log; i32 id; i32 value; *i32 saved; string label; };
+unsafe Tracked Tracked::init(*i32 log, i32 id) override {
+    return build Tracked {
+        self.log = log;
+        self.id = id;
+        self.saved = &raw self.value;
+        self.label = "tracked";
+    };
+}
+unsafe void Tracked::tear(&self) override {
+    self->value = 42;
+    if *self->saved != 42 { *self->log = -1000; return; }
+    *self->log = *self->log * 10 + self->id;
+}
+structure Atom { *i32 log; i32 id; i32 value; *i32 saved; };
+unsafe Atom Atom::init() override {
+    return build Atom { self.saved = &raw self.value; };
+}
+unsafe void Atom::tear(&self) override {
+    self->value = 42;
+    if *self->saved != 42 { *self->log = -1000; return; }
+    *self->log = *self->log * 10 + self->id;
+}
+structure Composite { Atom first; Atom second; *i32 log; };
+unsafe void Composite::tear(&self) override { *self->log = *self->log * 10 + 1; }
+
+i32 allocation_lifecycle_test() {
+    i32 log = 0;
+    unsafe {
+        (object, err) := new<Composite>(build Composite {
+            self.log = &raw log;
+            self.first.log = &raw log;
+            self.first.id = 2;
+            self.second.log = &raw log;
+            self.second.id = 3;
+        });
+        if err != none { return 1; }
+        free(object);
+    }
+    if log != 132 { return 2; }
+    log = 0;
+    unsafe {
+        (array, err) := new<[2]Tracked>([Tracked::init(&raw log, 1), Tracked::init(&raw log, 2)]);
+        if err != none { return 3; }
+        free(array);
+    }
+    if log != 21 { return 4; }
+    log = 0;
+    unsafe {
+        (tuple, err) := new<(Tracked, Tracked)>((Tracked::init(&raw log, 3), Tracked::init(&raw log, 4)));
+        if err != none { return 5; }
+        defer free(tuple);
+    }
+    if log != 43 { return 6; }
+    return 42;
+}
+
+unsafe i32 defer_return(*i32 log) {
+    (object, err) := new<Tracked>(Tracked::init(log, 1));
+    if err != none { return 1; }
+    defer free(object);
+    return 42;
+}
+i32 allocation_defer_test() {
+    i32 log = 0;
+    unsafe {
+        if defer_return(&raw log) != 42 { return 1; }
+        loop i := 0; i < 2; i++ {
+            (object, err) := new<Tracked>(Tracked::init(&raw log, 2));
+            if err != none { return 2; }
+            defer free(object);
+            if i == 0 { proceed; }
+            break;
+        }
+        loop ;; {
+            {
+                (object, err) := new<Tracked>(Tracked::init(&raw log, 3));
+                if err != none { return 3; }
+                defer free(object);
+                jumpto outside;
+            }
+            #outside
+            break;
+        }
+        loop ;; {
+            i32 index = 0;
+            #again
+            (object, err) := new<Tracked>(Tracked::init(&raw log, 4));
+            if err != none { return 4; }
+            defer free(object);
+            index++;
+            if index < 2 { jumpto again; }
+            break;
+        }
+    }
+    if log != 122344 { return 5; }
+    return 42;
+}
+
+i32 allocation_argument(&i32 calls) { *calls = *calls + 1; return 42; }
+i32 allocation_failure_test() {
+    i32 calls = 0;
+    unsafe {
+        (object, err) := new<HeapBox>(HeapBox::init(allocation_argument(&calls), "skipped"));
+        defer free(object);
+        if object != null or err != AllocationError.OutOfMemory or calls != 0 { return 1; }
+    }
+    return 42;
+}
+i32 allocation_success_test() {
+    i32 calls = 0;
+    unsafe {
+        (object, err) := new<i32>(allocation_argument(&calls));
+        if err != none { return 1; }
+        defer free(object);
+        if calls != 1 or *object != 42 { return 2; }
+    }
+    return 42;
+}

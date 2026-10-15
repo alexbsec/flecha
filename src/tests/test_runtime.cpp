@@ -65,3 +65,27 @@ TEST(RuntimeStringTests, ConcatenatesIndependentOwnedStorage) {
     EXPECT_STREQ(joined.data, "flecha");
     flecha_runtime_v1_string_destroy(joined.data);
 }
+
+TEST(RuntimeAllocationTests, ZeroesStorageAndHonorsAlignment) {
+    for (const size_t alignment :
+         {size_t{1}, size_t{8}, size_t{64}, size_t{4096}}) {
+        void* data = flecha_runtime_v1_alloc(137, alignment);
+        ASSERT_NE(data, nullptr);
+        EXPECT_EQ(reinterpret_cast<std::uintptr_t>(data) % alignment, 0);
+        for (size_t i = 0; i < 137; ++i)
+            EXPECT_EQ(static_cast<unsigned char*>(data)[i], 0);
+        static_cast<unsigned char*>(data)[136] = 42;
+        flecha_runtime_v1_free(data);
+    }
+    void* empty = flecha_runtime_v1_alloc(0, 1);
+    ASSERT_NE(empty, nullptr);
+    flecha_runtime_v1_free(empty);
+    flecha_runtime_v1_free(nullptr);
+}
+
+TEST(RuntimeAllocationTests, RejectsInvalidAlignmentAndSizeOverflow) {
+    EXPECT_EQ(flecha_runtime_v1_alloc(1, 0), nullptr);
+    EXPECT_EQ(flecha_runtime_v1_alloc(1, 3), nullptr);
+    EXPECT_EQ(flecha_runtime_v1_alloc(SIZE_MAX, 8), nullptr);
+    EXPECT_EQ(flecha_runtime_v1_alloc(SIZE_MAX - sizeof(void*), 64), nullptr);
+}

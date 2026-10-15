@@ -613,6 +613,9 @@ class BorrowChecker final {
                 const Symbol* symbol = Named(call.Callee());
                 const auto* function =
                     static_cast<const FunctionSymbol*>(symbol);
+                const bool allocation =
+                    function && function->BuiltIn() == BuiltInFunction::New;
+                const State skipped = allocation ? *_state : State{};
                 const std::vector<Loan> previousLoans = _temporaries;
                 for (std::size_t index = 0; index < call.Arguments().size();
                      ++index) {
@@ -628,6 +631,7 @@ class BorrowChecker final {
                     }
                 }
                 _temporaries = previousLoans;
+                if (allocation) Merge(*_state, skipped);
                 return {};
             }
             case Kind::CastExpression:

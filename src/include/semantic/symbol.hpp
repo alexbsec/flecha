@@ -19,7 +19,7 @@ enum class SymbolKind {
     StructureType
 };
 
-enum class BuiltInFunction { None, Stdout, StdoutLine };
+enum class BuiltInFunction { None, Stdout, StdoutLine, New, Free };
 
 class Symbol {
    public:

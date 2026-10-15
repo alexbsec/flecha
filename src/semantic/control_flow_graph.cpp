@@ -359,10 +359,12 @@ class GraphBuilder final {
             case core::AstNodeKind::CallExpression: {
                 const auto& call =
                     static_cast<const core::CallExpression&>(expression);
+                const NodeId failure = next;
                 for (auto argument = call.Arguments().rbegin();
                      argument != call.Arguments().rend(); ++argument) {
                     next = BuildExpression(**argument, next);
                 }
+                if (call.TypeArgument()) next = AddNode({next, failure});
                 return BuildExpression(call.Callee(), next);
             }
             case core::AstNodeKind::MemberCallExpression: {

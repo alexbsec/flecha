@@ -1201,3 +1201,27 @@ TEST(ParserStructureTests, RejectsMalformedStructureSyntax) {
         EXPECT_TRUE(diagnostics.HasErrors());
     }
 }
+
+TEST(ParserAllocationTests, ParsesCompoundTypeArgumentsAndRejectsMalformedNew) {
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource(
+        "unsafe void f() { new<*(i32, bool)>(none); new<[2]u8>([1, 2]); "
+        "free(null); }",
+        diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const auto& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    const auto& statement = static_cast<const ExpressionStatement&>(
+        *function.Body().Statements()[0]);
+    const auto& call = static_cast<const CallExpression&>(statement.Value());
+    ASSERT_NE(call.TypeArgument(), nullptr);
+    EXPECT_EQ(call.TypeArgument()->TypeForm(), TypeKind::Pointer);
+    EXPECT_EQ(call.TypeArgument()->Target()->TypeForm(), TypeKind::Tuple);
+    for (const std::string& source :
+         {"unsafe void f() { new<>(1); }", "unsafe void f() { new<u8(1); }",
+          "unsafe void f() { new<u8>; }"}) {
+        DiagnosticBag invalid;
+        (void)ParseSource(source, invalid);
+        EXPECT_TRUE(invalid.HasErrors()) << source;
+    }
+}

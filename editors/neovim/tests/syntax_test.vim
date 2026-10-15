@@ -85,6 +85,9 @@ call assert_equal('flechaModifier', s:HighlightAt('override', 0))
 call assert_equal('flechaOperator', s:HighlightAt('::', 0))
 call assert_equal('flechaOperator', s:HighlightAt('->', 0))
 
+call assert_equal('flechaAllocation', s:HighlightAt('new<u8>', 0))
+call assert_equal('flechaType', s:HighlightAt('AllocationError', 0))
+
 if !empty(v:errors)
     for error in v:errors
         echomsg error

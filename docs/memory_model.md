@@ -416,16 +416,16 @@ conceptually related to `[]const u8`, but type identity, conversions, and ABI
 compatibility must be decided separately. Existing string lengths and methods
 are not silently changed by the proposed `usize` slice length.
 
-## 8. Allocation and failure — agreed direction
+## 8. Allocation and failure
 
-The planned `new<T>(value)` and `free(ptr)` built-ins use the process-wide
+The implemented `new<T>(value)` and `free(ptr)` built-ins use the process-wide
 system allocation service. They replace the earlier `Allocator` handle and
 `system_allocator()` proposal. `new<T>` returns `(*T, error)`, supporting both
 `(*u8 ptr, error err) = new<u8>(10);` and `ptr, err := new<u8>(10);`.
-Custom allocator interfaces remain future work. These built-ins are not yet
-implemented.
+Custom allocator interfaces remain future work. See [raw_allocation.md](raw_allocation.md)
+for the supported types, evaluation rules, and current limits.
 
-The raw API under discussion uses typed tuple bindings and explicit failure:
+The raw API uses typed tuple bindings and explicit failure:
 
 ```flecha
 unsafe {
@@ -441,9 +441,9 @@ unsafe {
 `new<T>(value)` allocates one element and initializes it with `value`.
 `new<T>(none)` initializes to T's defined zero value, when one exists; it
 does not mean uninitialized storage. Success produces a live allocation and
-no error; failure assigns null and an error. Tuple/error values are implemented;
-generic allocation calls require implementation work. Array allocation spelling
-is still provisional.
+no error; failure assigns null and `AllocationError.OutOfMemory`, without
+evaluating the initializer. Fixed arrays use `new<[N]T>(value)`; dynamic array
+allocation remains future work. `free(null)` is a no-op.
 
 Raw allocation and free require an unsafe function or block. Allocations are
 not implicitly freed at the end of an unsafe block: allocation lifetime is
@@ -476,8 +476,8 @@ The special pointer-operation syntax and naming remain to be finalized.
 
 ### 8.1 Deferred cleanup
 
-The direct-call implementation is documented in [defer.md](defer.md). The
-allocation example and allocation-effect rules below remain design
+The direct-call implementation is documented in [defer.md](defer.md). Deferred
+`free` is implemented. Static allocation-effect checks below remain design
 contracts for future milestones.
 
 A deferred call registers when execution reaches it and executes when its

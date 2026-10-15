@@ -66,6 +66,7 @@ enum class DiagnosticCode {
     PrivateAccess,
     InvalidLifecycle,
     NonCopyableValue,
+    InvalidAllocation,
     NativeTargetUnavailable,
     ObjectEmissionFailed,
     RuntimeUnavailable,

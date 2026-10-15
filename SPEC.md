@@ -567,7 +567,10 @@ fields, construction limits, examples, and diagnostics.
 
 ## 14. Memory and runtime model
 
-Flecha should not require a garbage collector. Stack allocation is the ordinary default. The planned explicit raw allocation API is `new<T>(value)` returning `(*T, error)`, paired with unsafe `free(ptr)`. It uses the system allocation service; custom allocators remain future work.
+Flecha should not require a garbage collector. Stack allocation is the ordinary default. The implemented explicit raw allocation API is `new<T>(value)` returning `(*T, error)`, paired with unsafe `free(ptr)`. It uses the system allocation service; custom allocators remain future work.
+On failure, new returns null and `AllocationError.OutOfMemory` without evaluating
+the initializer. Free runs typed teardown and accepts null. See
+[raw allocation](docs/raw_allocation.md) for the unsafe contract and current limits.
 
 The language should avoid hidden allocation in:
 
