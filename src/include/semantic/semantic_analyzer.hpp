@@ -3,6 +3,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "diagnostics/diagnostic_bag.hpp"
 #include "semantic_model.hpp"
@@ -37,6 +38,8 @@ class SemanticAnalyzer final {
         const core::MemberCallExpression& expression);
     SemanticType AnalyzeIndex(const core::IndexExpression& expression);
     SemanticType AnalyzeCast(const core::CastExpression& expression);
+    [[nodiscard]] bool BorrowsLocalString(
+        const core::Expression& expression) const;
     const Symbol* AddSymbol(std::unique_ptr<Symbol> symbol,
                             const core::AstNode& declaration);
     Scope& AddScope(const Scope* parent);
@@ -48,6 +51,7 @@ class SemanticAnalyzer final {
     Scope* _currentScope = nullptr;
     const FunctionSymbol* _currentFunction = nullptr;
     std::unordered_map<std::string, source::SourceRange> _positions;
+    std::unordered_set<const Symbol*> _localStringBorrows;
     std::size_t _loopDepth = 0;
 };
 

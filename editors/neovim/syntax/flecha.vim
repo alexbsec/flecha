@@ -6,7 +6,7 @@ syntax case match
 
 syntax keyword flechaType i8 i16 i32 i64 isize
 syntax keyword flechaType u8 u16 u32 u64 usize
-syntax keyword flechaType f32 f64 bool char void stringv
+syntax keyword flechaType f32 f64 bool char void string stringv
 
 syntax keyword flechaModifier unsafe export extern inline comptime const volatile
 syntax keyword flechaConditional if else also

@@ -60,6 +60,8 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0018";
         case DiagnosticCode::NotIndexable:
             return "FLECHA-S0019";
+        case DiagnosticCode::BorrowEscapesOwner:
+            return "FLECHA-S0020";
         case DiagnosticCode::NativeTargetUnavailable:
             return "FLECHA-C0001";
         case DiagnosticCode::ObjectEmissionFailed:

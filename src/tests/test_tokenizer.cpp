@@ -18,8 +18,8 @@ std::vector<Token> Tokenize(const std::string& source,
 
 TEST(TokenizerTests, RecognizesKeywords) {
     std::vector<Token> tokens =
-        Tokenize("i32 u8 f64 char bool void unsafe return none");
-    ASSERT_EQ(tokens.size(), 10);
+        Tokenize("i32 u8 f64 char bool void string stringv unsafe return none");
+    ASSERT_EQ(tokens.size(), 12);
 
     EXPECT_EQ(tokens[0].type, TokenType::I32);
     EXPECT_EQ(tokens[0].value, "i32");
@@ -29,10 +29,12 @@ TEST(TokenizerTests, RecognizesKeywords) {
     EXPECT_EQ(tokens[3].type, TokenType::Char);
     EXPECT_EQ(tokens[4].type, TokenType::Bool);
     EXPECT_EQ(tokens[5].type, TokenType::Void);
-    EXPECT_EQ(tokens[6].type, TokenType::Unsafe);
-    EXPECT_EQ(tokens[7].type, TokenType::Return);
-    EXPECT_EQ(tokens[8].type, TokenType::None);
-    EXPECT_EQ(tokens[9].type, TokenType::EOF_TOKEN);
+    EXPECT_EQ(tokens[6].type, TokenType::String);
+    EXPECT_EQ(tokens[7].type, TokenType::StringView);
+    EXPECT_EQ(tokens[8].type, TokenType::Unsafe);
+    EXPECT_EQ(tokens[9].type, TokenType::Return);
+    EXPECT_EQ(tokens[10].type, TokenType::None);
+    EXPECT_EQ(tokens[11].type, TokenType::EOF_TOKEN);
 }
 
 TEST(TokenizerTests, RecognizesFunctionModifiersAndReservedWords) {

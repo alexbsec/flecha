@@ -630,3 +630,21 @@ TEST(ParserCastTests, CastBindsTighterThanBinaryOperators) {
         static_cast<const BinaryExpression&>(*statement.Value());
     EXPECT_EQ(binary.Right().Kind(), AstNodeKind::CastExpression);
 }
+
+TEST(ParserStringTests, ParsesOwningStringTypesAndLiteralConversions) {
+    DiagnosticBag diagnostics;
+    std::unique_ptr<CompilationUnit> unit = ParseSource(
+        "string Build() { string value = \"hi mom\".string(); "
+        "return value.cast<string>; }",
+        diagnostics);
+
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const FunctionDeclaration& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    EXPECT_EQ(function.ReturnType().Type(), PrimitiveType::String);
+    const VariableDeclarationStatement& variable =
+        static_cast<const VariableDeclarationStatement&>(
+            *function.Body().Statements()[0]);
+    EXPECT_EQ(variable.ExplicitType()->Type(), PrimitiveType::String);
+    EXPECT_EQ(variable.Initializer()->Kind(), AstNodeKind::MemberCallExpression);
+}

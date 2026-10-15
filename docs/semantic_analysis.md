@@ -44,9 +44,9 @@ is diagnosed.
 
 ## Types and inference
 
-Semantic types cover every syntax primitive plus the literal-only `string`,
-`null`, and `none` types, the internal `function` type, and an error-recovery
-type. Literal defaults are:
+Semantic types cover every syntax primitive plus the literal-only `null` and
+`none` types, the internal `function` type, and an error-recovery type. Literal
+defaults are:
 
 | Literal | Inferred type |
 | --- | --- |
@@ -54,7 +54,7 @@ type. Literal defaults are:
 | Floating point | `f64` |
 | `true`, `false` | `bool` |
 | Character | `char` |
-| String | `string` |
+| String | `stringv` |
 | `null` | `null` |
 | `none` | `none` |
 

@@ -198,6 +198,27 @@ TEST(LlvmCodeGeneratorTests, EmitsCheckedStringViewOperations) {
     EXPECT_NE(ir.find("stringv.len"), std::string::npos);
 }
 
+TEST(LlvmCodeGeneratorTests, EmitsOwnedStringConversionsAndCleanup) {
+    GeneratedSource result = Generate(
+        "i32 main() { string greeting = \"hi mom\".string(); "
+        "string copy = greeting; string answer = 42.string(); "
+        "stringv view = greeting.view(); "
+        "stdoutln(greeting); return 42; }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("@flecha_runtime_v1_string_from_view"),
+              std::string::npos);
+    EXPECT_NE(ir.find("@flecha_runtime_v1_string_from_i32"),
+              std::string::npos);
+    EXPECT_NE(ir.find("@flecha_runtime_v1_string_destroy"),
+              std::string::npos);
+    EXPECT_NE(ir.find("@flecha_runtime_v1_stdout_string_view"),
+              std::string::npos);
+}
+
 TEST(LlvmCodeGeneratorTests, EmitsLengthAwareStandardOutput) {
     GeneratedSource result =
         Generate("i32 main() { stdout(\"Flecha\"); "

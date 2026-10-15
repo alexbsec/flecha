@@ -4,7 +4,8 @@ project(Flecha LANGUAGES C CXX)
 
 include(CTest)
 
-option(FLECHA_ENABLE_SANITIZERS "Build Flecha with AddressSanitizer" OFF)
+option(FLECHA_ENABLE_SANITIZERS
+    "Build Flecha with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -17,11 +18,11 @@ target_compile_features(flecha_project_options INTERFACE cxx_std_23)
 if(FLECHA_ENABLE_SANITIZERS)
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
         target_compile_options(flecha_project_options INTERFACE
-            -fsanitize=address
+            -fsanitize=address,undefined
             -fno-omit-frame-pointer
         )
         target_link_options(flecha_project_options INTERFACE
-            -fsanitize=address
+            -fsanitize=address,undefined
         )
     else()
         message(WARNING

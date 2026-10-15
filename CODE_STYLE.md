@@ -1,10 +1,14 @@
 # Flecha C++ Code Style
 
+This file governs the C++ implementation of the compiler and runtime. Flecha
+source APIs follow the separate conventions in
+[`docs/library_api_style.md`](docs/library_api_style.md).
+
 ## Naming
 
 - Source and header filenames use `snake_case`: `source_range.hpp`.
 - Types, classes, structs, and enums use `PascalCase`: `DiagnosticBag`.
-- Every function and method uses `PascalCase`, regardless of visibility:
+- Every C++ function and method uses `PascalCase`, regardless of visibility:
   `Tokenize()`, `Report()`, and `NextToken()`.
 - Private data members use a leading underscore followed by `camelCase`:
   `_currentToken`. Do not use a trailing underscore such as `currentToken_`.

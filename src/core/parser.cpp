@@ -77,6 +77,7 @@ bool Parser::IsTypeToken(TokenType type) const {
         case TokenType::Bool:
         case TokenType::Char:
         case TokenType::Void:
+        case TokenType::String:
         case TokenType::StringView:
             return true;
         default:
@@ -153,6 +154,9 @@ std::unique_ptr<TypeNode> Parser::ParseType() {
             break;
         case TokenType::Void:
             type = PrimitiveType::Void;
+            break;
+        case TokenType::String:
+            type = PrimitiveType::String;
             break;
         case TokenType::StringView:
             type = PrimitiveType::StringView;
@@ -645,8 +649,13 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
         }
 
         if (Match(TokenType::Dot)) {
-            const Token* member =
-                Consume(TokenType::Identifier, "member name after '.'");
+            const Token* member = nullptr;
+            if (Check(TokenType::Identifier) || Check(TokenType::String)) {
+                member = &Advance();
+            } else {
+                member = Consume(TokenType::Identifier,
+                                 "member name after '.'");
+            }
             if (member == nullptr) return expression;
             if (member->value == "cast" && Match(TokenType::Less)) {
                 std::unique_ptr<TypeNode> targetType = ParseType();

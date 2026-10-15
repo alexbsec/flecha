@@ -89,6 +89,7 @@ enum class PrimitiveType {
     Bool,
     Char,
     Void,
+    String,
     StringView,
 };
 

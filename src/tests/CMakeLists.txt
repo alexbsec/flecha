@@ -26,7 +26,7 @@ target_link_libraries(test_flecha
 )
 
 include(GoogleTest)
-gtest_discover_tests(test_flecha)
+gtest_discover_tests(test_flecha DISCOVERY_MODE PRE_TEST)
 
 add_test(
     NAME NativeRuntimeTests.PrintsEveryPrintableType
@@ -44,4 +44,22 @@ add_test(
         -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/string_view_operations.fl
         -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/string_view_operations_test
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_string_view_operations.cmake
+)
+
+add_test(
+    NAME NativeRuntimeTests.OwningStrings
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/owning_string.fl
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/owning_string_test
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_owning_string.cmake
+)
+
+add_test(
+    NAME NativeRuntimeTests.OwningStringScalarFormatting
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/owning_string_scalars.fl
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/owning_string_scalars_test
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_owning_string_scalars.cmake
 )

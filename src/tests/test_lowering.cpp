@@ -180,10 +180,10 @@ TEST(LoweringTests, NormalizesStringViewMembersAndIndexSyntax) {
     ASSERT_FALSE(result.diagnostics.HasErrors());
     ASSERT_NE(result.program, nullptr);
     const std::string dump = DumpBoundProgram(*result.program);
-    EXPECT_NE(dump.find("(stringv.at"), std::string::npos);
-    EXPECT_NE(dump.find("(stringv.at"), dump.rfind("(stringv.at"));
-    EXPECT_NE(dump.find("(stringv.substr"), std::string::npos);
-    EXPECT_NE(dump.find("(stringv.len"), std::string::npos);
+    EXPECT_NE(dump.find("(string.at"), std::string::npos);
+    EXPECT_NE(dump.find("(string.at"), dump.rfind("(string.at"));
+    EXPECT_NE(dump.find("(string.substr"), std::string::npos);
+    EXPECT_NE(dump.find("(string.len"), std::string::npos);
 
     const BoundFunction& function = *result.program->Functions()[0];
     const BoundVariableDeclarationStatement& atDeclaration =
@@ -200,6 +200,19 @@ TEST(LoweringTests, NormalizesStringViewMembersAndIndexSyntax) {
             indexDeclaration.Initializer());
     EXPECT_EQ(at.Operation(), StringViewOperation::At);
     EXPECT_EQ(index.Operation(), StringViewOperation::At);
+}
+
+TEST(LoweringTests, PreservesOwningStringConversions) {
+    LoweredSource result = Lower(
+        "string Build() { string owned = \"hi mom\".string(); "
+        "string copy = owned.copy(); view := copy.view(); return copy; }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.program, nullptr);
+    const std::string dump = DumpBoundProgram(*result.program);
+    EXPECT_NE(dump.find("(string.string"), std::string::npos);
+    EXPECT_NE(dump.find("(string.copy"), std::string::npos);
+    EXPECT_NE(dump.find("(string.view"), std::string::npos);
 }
 
 TEST(LoweringTests, SafelyRepresentsFunctionReferences) {

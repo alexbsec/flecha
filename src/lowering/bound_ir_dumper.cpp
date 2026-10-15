@@ -244,8 +244,17 @@ class Dumper final {
                 } else if (operation.Operation() ==
                            StringViewOperation::Substring) {
                     name = "substr";
+                } else if (operation.Operation() ==
+                           StringViewOperation::ToString) {
+                    name = "string";
+                } else if (operation.Operation() ==
+                           StringViewOperation::View) {
+                    name = "view";
+                } else if (operation.Operation() ==
+                           StringViewOperation::Copy) {
+                    name = "copy";
                 }
-                _stream << "(stringv." << name << " ";
+                _stream << "(string." << name << " ";
                 WriteExpression(operation.Receiver());
                 for (const std::unique_ptr<BoundExpression>& argument :
                      operation.Arguments()) {

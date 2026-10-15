@@ -25,6 +25,7 @@ const KeywordMap KEYWORDS = {
     {"bool", TokenType::Bool},
     {"char", TokenType::Char},
     {"void", TokenType::Void},
+    {"string", TokenType::String},
     {"stringv", TokenType::StringView},
     {"unsafe", TokenType::Unsafe},
     {"export", TokenType::Export},
