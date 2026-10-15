@@ -12,9 +12,8 @@ using Symbols = std::set<const Symbol*>;
 using Code = diagnostics::DiagnosticCode;
 using Kind = core::AstNodeKind;
 
-bool IsReference(const Symbol* symbol) {
-    return symbol != nullptr &&
-           symbol->Type().Kind() == SemanticTypeKind::Reference;
+bool IsBorrowed(const Symbol* symbol) {
+    return symbol != nullptr && symbol->Type().IsBorrowed();
 }
 
 const core::Expression& Unwrap(const core::Expression& expression) {
@@ -75,7 +74,7 @@ class BorrowChecker final {
         for (const std::unique_ptr<core::Parameter>& parameter :
              function.Parameters()) {
             const Symbol* symbol = _model.DeclaredSymbol(*parameter);
-            if (IsReference(symbol)) seed[symbol].origins.insert({symbol, {}});
+            if (IsBorrowed(symbol)) seed[symbol].origins.insert({symbol, {}});
         }
         ComputeLiveness();
         std::vector<State> incoming(_graph.nodes.size()),
@@ -135,6 +134,14 @@ class BorrowChecker final {
 
     void CollectUses(const core::Expression& expression, Symbols& uses) const {
         switch (expression.Kind()) {
+            case Kind::SliceExpression: {
+                const auto& slice =
+                    static_cast<const core::SliceExpression&>(expression);
+                CollectUses(slice.Receiver(), uses);
+                if (slice.Start() != nullptr) CollectUses(*slice.Start(), uses);
+                if (slice.End() != nullptr) CollectUses(*slice.End(), uses);
+                break;
+            }
             case Kind::ArrayExpression:
                 for (const auto& element :
                      static_cast<const core::ArrayExpression&>(expression)
@@ -143,7 +150,7 @@ class BorrowChecker final {
                 break;
             case Kind::NameExpression: {
                 const Symbol* symbol = Named(expression);
-                if (IsReference(symbol)) uses.insert(symbol);
+                if (IsBorrowed(symbol)) uses.insert(symbol);
                 break;
             }
             case Kind::ParenthesizedExpression:
@@ -208,7 +215,7 @@ class BorrowChecker final {
             const FlowNode& node = _graph.nodes[id];
             if (node.declaration != nullptr) {
                 const Symbol* symbol = _model.DeclaredSymbol(*node.declaration);
-                if (IsReference(symbol)) _defs[id].insert(symbol);
+                if (IsBorrowed(symbol)) _defs[id].insert(symbol);
                 if (node.declaration->Initializer() != nullptr)
                     CollectUses(*node.declaration->Initializer(), _uses[id]);
             }
@@ -220,7 +227,7 @@ class BorrowChecker final {
                         Named(static_cast<const core::AssignmentExpression&>(
                                   expression)
                                   .Target());
-                    if (IsReference(symbol)) _defs[id].insert(symbol);
+                    if (IsBorrowed(symbol)) _defs[id].insert(symbol);
                 }
             }
         }
@@ -262,14 +269,18 @@ class BorrowChecker final {
             // A backward jump can execute a declaration again while another
             // handle still borrows its old storage.
             CheckHandleChange(symbol, node.declaration->NameRange());
-            if (!IsReference(symbol))
+            if (!IsBorrowed(symbol))
                 CheckAccess({{{symbol, {}}}, nullptr, 0}, true,
                             node.declaration->NameRange());
             Value value;
             if (node.declaration->Initializer() != nullptr)
                 value = Evaluate(*node.declaration->Initializer());
-            if (IsReference(symbol))
+            if (IsBorrowed(symbol)) {
+                if (node.declaration->IsRangeSource())
+                    value = Borrow(std::move(value), false,
+                                   node.declaration->Range());
                 Store(symbol, value, node.declaration->Initializer()->Range());
+            }
         }
         if (node.evaluation != nullptr) (void)Evaluate(*node.evaluation);
     }
@@ -375,10 +386,22 @@ class BorrowChecker final {
         const core::Expression& inner = Unwrap(expression);
         const Symbol* symbol = Named(inner);
         if (symbol != nullptr) return {{{symbol, {}}}, nullptr, 0};
+        if (inner.Kind() == Kind::MemberCallExpression) {
+            const auto& call =
+                static_cast<const core::MemberCallExpression&>(inner);
+            if (call.Member() == "front" || call.Member() == "back")
+                return _model.TypeOf(call.Receiver()).Kind() ==
+                               SemanticTypeKind::Slice
+                           ? Evaluate(call.Receiver())
+                           : Place(call.Receiver());
+        }
         if (inner.Kind() == Kind::IndexExpression) {
             const auto& index =
                 static_cast<const core::IndexExpression&>(inner);
-            Value value = Place(index.Receiver());
+            Value value = _model.TypeOf(index.Receiver()).Kind() ==
+                                  SemanticTypeKind::Slice
+                              ? Evaluate(index.Receiver())
+                              : Place(index.Receiver());
             const Symbols previousPinned = _pinned;
             if (value.handle != nullptr) _pinned.insert(value.handle);
             for (const Origin& origin : value.origins)
@@ -414,6 +437,25 @@ class BorrowChecker final {
 
     Value Evaluate(const core::Expression& expression) {
         switch (expression.Kind()) {
+            case Kind::SliceExpression: {
+                const auto& slice =
+                    static_cast<const core::SliceExpression&>(expression);
+                Value value = _model.TypeOf(slice.Receiver()).Kind() ==
+                                      SemanticTypeKind::Slice
+                                  ? Evaluate(slice.Receiver())
+                                  : Place(slice.Receiver());
+                const Symbols previousPinned = _pinned;
+                if (value.handle != nullptr) _pinned.insert(value.handle);
+                for (const Origin& origin : value.origins)
+                    _pinned.insert(origin.parents.begin(),
+                                   origin.parents.end());
+                if (slice.Start() != nullptr) (void)Evaluate(*slice.Start());
+                if (slice.End() != nullptr) (void)Evaluate(*slice.End());
+                _pinned = previousPinned;
+                return Borrow(std::move(value),
+                              !_model.TypeOf(expression).Target()->IsConst(),
+                              expression.Range());
+            }
             case Kind::ArrayExpression:
                 for (const auto& element :
                      static_cast<const core::ArrayExpression&>(expression)
@@ -424,7 +466,7 @@ class BorrowChecker final {
                 return Evaluate(Unwrap(expression));
             case Kind::NameExpression: {
                 const Symbol* symbol = Named(expression);
-                if (IsReference(symbol)) {
+                if (IsBorrowed(symbol)) {
                     const Handle& handle = (*_state)[symbol];
                     if (handle.moved)
                         Report(Code::MovedReference, expression.Range(),
@@ -466,7 +508,7 @@ class BorrowChecker final {
                 const auto& assignment =
                     static_cast<const core::AssignmentExpression&>(expression);
                 const Symbol* symbol = Named(assignment.Target());
-                if (IsReference(symbol)) {
+                if (IsBorrowed(symbol)) {
                     Value value = Evaluate(assignment.Value());
                     Store(symbol, std::move(value), assignment.Value().Range());
                     return {(*_state)[symbol].origins, symbol, 0};
@@ -508,8 +550,7 @@ class BorrowChecker final {
                     Value value = Evaluate(*call.Arguments()[index]);
                     if (function != nullptr &&
                         index < function->ParameterTypes().size() &&
-                        function->ParameterTypes()[index].Kind() ==
-                            SemanticTypeKind::Reference) {
+                        function->ParameterTypes()[index].IsBorrowed()) {
                         (void)Borrow(std::move(value),
                                      !function->ParameterTypes()[index]
                                           .Target()
@@ -528,7 +569,18 @@ class BorrowChecker final {
             case Kind::MemberCallExpression: {
                 const auto& call =
                     static_cast<const core::MemberCallExpression&>(expression);
-                (void)Evaluate(call.Receiver());
+                if (_model.TypeOf(call.Receiver()).IsSequence() &&
+                    (call.Member() == "front" || call.Member() == "back")) {
+                    CheckAccess(Place(expression), false, expression.Range());
+                    return {};
+                }
+                if (_model.TypeOf(call.Receiver()).Kind() ==
+                    SemanticTypeKind::Slice) {
+                    CheckAccess(Evaluate(call.Receiver()), false,
+                                call.Receiver().Range());
+                } else {
+                    (void)Evaluate(call.Receiver());
+                }
                 for (const auto& argument : call.Arguments())
                     (void)Evaluate(*argument);
                 return {};
@@ -536,8 +588,7 @@ class BorrowChecker final {
             case Kind::IndexExpression: {
                 const auto& index =
                     static_cast<const core::IndexExpression&>(expression);
-                if (_model.TypeOf(index.Receiver()).Kind() ==
-                    SemanticTypeKind::Array) {
+                if (_model.TypeOf(index.Receiver()).IsSequence()) {
                     CheckAccess(Place(expression), false, expression.Range());
                 } else {
                     (void)Evaluate(index.Receiver());

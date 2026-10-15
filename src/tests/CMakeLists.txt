@@ -150,3 +150,17 @@ add_test(
         -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_unsafe_pointers.cmake
 )
+
+add_test(
+    NAME NativeSemanticTests.CheckedSlices
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/checked_slice_api.fl
+        -DFLECHA_HARNESS=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/checked_slice_harness.cpp
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/checked_slices_test
+        -DFLECHA_RUNTIME=$<TARGET_FILE:runtime>
+        -DFLECHA_LINKER=${CMAKE_CXX_COMPILER}
+        -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
+        "-DFLECHA_TRAP_MODES=r;w;b;o;e;n;f;k;u;m"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_fixed_arrays.cmake
+)

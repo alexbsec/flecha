@@ -29,7 +29,10 @@ if(NOT actualOutput STREQUAL "")
 endif()
 
 # An invalid access must trap, including unsafe accesses and address creation.
-foreach(mode r w b u m n s)
+if(NOT DEFINED FLECHA_TRAP_MODES)
+    set(FLECHA_TRAP_MODES r w b u m n s)
+endif()
+foreach(mode IN LISTS FLECHA_TRAP_MODES)
     execute_process(COMMAND "${FLECHA_OUTPUT}" "${mode}"
         RESULT_VARIABLE trapResult OUTPUT_VARIABLE trapOutput ERROR_VARIABLE trapError TIMEOUT 10)
     if(NOT trapResult MATCHES "Illegal instruction|Trace/breakpoint trap")

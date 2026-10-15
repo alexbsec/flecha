@@ -1,0 +1,40 @@
+// Build: build/flecha build examples/checked_slices.fl -o build/checked_slices
+void increment([]i32 values) {
+    loop usize i = 0; i < values.len(); i++ {
+        values[i]++;
+    }
+}
+
+i32 sum([]const i32 values) {
+    i32 total = 0;
+    for (_, value) := range values {
+        total = total + value;
+    }
+    return total;
+}
+
+i32 main() {
+    [5]i32 values = [10, 20, 30, 40, 50];
+    middle := values[1:4]; // Borrows elements 1, 2, and 3; no allocation.
+    increment(middle);   // Reborrows for the call; middle remains usable.
+    middle.front() = 22;
+    last := &middle.back();
+    *last = 42;
+
+    []const i32 readonly = middle[:];
+    copy := readonly; // Read-only handles can be copied.
+    if sum(copy) != 95 { return 1; }
+    for (index, value) := range readonly {
+        stdoutln(index);
+        stdoutln(value);
+    }
+    // All shared uses ended; mutation through middle is available again.
+    moved := middle; // Mutable handles move; middle is no longer usable.
+    moved[1]++;
+    empty := moved[3:3];
+    if empty.len() != 0 { return 2; }
+
+    // The last slice use ended; direct array access is available again.
+    if values[1] != 22 or values[2] != 32 or values[3] != 42 { return 3; }
+    return 0;
+}

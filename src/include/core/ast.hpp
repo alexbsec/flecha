@@ -41,6 +41,7 @@ enum class AstNodeKind {
     CallExpression,
     MemberCallExpression,
     IndexExpression,
+    SliceExpression,
     CastExpression,
 };
 
@@ -96,7 +97,7 @@ enum class PrimitiveType {
     StringView,
 };
 
-enum class TypeKind { Primitive, Pointer, Reference, Array };
+enum class TypeKind { Primitive, Pointer, Reference, Array, Slice };
 
 class TypeNode final : public AstNode {
    public:
@@ -442,16 +443,19 @@ class VariableDeclarationStatement final : public Statement {
                                  std::unique_ptr<TypeNode> type,
                                  std::string name,
                                  std::unique_ptr<Expression> initializer,
-                                 source::SourceRange nameRange = {})
+                                 source::SourceRange nameRange = {},
+                                 bool isRangeSource = false)
         : Statement(range),
           _type(std::move(type)),
           _name(std::move(name)),
           _initializer(std::move(initializer)),
-          _nameRange(nameRange.Empty() ? range : nameRange) {}
+          _nameRange(nameRange.Empty() ? range : nameRange),
+          _isRangeSource(isRangeSource) {}
 
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::VariableDeclarationStatement;
     }
+    [[nodiscard]] bool IsRangeSource() const { return _isRangeSource; }
     [[nodiscard]] const TypeNode* ExplicitType() const { return _type.get(); }
     [[nodiscard]] bool HasExplicitType() const { return _type != nullptr; }
     [[nodiscard]] const std::string& Name() const { return _name; }
@@ -467,6 +471,7 @@ class VariableDeclarationStatement final : public Statement {
     std::string _name;
     std::unique_ptr<Expression> _initializer;
     source::SourceRange _nameRange;
+    bool _isRangeSource;
 };
 
 class ExpressionStatement final : public Statement {
@@ -724,6 +729,29 @@ class MemberCallExpression final : public Expression {
     std::string _member;
     source::SourceRange _memberRange;
     std::vector<std::unique_ptr<Expression>> _arguments;
+};
+
+class SliceExpression final : public Expression {
+   public:
+    SliceExpression(source::SourceRange range,
+                    std::unique_ptr<Expression> receiver,
+                    std::unique_ptr<Expression> start,
+                    std::unique_ptr<Expression> end)
+        : Expression(range),
+          _receiver(std::move(receiver)),
+          _start(std::move(start)),
+          _end(std::move(end)) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::SliceExpression;
+    }
+    [[nodiscard]] const Expression& Receiver() const { return *_receiver; }
+    [[nodiscard]] const Expression* Start() const { return _start.get(); }
+    [[nodiscard]] const Expression* End() const { return _end.get(); }
+
+   private:
+    std::unique_ptr<Expression> _receiver;
+    std::unique_ptr<Expression> _start;
+    std::unique_ptr<Expression> _end;
 };
 
 class IndexExpression final : public Expression {

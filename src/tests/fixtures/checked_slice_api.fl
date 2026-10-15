@@ -1,0 +1,106 @@
+void slice_bump([]i32 values) {
+    loop usize i = 0; i < values.len(); i++ { values[i]++; }
+    values.front() = 40;
+    values.back()++;
+}
+i32 slice_sum([]const i32 values) {
+    i32 total = 0;
+    for (index, value) := range values {
+        if index == 0 { proceed; }
+        total = total + value;
+    }
+    return total;
+}
+usize slice_mark(&usize trace, usize digit, usize result) {
+    *trace = *trace * 10 + digit;
+    return result;
+}
+i32 slice_rhs() { stdoutln("RHS should not run"); return 1; }
+
+i32 slice_test() {
+    a := [1, 2, 3, 4];
+    s := a[1:3];
+    slice_bump(s);
+    if s.front() != 40 or slice_sum(s) != 5 { return 1; }
+    child := s[:1]; child[0]++;
+    r := &s.back(); *r = 42;
+    moved := s;
+    if moved.len() != 2 { return 2; }
+    []const i32 shared = moved[:];
+    copied := shared;
+    if copied.front() != 41 or shared.back() != 42 { return 3; }
+    if a[0] != 1 or a[1] != 41 or a[2] != 42 or a[3] != 4 { return 4; }
+    const []i32 fixed = a[:]; fixed.front()++;
+    [0]i32 empty = [];
+    z := empty[:];
+    if z.len() != 0 { return 5; }
+    z2 := a[4:4]; if z2.len() != 0 { return 6; }
+    matrix := [[1, 2], [3, 4]];
+    rows := matrix[:]; row := rows[1][:]; row[0] = 10;
+    if rows.back()[0] != 10 { return 7; }
+    array_ref := &a;
+    through_ref := (*array_ref)[:]; through_ref.back() = 20;
+    if a[3] != 20 { return 8; }
+    b := [3, 4, 5, 6];
+    current := a[:]; other := b[:];
+    usize trace = 0;
+    section := (current = other)[slice_mark(&trace, 1, 1):slice_mark(&trace, 2, 3)];
+    if trace != 12 or section.front() != 4 or section.back() != 5 { return 9; }
+    section[slice_mark(&trace, 3, 0)]++;
+    if trace != 123 or section.front() != 5 { return 10; }
+    const [2]i32 frozen = [10, 20];
+    readonly := frozen[:]; if readonly.back() != 20 { return 11; }
+    p := 7;
+    unsafe {
+        pointers := [&raw p]; slots := pointers[:]; *slots.front() = 9;
+    }
+    if p != 9 { return 12; }
+    // front/back also work as checked places on fixed arrays.
+    a.front() = 8; a.back()++;
+    if a[0] != 8 or a[3] != 21 { return 13; }
+    return 42;
+}
+
+i32 slice_range_test() {
+    values := [10, 20, 30];
+    view := values[:];
+    usize indices = 0;
+    for index := range view { indices = indices + index; }
+    if indices != 3 { return 1; }
+    i32 total = 0;
+    for (usize index, i32 value) = range view {
+        total = total + value;
+        value = 1000;
+        if index == 1 { break; }
+    }
+    if total != 30 or view[0] != 10 { return 2; }
+    view[0]++;
+    for (_, value) := range view[0:0] { return 3; }
+    if view[0] != 11 { return 4; }
+    return 42;
+}
+
+i32 slice_read(usize index) {
+    a := [1, 2, 3]; s := a[1:]; return s[index];
+}
+void slice_write(usize index) {
+    a := [1, 2, 3]; s := a[1:]; s[index] = slice_rhs();
+}
+void slice_borrow(usize index) {
+    a := [1, 2, 3]; s := a[1:]; r := &s[index]; *r = 1;
+}
+usize slice_bounds(usize start, usize end) {
+    a := [1, 2, 3]; s := a[start:end]; return s.len();
+}
+usize slice_nested(usize end) {
+    a := [1, 2, 3]; s := a[1:]; child := s[:end]; return child.len();
+}
+i32 slice_front(usize length) {
+    a := [1, 2, 3]; s := a[:length]; return s.front();
+}
+void slice_back(usize length) {
+    a := [1, 2, 3]; s := a[:length]; s.back() = slice_rhs();
+}
+void slice_increment(usize index) {
+    a := [1, 2, 3]; s := a[:]; unsafe { s[index]++; }
+}

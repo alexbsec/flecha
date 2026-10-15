@@ -37,9 +37,11 @@ bindings does not affect the array or the iteration cursor. Changes to the
 original array do not change the snapshot. Nested array elements also copy by
 value; pointer elements copy addresses without owning the pointees.
 
-Only fixed-array values are supported for now. Use `range *arrayReference` to
-copy through a reference. Strings, slices, numeric ranges, and implicit iteration
-through a pointer/reference are not introduced here. Existing initialization and
+Fixed-array and slice values are supported. Use `range *arrayReference` to
+copy through a reference. Slice ranges take a shared reborrow for the duration
+of the loop, without copying the backing elements; see [checked_slices.md](checked_slices.md).
+Slice indices must use `usize`, including explicit declarations. Strings, numeric
+ranges, and implicit iteration through a pointer/reference are not introduced here. Existing initialization and
 borrow checks apply to the source read. References to an iteration binding cannot
 escape that iteration's scope.
 

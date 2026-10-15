@@ -124,3 +124,11 @@ initialization, and borrow analysis. The CFG routes `proceed` through counted-lo
 updates, and header variables end at the loop boundary. Integer postfix increment
 requires initialized writable storage and participates in borrow checking as a
 write. See [iteration.md](iteration.md) for syntax and exact evaluation rules.
+
+### Checked slices
+
+`[]T` and `[]const T` borrow array storage or another slice. The checker tracks
+slice handles using the same origins, moves, reborrow parents, last uses, and
+scope constraints as references. Slice range sources receive shared reborrows.
+`FLECHA-S0037` reports statically invalid slice bounds; dynamic bounds trap in
+native code. See [checked_slices.md](checked_slices.md).

@@ -56,6 +56,7 @@ enum class DiagnosticCode {
     InvalidArrayElement,
     ArrayInitializerCount,
     ArrayIndexOutOfBounds,
+    SliceBounds,
     NativeTargetUnavailable,
     ObjectEmissionFailed,
     RuntimeUnavailable,

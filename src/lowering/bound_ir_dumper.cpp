@@ -181,6 +181,24 @@ class Dumper final {
 
     void WriteExpression(const BoundExpression& expression) {
         switch (expression.Kind()) {
+            case BoundNodeKind::SliceExpression: {
+                const auto& slice =
+                    static_cast<const BoundSliceExpression&>(expression);
+                _stream << "(slice " << slice.Type().Name() << " ";
+                WriteExpression(slice.Receiver());
+                _stream << " ";
+                if (slice.Start() != nullptr)
+                    WriteExpression(*slice.Start());
+                else
+                    _stream << "0";
+                _stream << ":";
+                if (slice.End() != nullptr)
+                    WriteExpression(*slice.End());
+                else
+                    _stream << "len";
+                _stream << ")";
+                break;
+            }
             case BoundNodeKind::ArrayExpression: {
                 const auto& array =
                     static_cast<const BoundArrayExpression&>(expression);
@@ -199,7 +217,10 @@ class Dumper final {
                 _stream << "(checked-index ";
                 WriteExpression(index.Receiver());
                 _stream << " ";
-                WriteExpression(index.Index());
+                if (index.HasIndex())
+                    WriteExpression(index.Index());
+                else
+                    _stream << (index.FromBack() ? "back" : "front");
                 _stream << ")";
                 break;
             }

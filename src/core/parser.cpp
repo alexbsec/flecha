@@ -173,6 +173,14 @@ std::unique_ptr<TypeNode> Parser::ParseType() {
                                           alias ? token.range : qualifierRange);
     }
     if (Match(TokenType::LBracket)) {
+        if (Match(TokenType::RBracket)) {
+            auto target = ParseType();
+            if (target == nullptr) return nullptr;
+            const source::SourceRange range{start, target->Range().end};
+            return std::make_unique<TypeNode>(range, TypeKind::Slice,
+                                              std::move(target), explicitConst,
+                                              qualifierRange);
+        }
         const std::optional<std::uint64_t> length = ParseArrayLength();
         if (!length.has_value() ||
             Consume(TokenType::RBracket, "']' after array length") == nullptr)
@@ -637,7 +645,7 @@ std::unique_ptr<RangeStatement> Parser::ParseRangeStatement() {
     };
     std::vector<std::unique_ptr<Statement>> outer;
     auto snapshot = std::make_unique<VariableDeclarationStatement>(
-        sourceRange, nullptr, sourceName, std::move(source), sourceRange);
+        sourceRange, nullptr, sourceName, std::move(source), sourceRange, true);
     const VariableDeclarationStatement* sourceDeclaration = snapshot.get();
     outer.push_back(std::move(snapshot));
     outer.push_back(std::make_unique<VariableDeclarationStatement>(
@@ -767,7 +775,8 @@ std::unique_ptr<Expression> Parser::ParseAssignmentExpression() {
         static_cast<const UnaryExpression&>(*place).OperatorType() ==
             TokenType::Mul;
     if (place->Kind() != AstNodeKind::NameExpression &&
-        place->Kind() != AstNodeKind::IndexExpression && !dereference) {
+        place->Kind() != AstNodeKind::IndexExpression &&
+        place->Kind() != AstNodeKind::MemberCallExpression && !dereference) {
         _diagnostics.Report(
             diagnostics::DiagnosticCode::InvalidAssignmentTarget, targetRange,
             "expression is not a valid assignment target");
@@ -941,8 +950,26 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
         }
 
         if (Match(TokenType::LBracket)) {
-            std::unique_ptr<Expression> index = ParseExpression();
-            if (index == nullptr) return expression;
+            std::unique_ptr<Expression> index;
+            if (!Check(TokenType::Colon)) {
+                index = ParseExpression();
+                if (index == nullptr) return expression;
+            }
+            if (Match(TokenType::Colon)) {
+                std::unique_ptr<Expression> upper;
+                if (!Check(TokenType::RBracket)) {
+                    upper = ParseExpression();
+                    if (upper == nullptr) return expression;
+                }
+                const Token* close =
+                    Consume(TokenType::RBracket, "']' after slice bounds");
+                const source::SourceLocation end =
+                    close == nullptr ? Current().range.start : close->range.end;
+                expression = std::make_unique<SliceExpression>(
+                    source::SourceRange{expression->Range().start, end},
+                    std::move(expression), std::move(index), std::move(upper));
+                continue;
+            }
             const Token* close =
                 Consume(TokenType::RBracket, "']' after index");
             const source::SourceLocation end =

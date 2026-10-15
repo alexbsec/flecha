@@ -497,25 +497,24 @@ each body execution, including `proceed`; `break` skips the update. Postfix `++`
 works on writable integer locations, evaluates the location once, and yields its
 previous value. See [iteration](docs/iteration.md).
 
-### 13.3 Slices (planned)
+### 13.3 Checked slices
 
-Slices contain a pointer and a length:
-
-```flecha
-[]u8
-[]const u8
-```
-
-Example:
+Slices are implemented as borrowed addresses and `usize` lengths:
 
 ```flecha
-void clear([]u8 buffer) {
-    // Implementation omitted.
-    return;
-}
+[]i32 mutable_view = values[1:3];
+[]const i32 readonly_view = mutable_view[:];
+const []i32 fixed_handle = values[:];
 ```
 
-Pointer arithmetic, provenance, aliasing, slice bounds, mutability, and lifetime rules require a dedicated later specification. Safe slice access should be bounds-checked unless the programmer explicitly enters an unsafe operation.
+`start:end` is half-open; omitted bounds default to zero and receiver length.
+Slices neither allocate nor own their elements. Bounds are checked even in unsafe
+blocks. `len()`, indexing, `front()`, and `back()` are supported; endpoint methods
+are writable locations when elements are mutable. Mutable handles move, shared
+handles copy, and calls reborrow. Slice ranges take a shared reborrow rather than
+copying the backing elements. Slice returns and nested borrowed storage remain
+unsupported pending lifetime contracts. See [checked slices](docs/checked_slices.md)
+for exact rules, limitations, and diagnostics.
 
 ## 14. Memory and runtime model
 

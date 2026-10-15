@@ -219,6 +219,15 @@ class GraphBuilder final {
 
     NodeId BuildExpression(const core::Expression& expression, NodeId next) {
         switch (expression.Kind()) {
+            case core::AstNodeKind::SliceExpression: {
+                const auto& slice =
+                    static_cast<const core::SliceExpression&>(expression);
+                if (slice.End() != nullptr)
+                    next = BuildExpression(*slice.End(), next);
+                if (slice.Start() != nullptr)
+                    next = BuildExpression(*slice.Start(), next);
+                return BuildExpression(slice.Receiver(), next);
+            }
             case core::AstNodeKind::ArrayExpression: {
                 const auto& array =
                     static_cast<const core::ArrayExpression&>(expression);

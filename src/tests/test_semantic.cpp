@@ -1893,3 +1893,134 @@ TEST(SemanticAnalyzerTests, RangeCopiesRespectLoansAndIterationLifetimes) {
             "void f() { x := 1; r := &x; loop i := 0; i < 2; x++ { *r = i; } }")
             .diagnostics.HasErrors());
 }
+
+TEST(SemanticSliceTests, AcceptsCheckedSlicesCallsConstAndElementReferences) {
+    const Analysis result = Analyze(R"(
+        void bump([]i32 s) { s.front()++; s.back() = 4; }
+        i32 read([]const i32 s) { return s.front(); }
+        void f() {
+            a := [1, 2, 3];
+            s := a[:];
+            bump(s); read(s);
+            child := s[1:]; child[0] = 10;
+            r := &s.back(); *r = 5;
+            moved := s; moved[0] = 6;
+            []const i32 shared = moved[:];
+            copy := shared; read(copy); read(shared);
+            const []i32 fixed = a[:]; fixed.front() = 1; bump(fixed);
+            const [2]i32 frozen = [1, 2];
+            inferred := frozen[:]; read(inferred);
+            [0]i32 empty = []; empty_slice := empty[:]; empty_slice.len();
+            matrix := [[1, 2], [3, 4]]; rows := matrix[:]; rows[0][1] = 7;
+        }
+    )");
+    EXPECT_FALSE(result.diagnostics.HasErrors());
+}
+
+TEST(SemanticSliceTests, RejectsBadBoundsSourcesAndUnsupportedStorage) {
+    for (const std::string& source :
+         {"void f() { a := [1, 2]; s := a[2:1]; }",
+          "void f() { a := [1, 2]; s := a[:3]; }",
+          "void f() { a := [1, 2]; s := a[3:]; }",
+          "void f() { a := [1, 2]; s := a[-1:]; }",
+          "void f() { a := [1, 2]; u32 i = 0; s := a[i:]; }",
+          "void f() { s := [1, 2][:]; }",
+          "void f() { a := 2; s := a[:]; }",
+          "void f() { s := \"abc\"[:]; }",
+          "void f() { []u8 s; }",
+          "void f() { []u8 s = none; }",
+          "void f() { []u8 s = null; }",
+          "void f([]string s) {}",
+          "void f([]&u8 s) {}",
+          "void f([][]u8 s) {}",
+          "void f([2][]u8 a) {}",
+          "void f(&[]u8 s) {}",
+          "void f(*[]u8 s) {}",
+          "[]u8 f() { [1]u8 a = [1]; return a[:]; }",
+          "unsafe void f(*[2]u8 p) { s := (*p)[:]; }",
+          "void f() { a := [1]; s := a[:]; unsafe { p := &raw s; } }",
+          "void f() { a := [1]; s := a[:]; unsafe { p := &raw s.front(); } }",
+          "void f() { [2]u8 a; s := a[:]; }",
+          "void f() { a := [1]; s := a[:]; s.len() = 1; }",
+          "void f() { a := [1]; s := a[:]; s.front(0); }",
+          "void f() { a := [1]; s := a[:]; s == s; }",
+          "void f() { a := [1]; s := a[:] as []i32; }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+}
+
+TEST(SemanticSliceTests, EnforcesReadOnlyElementsAndFixedHandles) {
+    for (const std::string& source :
+         {"void f() { const [1]i32 a = [1]; []i32 s = a[:]; }",
+          "void f() { a := [1]; []const i32 s = a[:]; s[0] = 2; }",
+          "void f() { a := [1]; []const i32 s = a[:]; s.front()++; }",
+          "void f() { a := [1]; []const i32 s = a[:]; []i32 mutable = s[:]; }",
+          "void f() { a := [1]; const []i32 s = a[:]; s = a[:]; }",
+          "void f() { a := [1]; const []i32 s = a[:]; moved := s; }",
+          "void f() { a := [[1]]; []const [1]i32 s = a[:]; s[0][0]++; }",
+          "void bump([]i32 s) {} void f() { a := [1]; []const i32 s = a[:]; "
+          "bump(s); }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+}
+
+TEST(SemanticSliceTests, TracksMovesLoansAndEscapesAcrossControlFlow) {
+    for (const std::string& source :
+         {"void f() { a := [1, 2]; s := a[:]; a[0] = 3; s[0] = 2; }",
+          "void f() { a := [1, 2]; s := a[:]; a.len(); s.len(); }",
+          "void f() { a := [1, 2]; s := a[:]; moved := s; s.len(); }",
+          "void f(bool b) { a := [1, 2]; s := a[:]; if b { moved := s; } "
+          "s.len(); }",
+          "void f() { a := [1, 2]; s := a[:]; child := s[:1]; s[1] = 3; "
+          "child[0] = 2; }",
+          "void f() { a := [1, 2]; s := a[:]; child := s[:1]; moved := s; "
+          "child.len(); }",
+          "void f() { a := [1, 2]; s := a[:]; { inner := [3, 4]; s = inner[:]; "
+          "} s.len(); }",
+          "void f() { a := [1, 2]; s := a[:]; { parent := s[:]; s = parent[:]; "
+          "} }",
+          "void f() { a := [1, 2]; s := a[:]; r := &s[0]; s[1] = 2; *r = 3; }",
+          "void f() { a := [1, 2]; s := a[:]; loop i := 0; i < 2; i++ { moved "
+          ":= s; moved.len(); } }",
+          "void use([]i32 x, []i32 y) {} void f() { a := [1, 2]; s := a[:]; "
+          "use(s, s); }",
+          "void use([]const i32 x, []i32 y) {} void f() { a := [1, 2]; s := "
+          "a[:]; use(s, s); }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+    EXPECT_FALSE(Analyze("void use([]const i32 x, []const i32 y) {} void f() { "
+                         "a := [1, 2]; s := a[:]; use(s, s); s[0]++; }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("void f() { a := [1, 2]; s := a[:]; child := s[:1]; "
+                         "child[0]++; s[1]++; a[0]++; }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticSliceTests, PinsParentsDuringBoundsAndPendingStores) {
+    for (const std::string& source :
+         {"void f() { a := [1, 2]; b := [3, 4]; s := a[:]; t := b[:]; child := "
+          "s[(s = t).len():]; }",
+          "void f() { a := [1, 2]; b := [3, 4]; s := a[:]; t := b[:]; s[(s = "
+          "t).len()] = 1; }",
+          "void f() { a := [1, 2]; b := [3, 4]; s := a[:]; t := b[:]; s[0] = "
+          "(s = t).front(); }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+}
+
+TEST(SemanticSliceTests,
+     RangesReborrowReadOnlyAndPreserveHandleAfterIteration) {
+    EXPECT_FALSE(Analyze("void f() { a := [1, 2]; s := a[:]; for (i, v) := "
+                         "range s { usize n = i; i32 x = v; } s[0]++; }")
+                     .diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze("void f() { a := [1, 2]; s := a[:]; for (i, v) := "
+                        "range s { s[i]++; } }")
+                    .diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze("void f() { a := [1, 2]; s := a[:]; for (u8 i, i32 v) "
+                        "= range s {} }")
+                    .diagnostics.HasErrors());
+}

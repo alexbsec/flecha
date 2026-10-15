@@ -1,10 +1,8 @@
 # Memory feature implementation order
 
-Status: const types, unsafe pointers, and checked references are merged.
-Fixed arrays are implemented on `codex/fixed-arrays`, prioritized ahead of
-`defer`. The same working branch now includes the requested array-range and
-counted-loop follow-up; see [iteration.md](iteration.md). Checked slices are the
-remaining half of the array/slice milestone.
+Status: const types, unsafe pointers, checked references, fixed arrays, and
+iteration are merged. Checked slices are implemented on `feat/checked-slices`;
+see [checked_slices.md](checked_slices.md). Allocation and ownership work remains.
 
 Based on the agreed rules in [memory_model.md](memory_model.md), with the
 const-type milestone merged into `master` at `c9e6ee4`. Each milestone should be a separate feature
@@ -251,11 +249,12 @@ pointer slots and supported reference-to-pointer slots; const violations fail.
 
 ## 9. Inline arrays and checked slices
 
-Fixed-array behavior is implemented and documented in [fixed arrays](fixed_arrays.md).
-This stage was moved ahead of defer at the user's request. Slices/subslicing
-and borrowed range checks remain planned; fixed-array length syntax is `[N]T`.
+Fixed-array behavior is documented in [fixed arrays](fixed_arrays.md), and
+checked slice behavior in [checked slices](checked_slices.md). Both are
+implemented. This stage was moved ahead of defer at the user's request.
+Fixed-array length syntax is `[N]T`; slices use `[]T` and `[]const T`.
 
-Proposed branch: `feat/arrays-slices`. Depends on: 1, 2, and 3.
+Slice implementation branch: `feat/checked-slices`. Depends on: 1, 2, and 3.
 
 - Finalize fixed-array syntax and whole-value initialization. Implement contiguous
   inline layout without implicit heap allocation.
@@ -305,5 +304,6 @@ syntax, including the now-rejected inline unsafe-call form. Treat it as design
 input, not an executable acceptance fixture; create focused fixtures for each
 milestone and reconcile that example separately.
 
-The next array milestone is checked slices. The roadmap itself does not
-authorize committing, pushing, opening a PR, or merging.
+Growable owning arrays and explicit iterator handles remain future container
+work. The roadmap itself does not authorize committing, pushing, opening a PR,
+or merging.

@@ -59,6 +59,9 @@ class LlvmCodeGenerator final {
     bool EmitPosition(const lowering::BoundPositionStatement& statement);
     [[nodiscard]] llvm::AllocaInst* CreateTemporaryAlloca(
         llvm::Type* type, std::string_view name);
+    void EmitBoundsCheck(llvm::Value* valid);
+    [[nodiscard]] llvm::Value* EmitSlice(
+        const lowering::BoundSliceExpression& expression);
     [[nodiscard]] llvm::Value* EmitArray(
         const lowering::BoundArrayExpression& expression);
     [[nodiscard]] llvm::Value* EmitArrayStorage(

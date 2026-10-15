@@ -555,3 +555,19 @@ TEST(CodeGeneratorTests, EmitsLoopUpdateTargetsAndSingleEvaluationIncrements) {
               std::string::npos);
     EXPECT_NE(ir.find("increment.old = load i32"), std::string::npos);
 }
+
+TEST(CodeGeneratorTests, EmitsSliceDescriptorsChecksAndReborrowedCalls) {
+    GeneratedSource result = Generate(
+        "usize size([]const u8 s) { return s.len(); }"
+        "void change([]u8 s) { s.front()++; s.back() = 5; }"
+        "usize f(usize start, usize end) { [4]u8 a = [1, 2, 3, 4]; "
+        "s := a[start:end]; change(s); return size(s); }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("{ ptr, i64 }"), std::string::npos);
+    EXPECT_NE(ir.find("icmp ule i64"), std::string::npos);
+    EXPECT_NE(ir.find("icmp ult i64"), std::string::npos);
+    EXPECT_NE(ir.find("call void @llvm.trap()"), std::string::npos);
+}

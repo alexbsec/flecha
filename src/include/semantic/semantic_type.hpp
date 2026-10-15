@@ -30,6 +30,7 @@ enum class SemanticTypeKind {
     Pointer,
     Reference,
     Array,
+    Slice,
     Null,
     None,
     Function,
@@ -55,11 +56,20 @@ class SemanticType final {
         return _kind == SemanticTypeKind::Error;
     }
 
+    [[nodiscard]] bool IsBorrowed() const {
+        return _kind == SemanticTypeKind::Reference ||
+               _kind == SemanticTypeKind::Slice;
+    }
+    [[nodiscard]] bool IsSequence() const {
+        return _kind == SemanticTypeKind::Array ||
+               _kind == SemanticTypeKind::Slice;
+    }
     [[nodiscard]] bool IsConst() const { return _isConst; }
     [[nodiscard]] bool IsCompound() const {
         return _kind == SemanticTypeKind::Pointer ||
                _kind == SemanticTypeKind::Reference ||
-               _kind == SemanticTypeKind::Array;
+               _kind == SemanticTypeKind::Array ||
+               _kind == SemanticTypeKind::Slice;
     }
     [[nodiscard]] std::uint64_t Length() const { return _length; }
     [[nodiscard]] const SemanticType* Target() const { return _target.get(); }
