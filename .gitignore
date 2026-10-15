@@ -3,3 +3,4 @@ language/
 build/
 .cache/
 build-tests/
+build-sanitizers/

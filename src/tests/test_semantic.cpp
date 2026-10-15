@@ -670,3 +670,234 @@ TEST(SemanticIntegrationTests, RecoversMultipleStableExactDiagnostics) {
     EXPECT_EQ(unknown->range.start.offset, source.find("missing"));
     EXPECT_EQ(unknown->range.Length(), std::string("missing").size());
 }
+
+TEST(SemanticControlFlowAssignmentTests, IntersectsOnlyFallthroughBranches) {
+    const std::vector<std::string> programs = {
+        "i32 main(bool c) { i32 x; if c { return 0; } else { x = 42; } return "
+        "x; }",
+        "i32 main(bool c) { i32 x; if c { x = 42; } else { return 0; } return "
+        "x; }",
+        "i32 main(bool a, bool b) { i32 x; if a { return 0; } "
+        "else if b { x = 42; } else { x = 40; } return x; }",
+        "i32 main(bool a, bool b) { i32 x; if a { if b { x = 42; } "
+        "else { return 0; } } else { x = 40; } return x; }",
+        "i32 main(bool c) { string x; if c { x = \"yes\"; } "
+        "else { x = \"no\"; } stdoutln(x); return 42; }",
+        "i32 main(bool c) { i32 x; if c { return 1; } else { return 2; } "
+        "return x; }",
+    };
+    for (const std::string& program : programs) {
+        SCOPED_TRACE(program);
+        EXPECT_FALSE(Analyze(program).diagnostics.HasErrors());
+    }
+}
+
+TEST(SemanticControlFlowAssignmentTests, RejectsIncompleteBranchJoins) {
+    const std::vector<std::string> programs = {
+        "i32 main(bool c) { i32 x; if c { x = 42; } else {} return x; }",
+        "i32 main(bool c) { i32 x; if c { x = 42; } return x; }",
+        "i32 main(bool a, bool b) { i32 x; if a { x = 42; } "
+        "else if b { return 0; } return x; }",
+        "i32 main(bool a, bool b) { i32 x; if a { if b { x = 42; } } "
+        "else { x = 40; } return x; }",
+        "i32 main(bool c) { string x; if c { x = \"yes\"; } stdoutln(x); "
+        "return 0; }",
+        "i32 main(bool c) { i32 x; if c {} also c { x = 42; } return x; }",
+    };
+    for (const std::string& program : programs) {
+        SCOPED_TRACE(program);
+        Analysis analysis = Analyze(program);
+        ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
+        EXPECT_EQ(analysis.diagnostics.Diagnostics()[0].code,
+                  DiagnosticCode::UninitializedVariable);
+    }
+}
+
+TEST(SemanticControlFlowAssignmentTests, ModelsBreakProceedAndAlsoEdges) {
+    const std::vector<std::string> programs = {
+        "void main(bool c) { while c { i32 x; if c { break; } "
+        "else { x = 42; } stdoutln(x); } }",
+        "void main(bool c) { while c { i32 x; if c { proceed; } "
+        "else { x = 42; } stdoutln(x); } }",
+        "void main(bool c) { i32 x; while c { if c { proceed; } "
+        "else { x = 42; } } also c { stdoutln(x); } }",
+        "void main(bool c) { i32 x; while c { if c { break; } "
+        "else { x = 42; } } also c { stdoutln(x); break; } }",
+        "void main(bool c) { i32 x; while c { x = 42; } "
+        "also c { stdoutln(x); proceed; } }",
+        "void main(bool c) { while c { i32 x; while c { break; } "
+        "x = 42; stdoutln(x); } }",
+        "void main(bool c) { while c { i32 x; proceed; stdoutln(x); } }",
+    };
+    for (const std::string& program : programs) {
+        SCOPED_TRACE(program);
+        EXPECT_FALSE(Analyze(program).diagnostics.HasErrors());
+    }
+}
+
+TEST(SemanticControlFlowAssignmentTests,
+     RejectsLoopOnlyAndUnreachableAssignments) {
+    const std::vector<std::string> programs = {
+        "i32 main(bool c) { i32 x; while c { x = 42; break; } return x; }",
+        "i32 main(bool c) { i32 x; while c { x = 42; proceed; } return x; }",
+        "i32 main(bool c) { i32 x; while c { proceed; x = 42; } return x; }",
+        "void main(bool c) { i32 x; while c { stdoutln(x); x = 42; proceed; } "
+        "}",
+        "void main(bool c) { while c { i32 x; stdoutln(x); x = 42; } }",
+        "void main(bool c) { i32 x; while c { while c { x = 42; break; } "
+        "stdoutln(x); } }",
+        "void main(bool c) { i32 x; while c {} also c { x = 42; } stdoutln(x); "
+        "}",
+        "void main(bool c) { i32 x; while c {} also c { stdoutln(x); } }",
+    };
+    for (const std::string& program : programs) {
+        SCOPED_TRACE(program);
+        Analysis analysis = Analyze(program);
+        ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
+        EXPECT_EQ(analysis.diagnostics.Diagnostics()[0].code,
+                  DiagnosticCode::UninitializedVariable);
+    }
+}
+
+TEST(SemanticControlFlowAssignmentTests, FollowsForwardBackwardAndNestedJumps) {
+    const std::vector<std::string> programs = {
+        "void main(bool c) { i32 x; while c { x = 42; jumpto end; "
+        "#end stdoutln(x); break; } }",
+        "void main(bool c) { i32 x; while c { jumpto init; "
+        "#read stdoutln(x); break; #init x = 42; jumpto read; } }",
+        "void main(bool c) { i32 x; while c { if c { x = 1; jumpto end; } "
+        "else { x = 2; jumpto end; } #end stdoutln(x); break; } }",
+        "void main(bool c) { i32 x; while c { if c { x = 1; jumpto end; } "
+        "x = 2; #end stdoutln(x); break; } }",
+        "void main(bool c) { i32 x; while c { jumpto inner; "
+        "#outer stdoutln(x); break; while c { #inner x = 42; jumpto outer; } } "
+        "}",
+        "void main(bool c) { while c { i32 x; if c { jumpto end; } "
+        "else { x = 42; } stdoutln(x); #end break; } }",
+        "void main(bool c) { while c { jumpto position; string x; "
+        "#position x = \"ready\"; stdoutln(x); break; } }",
+    };
+    for (const std::string& program : programs) {
+        SCOPED_TRACE(program);
+        EXPECT_FALSE(Analyze(program).diagnostics.HasErrors());
+    }
+}
+
+TEST(SemanticControlFlowAssignmentTests,
+     RejectsBypassedDeclarationsAndAssignments) {
+    const std::vector<std::string> programs = {
+        "void main(bool c) { i32 x; while c { jumpto end; x = 42; "
+        "#end stdoutln(x); break; } }",
+        "void main(bool c) { while c { jumpto end; x := 42; "
+        "#end stdoutln(x); break; } }",
+        "void main(bool c) { while c { jumpto end; string x = \"ready\"; "
+        "#end stdoutln(x); break; } }",
+        "void main(bool c) { while c { jumpto end; stringv x = \"ready\"; "
+        "#end stdoutln(x); break; } }",
+        "void main(bool c) { i32 x; while c { if c { jumpto end; } "
+        "x = 42; #end stdoutln(x); break; } }",
+        "void main(bool c) { i32 x; while c { if c { x = 42; jumpto end; } "
+        "#end stdoutln(x); break; } }",
+        "void main(bool c) { i32 x; while c { #read stdoutln(x); "
+        "x = 42; jumpto read; } }",
+        "void main(bool c) { i32 x; while c { jumpto inner; "
+        "#outer stdoutln(x); break; while c { #inner jumpto outer; x = 42; } } "
+        "}",
+        "void main(bool c) { while c { jumpto inner; while c { x := 42; "
+        "#inner stdoutln(x); break; } } }",
+        "void main(bool c) { while c { #again i32 x; if c { x = 42; jumpto "
+        "again; } "
+        "stdoutln(x); break; } }",
+    };
+    for (const std::string& program : programs) {
+        SCOPED_TRACE(program);
+        Analysis analysis = Analyze(program);
+        ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
+        EXPECT_EQ(analysis.diagnostics.Diagnostics()[0].code,
+                  DiagnosticCode::UninitializedVariable);
+    }
+}
+
+TEST(SemanticControlFlowAssignmentTests, DropsLocalsWhenJumpsLeaveTheirScope) {
+    Analysis analysis = Analyze(
+        "void main(bool c) { while c { if c { string x = \"owned\"; "
+        "jumpto outside; #inside stdoutln(x); break; } "
+        "#outside jumpto inside; } }");
+    ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
+    EXPECT_EQ(analysis.diagnostics.Diagnostics()[0].code,
+              DiagnosticCode::UninitializedVariable);
+}
+
+TEST(SemanticControlFlowAssignmentTests, DistinguishesShadowedSymbols) {
+    Analysis invalid = Analyze(
+        "i32 main(bool c) { i32 x; if c { x := 42; stdoutln(x); } "
+        "else { x = 40; } return x; }");
+    ASSERT_EQ(invalid.diagnostics.Diagnostics().size(), 1);
+    EXPECT_EQ(invalid.diagnostics.Diagnostics()[0].code,
+              DiagnosticCode::UninitializedVariable);
+    Analysis valid = Analyze(
+        "i32 main(bool c) { x := 42; if c { i32 x; x = 1; stdoutln(x); } "
+        "return x; }");
+    EXPECT_FALSE(valid.diagnostics.HasErrors());
+    Analysis branchLocal =
+        Analyze("i32 main(bool c) { if c { x := 42; } return x; }");
+    EXPECT_NE(FindDiagnostic(branchLocal, DiagnosticCode::UnknownName),
+              nullptr);
+}
+
+TEST(SemanticControlFlowAssignmentTests,
+     HonorsExpressionEvaluationAndShortCircuit) {
+    const std::vector<std::string> valid = {
+        "i32 main(bool c) { i32 x; if (x = 42) == 42 { } return x; }",
+        "void main(bool c) { bool x; if c and (x = c) { stdoutln(x); } }",
+        "void main(bool c) { bool x; if c or (x = c) {} else { stdoutln(x); } "
+        "}",
+        "void main(bool c) { bool x; if !(c and (x = c)) {} else { "
+        "stdoutln(x); } }",
+        "i32 main(bool c) { i32 x; while (x = 42) == 0 {} return x; }",
+        "i32 main() { i32 x; return (x = 21) + x; }",
+    };
+    for (const std::string& program : valid) {
+        SCOPED_TRACE(program);
+        EXPECT_FALSE(Analyze(program).diagnostics.HasErrors());
+    }
+    const std::vector<std::string> invalid = {
+        "bool main(bool c) { bool x; c and (x = true); return x; }",
+        "bool main(bool c) { bool x; c or (x = true); return x; }",
+        "void main(bool c) { bool x; if c and (x = c) {} else { stdoutln(x); } "
+        "}",
+        "void main(bool c) { bool x; if c or (x = c) { stdoutln(x); } }",
+        "i32 main() { i32 x; return x + (x = 21); }",
+        "i32 main() { i32 x; x = x + 1; return x; }",
+    };
+    for (const std::string& program : invalid) {
+        SCOPED_TRACE(program);
+        Analysis analysis = Analyze(program);
+        ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
+        EXPECT_EQ(analysis.diagnostics.Diagnostics()[0].code,
+                  DiagnosticCode::UninitializedVariable);
+    }
+}
+
+TEST(SemanticControlFlowAssignmentTests, ReportsExactReachableReadRangeOnce) {
+    const std::string source =
+        "void main(bool c) {\n"
+        "    i32 value;\n"
+        "    while c {\n"
+        "        jumpto read;\n"
+        "        value = 42;\n"
+        "        #read stdoutln(value);\n"
+        "        jumpto read;\n"
+        "    }\n"
+        "}";
+    Analysis analysis = Analyze(source);
+    ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
+    const Diagnostic& diagnostic = analysis.diagnostics.Diagnostics()[0];
+    EXPECT_EQ(DiagnosticCodeName(diagnostic.code), "FLECHA-S0021");
+    EXPECT_EQ(diagnostic.range.start.offset, source.find("value);"));
+    EXPECT_EQ(diagnostic.range.start.line, 6);
+    EXPECT_EQ(diagnostic.range.start.column, 24);
+    EXPECT_EQ(diagnostic.range.end.line, 6);
+    EXPECT_EQ(diagnostic.range.end.column, 29);
+    EXPECT_EQ(diagnostic.range.Length(), 5);
+}

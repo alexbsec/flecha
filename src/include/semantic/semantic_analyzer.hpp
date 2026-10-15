@@ -23,8 +23,7 @@ class SemanticAnalyzer final {
     void AnalyzeFunction(const core::FunctionDeclaration& function);
     void AnalyzeBlock(const core::BlockStatement& block, bool createScope);
     void AnalyzeStatement(const core::Statement& statement);
-    [[nodiscard]] std::unordered_set<const Symbol*> AnalyzeBranch(
-        const core::ConditionalBranch& branch);
+    void AnalyzeBranch(const core::ConditionalBranch& branch);
     void CollectPositions(const core::BlockStatement& block,
                           std::size_t loopDepth);
     SemanticType AnalyzeExpression(const core::Expression& expression);
@@ -53,9 +52,7 @@ class SemanticAnalyzer final {
     const FunctionSymbol* _currentFunction = nullptr;
     std::unordered_map<std::string, source::SourceRange> _positions;
     std::unordered_set<const Symbol*> _localStringBorrows;
-    std::unordered_set<const Symbol*> _initializedSymbols;
     std::size_t _loopDepth = 0;
-    bool _analyzingAssignmentTarget = false;
 };
 
 }  // namespace flecha::semantic

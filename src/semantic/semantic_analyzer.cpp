@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "core/token_type.hpp"
+#include "semantic/definite_assignment.hpp"
 
 namespace flecha::semantic {
 namespace {
@@ -13,13 +14,6 @@ namespace {
 std::string TypeMismatch(SemanticType expected, SemanticType actual) {
     return "expected '" + std::string(expected.Name()) + "', found '" +
            std::string(actual.Name()) + "'";
-}
-
-void IntersectInitialized(std::unordered_set<const Symbol*>& destination,
-                          const std::unordered_set<const Symbol*>& source) {
-    std::erase_if(destination, [&source](const Symbol* symbol) {
-        return !source.contains(symbol);
-    });
 }
 
 }  // namespace
@@ -117,7 +111,6 @@ void SemanticAnalyzer::AnalyzeFunction(
 
     _positions.clear();
     _localStringBorrows.clear();
-    _initializedSymbols.clear();
     _loopDepth = 0;
     CollectPositions(function.Body(), 0);
 
@@ -125,16 +118,14 @@ void SemanticAnalyzer::AnalyzeFunction(
     _currentScope = &AddScope(previousScope);
     for (const std::unique_ptr<core::Parameter>& parameter :
          function.Parameters()) {
-        const Symbol* symbol = AddSymbol(std::make_unique<VariableSymbol>(
-                                             SymbolKind::Parameter,
-                                             parameter->Name(),
-                                             SemanticType::FromSyntax(
-                                                 parameter->Type().Type()),
-                                             parameter->NameRange(), true),
-                                         *parameter);
-        if (symbol != nullptr) _initializedSymbols.insert(symbol);
+        AddSymbol(std::make_unique<VariableSymbol>(
+                      SymbolKind::Parameter, parameter->Name(),
+                      SemanticType::FromSyntax(parameter->Type().Type()),
+                      parameter->NameRange(), true),
+                  *parameter);
     }
     AnalyzeBlock(function.Body(), false);
+    AnalyzeDefiniteAssignment(function, _model, _diagnostics);
     _currentScope = previousScope;
     _currentFunction = nullptr;
 }
@@ -200,15 +191,13 @@ void SemanticAnalyzer::AnalyzeBlock(const core::BlockStatement& block,
     if (createScope) _currentScope = previousScope;
 }
 
-std::unordered_set<const Symbol*> SemanticAnalyzer::AnalyzeBranch(
-    const core::ConditionalBranch& branch) {
+void SemanticAnalyzer::AnalyzeBranch(const core::ConditionalBranch& branch) {
     const SemanticType condition = AnalyzeExpression(branch.Condition());
     if (!condition.IsError() && condition.Kind() != SemanticTypeKind::Bool) {
         Report(diagnostics::DiagnosticCode::InvalidCondition,
                branch.Condition().Range(), "condition must have type 'bool'");
     }
     AnalyzeBlock(branch.Body(), true);
-    const std::unordered_set<const Symbol*> afterBody = _initializedSymbols;
     if (branch.Also() != nullptr) {
         const SemanticType alsoCondition =
             AnalyzeExpression(branch.Also()->Condition());
@@ -220,8 +209,6 @@ std::unordered_set<const Symbol*> SemanticAnalyzer::AnalyzeBranch(
         }
         AnalyzeBlock(branch.Also()->Body(), true);
     }
-    _initializedSymbols = afterBody;
-    return afterBody;
 }
 
 void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
@@ -267,9 +254,6 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                 BorrowsLocalString(*variable.Initializer())) {
                 _localStringBorrows.insert(symbol);
             }
-            if (symbol != nullptr && variable.Initializer() != nullptr) {
-                _initializedSymbols.insert(symbol);
-            }
             if (symbol != nullptr && variable.Initializer() == nullptr &&
                 variableType.Kind() == SemanticTypeKind::StringView) {
                 Report(diagnostics::DiagnosticCode::BorrowRequiresInitializer,
@@ -312,26 +296,13 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
         case core::AstNodeKind::IfStatement: {
             const core::IfStatement& ifStatement =
                 static_cast<const core::IfStatement&>(statement);
-            const std::unordered_set<const Symbol*> before =
-                _initializedSymbols;
-            std::vector<std::unordered_set<const Symbol*>> exits;
-            _initializedSymbols = before;
-            exits.push_back(AnalyzeBranch(ifStatement.PrimaryBranch()));
+            AnalyzeBranch(ifStatement.PrimaryBranch());
             for (const std::unique_ptr<core::ConditionalBranch>& branch :
                  ifStatement.ElseIfBranches()) {
-                _initializedSymbols = before;
-                exits.push_back(AnalyzeBranch(*branch));
+                AnalyzeBranch(*branch);
             }
             if (ifStatement.ElseBody() != nullptr) {
-                _initializedSymbols = before;
                 AnalyzeBlock(*ifStatement.ElseBody(), true);
-                exits.push_back(_initializedSymbols);
-            } else {
-                exits.push_back(before);
-            }
-            _initializedSymbols = exits.front();
-            for (std::size_t index = 1; index < exits.size(); ++index) {
-                IntersectInitialized(_initializedSymbols, exits[index]);
             }
             break;
         }
@@ -346,8 +317,6 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                        whileStatement.Condition().Range(),
                        "condition must have type 'bool'");
             }
-            const std::unordered_set<const Symbol*> before =
-                _initializedSymbols;
             ++_loopDepth;
             AnalyzeBlock(whileStatement.Body(), true);
             if (whileStatement.Also() != nullptr) {
@@ -362,7 +331,6 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                 AnalyzeBlock(whileStatement.Also()->Body(), true);
             }
             --_loopDepth;
-            _initializedSymbols = before;
             break;
         }
         case core::AstNodeKind::ProceedStatement:
@@ -496,15 +464,6 @@ SemanticType SemanticAnalyzer::AnalyzeName(
         return SemanticType::Error();
     }
     _model._bindings.emplace(&expression, symbol);
-    if (!_analyzingAssignmentTarget &&
-        (symbol->Kind() == SymbolKind::LocalVariable ||
-         symbol->Kind() == SymbolKind::Parameter) &&
-        !_initializedSymbols.contains(symbol)) {
-        Report(diagnostics::DiagnosticCode::UninitializedVariable,
-               expression.Range(),
-               "variable '" + expression.Name() +
-                   "' may be read before it is initialized");
-    }
     return symbol->Type();
 }
 
@@ -590,9 +549,7 @@ SemanticType SemanticAnalyzer::AnalyzeAssignment(
     }
     const core::NameExpression& name =
         static_cast<const core::NameExpression&>(expression.Target());
-    _analyzingAssignmentTarget = true;
     const SemanticType target = AnalyzeName(name);
-    _analyzingAssignmentTarget = false;
     _model._types.insert_or_assign(&expression.Target(), target);
     const Symbol* symbol = _model.SymbolFor(name);
     if (symbol == nullptr) return SemanticType::Error();
@@ -613,7 +570,6 @@ SemanticType SemanticAnalyzer::AnalyzeAssignment(
             _localStringBorrows.erase(symbol);
         }
     }
-    _initializedSymbols.insert(symbol);
     return target;
 }
 

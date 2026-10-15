@@ -74,6 +74,10 @@ test-sanitizers:
 	ASAN_OPTIONS=detect_leaks=0 \
 	UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
 		$(SANITIZER_BUILD_DIR)/src/tests/test_flecha
+	ASAN_OPTIONS=detect_leaks=1 \
+	UBSAN_OPTIONS=print_stacktrace=1:halt_on_error=1 \
+		ctest --test-dir $(SANITIZER_BUILD_DIR) --output-on-failure \
+		-R '^NativeSemanticTests.ControlFlowDefiniteAssignment$$'
 
 llvm-poc: build
 	$(BUILD_DIR)/flecha --emit-llvm examples/llvm_poc.fl \
