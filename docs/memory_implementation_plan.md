@@ -5,7 +5,8 @@ iteration, checked slices, deferred calls, and tuples/destructuring are merged.
 Named and generic error values are merged; see [error_values.md](error_values.md).
 Structures are implemented on `feat/structures`; see [structures.md](structures.md).
 Raw allocation is implemented on `feat/raw-allocation`; see [raw_allocation.md](raw_allocation.md).
-Allocation identity diagnostics and general ownership work remain.
+Mandatory allocation identity diagnostics and bounded visible-call analysis are
+also implemented on that branch. General ownership contracts remain.
 
 Based on the agreed rules in [memory_model.md](memory_model.md), with the
 const-type milestone merged into `master` at `c9e6ee4`. Each milestone should be a separate feature
@@ -204,9 +205,10 @@ stored-borrow lifetimes remain separate work.
 Implementation branch: `feat/raw-allocation`. Depends on: 2, 4, 5, and structures.
 
 The built-ins, typed destruction, native failure injection, and sanitizer coverage
-are implemented; see [raw_allocation.md](raw_allocation.md). CFG resource identities,
-alias tracking, and leak/double-free/use-after-free diagnostics below remain
-future work. The unsafe allocation milestone does not claim those checks.
+are implemented, together with mandatory CFG resource identities, local aliases,
+leak/double-free/use-after-free errors, null-path checks, and deferred cleanup.
+See [raw_allocation.md](raw_allocation.md) for supported paths and conservative
+rejections. This is not a guarantee for arbitrary unsafe input pointers.
 
 - Use the system allocation service through compiler built-ins; no public
   `Allocator` handle or `system_allocator()` is planned.
@@ -237,7 +239,12 @@ null, uninitialized, possibly freed, and outstanding allocations where provable.
 
 ## 7. Ownership effects across function calls
 
-Proposed branch: `feat/resource-call-effects`. Depends on: 6.
+Proposed branch for the remaining work: `feat/resource-call-effects`. Depends on: 6.
+
+Bounded interpretation of visible nonrecursive callees is already implemented
+in `feat/raw-allocation`, including consuming helpers, conditional consumption,
+returned allocations, deferred cleanup, and caller aliases. Recursive summaries,
+external contracts, and general stored ownership remain below.
 
 - Infer borrow/consume/escape summaries for visible functions. Include deferred
   effects on all returning paths and compute summaries to a fixed point for

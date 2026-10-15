@@ -23,6 +23,19 @@ struct FlowNode final {
     const core::VariableDeclarationStatement* declaration = nullptr;
     const core::DestructureStatement* destructure = nullptr;
     const core::DeferStatement* deferRegistration = nullptr;
+    // Post-order events for allocation analysis; never consume the borrow
+    // actions above in the memory pass (that would evaluate effects twice).
+    const core::Expression* memoryExpression = nullptr;
+    const core::Expression* memoryUntrackedStore = nullptr;
+    const core::Expression* memoryDiscard = nullptr;
+    const core::Expression* memoryBoolean = nullptr;
+    bool booleanValue = false;
+    const core::Expression* condition = nullptr;
+    const core::CallExpression* allocation = nullptr;
+    const core::VariableDeclarationStatement* memoryDeclaration = nullptr;
+    const core::DestructureStatement* memoryDestructure = nullptr;
+    const core::DeferStatement* memoryDefer = nullptr;
+    const core::ReturnStatement* memoryReturn = nullptr;
     bool reachable = false;
 };
 struct ControlFlowGraph final {

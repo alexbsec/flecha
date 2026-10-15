@@ -1,4 +1,5 @@
 add_library(semantic STATIC
+    allocation_checker.cpp
     borrow_checker.cpp
     control_flow_graph.cpp
     definite_assignment.cpp

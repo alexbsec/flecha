@@ -79,8 +79,8 @@ pointer to const T may be freed; target constness does not remove the cleanup
 obligation. `free(null)` and `free(none)` do nothing. Void pointers cannot be
 freed through this typed API because teardown needs the pointee type.
 
-Free does not reset the caller's variable or invalidate aliases in compiler
-analysis yet. It must receive null or the exact live pointer returned by a
+Free does not reset the caller's variable. The compiler marks tracked aliases
+as freed. Free must receive null or the exact live pointer returned by a
 matching new allocation, with its original pointee type (optionally const).
 Stack addresses, interior pointers, foreign allocations, and already-freed
 pointers violate this unsafe contract. Releasing a raw-pointer field or element
@@ -91,18 +91,108 @@ down.
 scope exit using the existing defer rules. It does not consume the allocation
 immediately, and rebinding the original variable does not change the captured
 pointer. `defer new<T>(...)` is rejected because it would discard the allocation.
-An ordinary ignored allocation result is not automatically freed.
+An ordinary ignored allocation result is rejected as a possible leak.
 
-This milestone does not prove allocation ownership, enforce null checks, track
-raw aliases, or diagnose all leaks, double frees, and use-after-free. Resource
-identity and cross-function consuming-effect analysis remain separate work.
-Safe heap owners and dynamic collections are also future features.
+## Mandatory allocation analysis
+
+After type, definite-assignment, and borrow checking succeed, the compiler runs
+allocation analysis before lowering or object emission. It is always enabled;
+`unsafe` does not disable it. Violations and unsupported ownership effects are
+errors, not optional warnings.
+
+The checker follows allocation identities through resolved local bindings,
+raw-pointer aliases, tuple destructuring, immutable aggregate snapshots, and
+assignments through references to pointer bindings. It checks reachable CFG
+paths through branches, loops, `also`, `break`, `proceed`, and `jumpto`.
+Success and failure of `new` remain separate paths: failure produces null and
+`AllocationError.OutOfMemory`, and skips the initializer. Error/pointer equality
+checks and short-circuit boolean expressions retain this relationship.
+
+It diagnoses:
+
+- Discarding an allocation, overwriting its last tracked handle, or leaving a
+  scope/function with an outstanding cleanup obligation.
+- Freeing a tracked allocation twice, including through aliases or deferred calls.
+- Using a tracked freed pointer, or dereferencing a pointer known to be null on
+  an allocation-failure path.
+- Freeing known stack storage or an interior address rather than the allocation.
+
+Each lifetime diagnostic identifies the operation or exit and includes an origin
+note at the allocation. Diagnostics describe a possible path; the checker does
+not prove arbitrary numeric or relational conditions infeasible.
+
+Deferred arguments are snapshots. Their calls execute in reverse registration
+order on each scope exit, including return and non-local loop control. A pending
+free keeps its allocation obligation alive; it does not free the pointer early.
+A later explicit free conflicts with that pending cleanup.
+
+Visible, nonrecursive helper bodies are interpreted with the caller's tracked
+arguments. This supports borrowing, conditional consumption, deferred consumers,
+reference-mediated pointer reassignment, and factories returning pointers or
+`(*T, error)`. Returning a live allocation transfers the obligation to the caller;
+returning it after explicit or deferred free is rejected. Calls and returns do
+not implicitly move or null raw-pointer bindings.
+
+```flecha
+unsafe void consume(*u8 pointer) {
+    defer free(pointer);
+}
+
+unsafe void example() {
+    pointer, err := new<u8>(42);
+    if err != none { return; }
+    alias := pointer;
+    consume(pointer);
+    free(alias); // FLECHA-S0049: the allocation was already freed.
+}
+```
+
+### Conservative limits and the unsafe boundary
+
+Ownership that cannot be represented is rejected with `FLECHA-S0052`. Current
+examples include storing a tracked allocation in a structure field or another
+heap object, mutable/indexed addresses and slices over containers of allocation
+handles, dynamic indexing of those handles, recursive pointer effects, and
+revisiting an allocation site while its earlier instance remains live. This
+last restriction also applies to multiple outstanding results from one factory
+allocation site. Use a per-iteration scope with `defer free(pointer)` when
+allocating in a loop. Previously freed aliases remain stale if the site repeats.
+
+Analysis is bounded at 128 distinct states per CFG node and 100,000 processed
+states per root function, including interpreted callees. Exceeding either budget
+is an error, not a silently successful check. Complex but valid programs may
+need simpler control flow. General ownership summaries, recursive contracts,
+and owning container storage remain future work.
+
+This is an allocation checker, not a proof that arbitrary unsafe code is memory
+safe. Raw pointer parameters entering a root function are symbolic external
+pointers: their provenance, validity, nullability, and possible aliasing remain
+caller obligations. Known arguments at visible call sites are checked, but
+unknown external/field-derived pointers and stack-address lifetimes do not gain
+a safety guarantee. Free with unverified provenance is rejected. The analysis
+tracks allocation obligations, not byte usage or peak heap size; automatic
+strings and structure values continue to use their existing cleanup rules.
+Safe heap owners and dynamic collections are separate features.
 
 ## Diagnostics and verification
 
 `FLECHA-S0047` diagnoses unsupported allocation/free types and invalid built-in
 usage. Existing argument, unsafe-context, const, copy, definite-assignment, and
 borrow diagnostics continue to apply.
+
+| Code | Meaning |
+| --- | --- |
+| FLECHA-S0048 | Possible leak / lost allocation |
+| FLECHA-S0049 | Possible double free |
+| FLECHA-S0050 | Possible use after free |
+| FLECHA-S0051 | Invalid free of known non-allocation storage |
+| FLECHA-S0052 | Ownership cannot be verified by the current checker |
+| FLECHA-S0053 | Null dereference on a tracked path |
+
+`SemanticMemoryTests` cover aliases, failure paths, cleanup ordering, control
+flow, helper effects, factories, stale loop aliases, and unsupported escapes.
+`CompilerDiagnostics.MemoryOwnership` verifies that rejected code produces no
+object file and that lifetime diagnostics include allocation origins.
 
 `NativeSemanticTests.RawAllocation` covers scalar/string/structure/array/tuple
 allocation, const and zero-sized objects, stable construction addresses,

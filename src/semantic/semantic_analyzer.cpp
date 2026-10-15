@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "core/token_type.hpp"
+#include "semantic/allocation_checker.hpp"
 #include "semantic/borrow_checker.hpp"
 #include "semantic/definite_assignment.hpp"
 
@@ -569,6 +570,8 @@ SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
                 static_cast<const core::FunctionDeclaration&>(*declaration));
         }
     }
+    if (!_diagnostics.HasErrors())
+        AnalyzeAllocations(unit, _model, _diagnostics);
     _currentScope = nullptr;
     _currentFunction = nullptr;
     return std::move(_model);

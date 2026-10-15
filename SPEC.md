@@ -571,6 +571,10 @@ Flecha should not require a garbage collector. Stack allocation is the ordinary 
 On failure, new returns null and `AllocationError.OutOfMemory` without evaluating
 the initializer. Free runs typed teardown and accepts null. See
 [raw allocation](docs/raw_allocation.md) for the unsafe contract and current limits.
+Mandatory allocation analysis rejects possible leaks, double frees, use-after-free,
+known invalid frees, tracked null dereferences, and ownership effects the current
+checker cannot verify. Unsafe permission does not bypass these checks; unknown
+external pointer validity still requires a caller contract.
 
 The language should avoid hidden allocation in:
 

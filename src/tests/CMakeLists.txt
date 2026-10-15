@@ -231,3 +231,12 @@ add_test(
         -DFLECHA_LINK_OPTIONS=-Wl,--wrap=flecha_runtime_v1_alloc
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_unsafe_pointers.cmake
 )
+
+add_test(
+    NAME CompilerDiagnostics.MemoryOwnership
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/memory_diagnostics.fl
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/rejected_memory.o
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_memory_diagnostics.cmake
+)

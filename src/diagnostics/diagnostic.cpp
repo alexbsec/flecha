@@ -102,6 +102,18 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0044";
         case DiagnosticCode::InvalidLifecycle:
             return "FLECHA-S0045";
+        case DiagnosticCode::MemoryLeak:
+            return "FLECHA-S0048";
+        case DiagnosticCode::DoubleFree:
+            return "FLECHA-S0049";
+        case DiagnosticCode::UseAfterFree:
+            return "FLECHA-S0050";
+        case DiagnosticCode::InvalidFree:
+            return "FLECHA-S0051";
+        case DiagnosticCode::UnverifiedOwnership:
+            return "FLECHA-S0052";
+        case DiagnosticCode::NullDereference:
+            return "FLECHA-S0053";
         case DiagnosticCode::InvalidAllocation:
             return "FLECHA-S0047";
         case DiagnosticCode::NonCopyableValue:

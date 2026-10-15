@@ -457,14 +457,15 @@ It can be passed across unsafe function calls. A function that frees the
 allocation consumes ownership; an ordinary borrowing function must preserve it.
 `*const T` restricts target writes but does not itself encode either contract.
 
-Compiler analysis should track allocation identity, aliases, and possible states
-across CFG edges and calls. Counting free statements is insufficient. Available
-function bodies may supply inferred ownership-effect summaries; external
-functions need declared contracts. At minimum, diagnose established double
-frees, use-after-free, lost allocations, and outstanding obligations on function
-exit. The severity of uncertain resource diagnostics and unsupported escapes
-remains to be chosen. Arbitrary raw-pointer manipulation is still the programmer's
-responsibility inside unsafe code; complete static leak detection is not promised.
+Mandatory compiler analysis now tracks allocation identity, aliases, and possible
+states across CFG edges and visible nonrecursive calls. Counting free statements
+is insufficient. Leaks, double frees, use-after-free, known invalid frees, null
+paths, and unsupported ownership escapes are compile-time errors. Bounded call
+interpretation handles local helpers and factories; recursive summaries and
+external contracts remain future work. See [raw_allocation.md](raw_allocation.md)
+for exact limits. Arbitrary raw-pointer manipulation and the validity of external
+input pointers remain programmer obligations inside unsafe code; complete static
+memory safety is not promised.
 
 A null-aware operation such as the proposed
 `ptr->safe_set(value)` can allocate and initialize when ptr is null,
@@ -477,8 +478,8 @@ The special pointer-operation syntax and naming remain to be finalized.
 ### 8.1 Deferred cleanup
 
 The direct-call implementation is documented in [defer.md](defer.md). Deferred
-`free` is implemented. Static allocation-effect checks below remain design
-contracts for future milestones.
+`free` and bounded static allocation-effect checks are implemented; explicit
+external ownership contracts remain future work.
 
 A deferred call registers when execution reaches it and executes when its
 current enclosing scope exits. It is not hoisted to scope entry. Register

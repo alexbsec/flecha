@@ -4,16 +4,22 @@ HeapBox HeapBox::init(i32 value, string label) override {
 }
 structure Empty {};
 unsafe void release_byte(*u8 pointer) { return free(pointer); }
+unsafe (*u8, error) make_byte() { return new<u8>(42); }
 
 i32 allocation_values_test() {
     unsafe {
         (*u8 byte, error err) = new<u8>(none);
         if err != none or byte == null { return 1; }
-        if *byte != 0 { return 2; }
+        if *byte != 0 { free(byte); return 2; }
         *byte = 42;
         release_byte(byte);
         free(null);
         free(none);
+        (made, madeError) := make_byte();
+        if madeError != none { return 13; }
+        alias := made;
+        made = null;
+        release_byte(alias);
         (box, e) := new<HeapBox>(HeapBox::init(42, "heap"));
         if e != none { return 3; }
         defer free(box);
@@ -37,8 +43,9 @@ i32 allocation_values_test() {
         if emptyError != none or empty == null { return 11; }
         free(empty);
         (fixed, fixedError) := new<const i32>(42);
-        if fixedError != none or *fixed != 42 { return 12; }
-        free(fixed);
+        if fixedError != none { return 12; }
+        defer free(fixed);
+        if *fixed != 42 { return 12; }
     }
     return 42;
 }
@@ -130,11 +137,13 @@ i32 allocation_defer_test() {
         loop ;; {
             i32 index = 0;
             #again
-            (object, err) := new<Tracked>(Tracked::init(&raw log, 4));
-            if err != none { return 4; }
-            defer free(object);
-            index++;
-            if index < 2 { jumpto again; }
+            {
+                (object, err) := new<Tracked>(Tracked::init(&raw log, 4));
+                if err != none { return 4; }
+                defer free(object);
+                index++;
+                if index < 2 { jumpto again; }
+            }
             break;
         }
     }
