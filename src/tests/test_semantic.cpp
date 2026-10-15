@@ -117,6 +117,61 @@ TEST(SemanticDeclarationTests, RegistersFunctionsParametersAndLocals) {
               SemanticTypeKind::I32);
 }
 
+TEST(SemanticBuiltInTests, ProvidesTypedStandardOutput) {
+    Analysis analysis =
+        Analyze("i32 main() { stdout(\"Flecha\"); "
+                "stdoutln(\"Language\"); return 42; }");
+
+    ASSERT_FALSE(analysis.diagnostics.HasErrors());
+    const FunctionDeclaration& function = FunctionAt(analysis, 0);
+    const ExpressionStatement& statement =
+        static_cast<const ExpressionStatement&>(
+            *function.Body().Statements()[0]);
+    const CallExpression& call =
+        static_cast<const CallExpression&>(statement.Value());
+    const NameExpression& name =
+        static_cast<const NameExpression&>(call.Callee());
+    const FunctionSymbol* symbol =
+        static_cast<const FunctionSymbol*>(analysis.model.SymbolFor(name));
+    ASSERT_NE(symbol, nullptr);
+    EXPECT_EQ(symbol->BuiltIn(), BuiltInFunction::Stdout);
+    EXPECT_EQ(symbol->ReturnType().Kind(), SemanticTypeKind::Void);
+    ASSERT_EQ(symbol->ParameterTypes().size(), 1);
+    EXPECT_EQ(symbol->ParameterTypes()[0].Kind(), SemanticTypeKind::StringView);
+
+    const ExpressionStatement& lineStatement =
+        static_cast<const ExpressionStatement&>(
+            *function.Body().Statements()[1]);
+    const CallExpression& lineCall =
+        static_cast<const CallExpression&>(lineStatement.Value());
+    const NameExpression& lineName =
+        static_cast<const NameExpression&>(lineCall.Callee());
+    const FunctionSymbol* lineSymbol = static_cast<const FunctionSymbol*>(
+        analysis.model.SymbolFor(lineName));
+    ASSERT_NE(lineSymbol, nullptr);
+    EXPECT_EQ(lineSymbol->BuiltIn(), BuiltInFunction::StdoutLine);
+}
+
+TEST(SemanticBuiltInTests, ValidatesStandardOutputArguments) {
+    Analysis valid = Analyze(
+        "void Main() { stdout(42); stdoutln(false); stdout('x'); "
+        "stdout(1.5); }");
+    EXPECT_FALSE(valid.diagnostics.HasErrors());
+
+    Analysis wrongType = Analyze("void Main() { stdout(null); }");
+    EXPECT_NE(FindDiagnostic(wrongType, DiagnosticCode::IncompatibleArgument),
+              nullptr);
+
+    Analysis wrongCount = Analyze("void Main() { stdout(); }");
+    EXPECT_NE(FindDiagnostic(wrongCount, DiagnosticCode::WrongArgumentCount),
+              nullptr);
+
+    Analysis lineWrongType = Analyze("void Main() { stdoutln(none); }");
+    EXPECT_NE(
+        FindDiagnostic(lineWrongType, DiagnosticCode::IncompatibleArgument),
+        nullptr);
+}
+
 TEST(SemanticDeclarationTests, BindsEveryNameToItsResolvedSymbol) {
     Analysis analysis =
         Analyze("i32 identity(i32 value) { copy := value; return copy; }");

@@ -58,6 +58,12 @@ bool SemanticType::IsFloating() const {
 
 bool SemanticType::IsNumeric() const { return IsInteger() || IsFloating(); }
 
+bool SemanticType::IsPrintable() const {
+    return IsNumeric() || _kind == SemanticTypeKind::Bool ||
+           _kind == SemanticTypeKind::Char ||
+           _kind == SemanticTypeKind::StringView;
+}
+
 SemanticType SemanticType::FromSyntax(core::PrimitiveType type) {
     switch (type) {
         case core::PrimitiveType::I8:

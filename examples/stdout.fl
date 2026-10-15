@@ -1,0 +1,8 @@
+i32 main() {
+    stringv mom = "mom";
+    stdout("Hello, ");
+    stdout("Flecha!\n");
+    stdoutln(mom);
+#here
+    return 42;
+}
