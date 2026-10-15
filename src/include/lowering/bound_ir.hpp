@@ -24,6 +24,7 @@ enum class BoundNodeKind {
     JumpToStatement,
     PositionStatement,
     ArrayExpression,
+    SliceExpression,
     ArrayElementExpression,
     ArrayLengthExpression,
     LiteralExpression,
@@ -132,20 +133,48 @@ class BoundArrayElementExpression final : public BoundPlaceExpression {
    public:
     BoundArrayElementExpression(source::SourceRange range,
                                 std::unique_ptr<BoundExpression> receiver,
-                                std::unique_ptr<BoundExpression> index)
+                                std::unique_ptr<BoundExpression> index,
+                                bool fromBack = false)
         : BoundPlaceExpression(range,
                                receiver->Type().Target()->WithoutConst()),
           _receiver(std::move(receiver)),
-          _index(std::move(index)) {}
+          _index(std::move(index)),
+          _fromBack(fromBack) {}
     [[nodiscard]] BoundNodeKind Kind() const override {
         return BoundNodeKind::ArrayElementExpression;
     }
     [[nodiscard]] const BoundExpression& Receiver() const { return *_receiver; }
     [[nodiscard]] const BoundExpression& Index() const { return *_index; }
+    [[nodiscard]] bool HasIndex() const { return _index != nullptr; }
+    [[nodiscard]] bool FromBack() const { return _fromBack; }
 
    private:
     std::unique_ptr<BoundExpression> _receiver;
     std::unique_ptr<BoundExpression> _index;
+    bool _fromBack;
+};
+
+class BoundSliceExpression final : public BoundExpression {
+   public:
+    BoundSliceExpression(source::SourceRange range, semantic::SemanticType type,
+                         std::unique_ptr<BoundExpression> receiver,
+                         std::unique_ptr<BoundExpression> start,
+                         std::unique_ptr<BoundExpression> end)
+        : BoundExpression(range, type),
+          _receiver(std::move(receiver)),
+          _start(std::move(start)),
+          _end(std::move(end)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::SliceExpression;
+    }
+    [[nodiscard]] const BoundExpression& Receiver() const { return *_receiver; }
+    [[nodiscard]] const BoundExpression* Start() const { return _start.get(); }
+    [[nodiscard]] const BoundExpression* End() const { return _end.get(); }
+
+   private:
+    std::unique_ptr<BoundExpression> _receiver;
+    std::unique_ptr<BoundExpression> _start;
+    std::unique_ptr<BoundExpression> _end;
 };
 
 class BoundArrayLengthExpression final : public BoundExpression {

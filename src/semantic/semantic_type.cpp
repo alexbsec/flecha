@@ -35,6 +35,9 @@ bool SemanticType::operator==(const SemanticType& other) const {
 }
 
 SemanticType SemanticType::FromSyntax(const core::TypeNode& type) {
+    if (type.TypeForm() == core::TypeKind::Slice)
+        return SemanticType(SemanticTypeKind::Slice, FromSyntax(*type.Target()),
+                            type.IsConst());
     if (type.TypeForm() == core::TypeKind::Array)
         return SemanticType(SemanticTypeKind::Array, FromSyntax(*type.Target()),
                             type.IsConst(), type.Length());
@@ -86,6 +89,8 @@ std::string SemanticType::Name() const {
             return "string";
         case SemanticTypeKind::StringView:
             return "stringv";
+        case SemanticTypeKind::Slice:
+            return "[]" + _target->Name();
         case SemanticTypeKind::Array:
             return "[" + std::to_string(_length) + "]" + _target->Name();
         case SemanticTypeKind::Pointer:
@@ -184,12 +189,11 @@ bool IsAssignable(SemanticType destination, SemanticType source) {
     return source.Kind() == SemanticTypeKind::None &&
            destination.Kind() != SemanticTypeKind::Void &&
            destination.Kind() != SemanticTypeKind::Function &&
-           destination.Kind() != SemanticTypeKind::Reference;
+           !destination.IsBorrowed();
 }
 
 bool CanReborrow(SemanticType destination, SemanticType source) {
-    return destination.Kind() == SemanticTypeKind::Reference &&
-           source.Kind() == SemanticTypeKind::Reference &&
+    return destination.IsBorrowed() && source.Kind() == destination.Kind() &&
            destination.Target()->WithoutConst() ==
                source.Target()->WithoutConst() &&
            (destination.Target()->IsConst() || !source.Target()->IsConst());

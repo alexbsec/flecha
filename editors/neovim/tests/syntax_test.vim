@@ -62,6 +62,12 @@ call assert_equal('flechaRepeat', s:HighlightAt('range values', 0))
 call assert_equal('flechaRepeat', s:HighlightAt('loop usize', 0))
 call assert_equal('flechaOperator', s:HighlightAt('value++', 5))
 
+call assert_equal('flechaModifier', s:HighlightAt('[]const i32', 2))
+call assert_equal('flechaType', s:HighlightAt('[]const i32', 8))
+call assert_equal('flechaNumber', s:HighlightAt('values[1:3]', 7))
+call assert_equal('flechaFunction', s:HighlightAt('readonly.front()', 9))
+call assert_equal('flechaFunction', s:HighlightAt('fixed.back()', 6))
+
 if !empty(v:errors)
     for error in v:errors
         echomsg error

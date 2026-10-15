@@ -156,8 +156,9 @@ expanding the source initializer per element. The aggregate function calling
 convention is internal to Flecha; C interoperability for by-value arrays is not
 yet a public ABI contract.
 
-Slices, resizing, heap-backed arrays, partial initialization/moves, and arrays
-of owning or borrowed elements remain separate features.
+Borrowed [checked slices](checked_slices.md) are implemented. Resizing,
+heap-backed arrays, partial initialization/moves, and arrays of owning or
+borrowed elements remain separate features.
 
 ## Iteration
 

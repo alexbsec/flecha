@@ -47,6 +47,11 @@ bool LlvmCodeGenerator::Fail(std::string message) {
 
 llvm::Type* LlvmCodeGenerator::MapType(semantic::SemanticType type) {
     switch (type.Kind()) {
+        case semantic::SemanticTypeKind::Slice:
+            return llvm::StructType::get(
+                _context, {llvm::PointerType::getUnqual(_context),
+                           MapType(semantic::SemanticType(
+                               semantic::SemanticTypeKind::USize))});
         case semantic::SemanticTypeKind::Array:
             return llvm::ArrayType::get(MapType(*type.Target()), type.Length());
         case semantic::SemanticTypeKind::I8:
@@ -1230,6 +1235,61 @@ llvm::Value* LlvmCodeGenerator::EmitArrayStorage(
     return storage;
 }
 
+void LlvmCodeGenerator::EmitBoundsCheck(llvm::Value* condition) {
+    llvm::BasicBlock* valid =
+        llvm::BasicBlock::Create(_context, "array.in.bounds", _currentFunction);
+    llvm::BasicBlock* invalid = llvm::BasicBlock::Create(
+        _context, "array.out.of.bounds", _currentFunction);
+    _builder.CreateCondBr(condition, valid, invalid);
+    _builder.SetInsertPoint(invalid);
+    llvm::FunctionCallee trap = _module->getOrInsertFunction(
+        "llvm.trap",
+        llvm::FunctionType::get(llvm::Type::getVoidTy(_context), false));
+    _builder.CreateCall(trap);
+    _builder.CreateUnreachable();
+    _builder.SetInsertPoint(valid);
+}
+
+llvm::Value* LlvmCodeGenerator::EmitSlice(
+    const lowering::BoundSliceExpression& expression) {
+    llvm::Type* sizeType =
+        MapType(semantic::SemanticType(semantic::SemanticTypeKind::USize));
+    llvm::Value* zero = llvm::ConstantInt::get(sizeType, 0);
+    llvm::Value* data;
+    llvm::Value* length;
+    if (expression.Receiver().Type().Kind() ==
+        semantic::SemanticTypeKind::Slice) {
+        llvm::Value* source = EmitExpression(expression.Receiver());
+        if (source == nullptr) return nullptr;
+        data = _builder.CreateExtractValue(source, 0);
+        length = _builder.CreateExtractValue(source, 1);
+    } else {
+        llvm::Value* storage = EmitArrayStorage(expression.Receiver());
+        if (storage == nullptr) return nullptr;
+        data = _builder.CreateInBoundsGEP(MapType(expression.Receiver().Type()),
+                                          storage, {zero, zero});
+        length = llvm::ConstantInt::get(sizeType,
+                                        expression.Receiver().Type().Length());
+    }
+    llvm::Value* start = expression.Start() == nullptr
+                             ? zero
+                             : EmitExpression(*expression.Start());
+    if (start == nullptr) return nullptr;
+    llvm::Value* end = expression.End() == nullptr
+                           ? length
+                           : EmitExpression(*expression.End());
+    if (end == nullptr) return nullptr;
+    EmitBoundsCheck(_builder.CreateAnd(_builder.CreateICmpULE(start, end),
+                                       _builder.CreateICmpULE(end, length)));
+    data = _builder.CreateInBoundsGEP(MapType(*expression.Type().Target()),
+                                      data, start, "slice.data");
+    llvm::Value* result =
+        llvm::Constant::getNullValue(MapType(expression.Type()));
+    result = _builder.CreateInsertValue(result, data, 0);
+    return _builder.CreateInsertValue(result, _builder.CreateSub(end, start), 1,
+                                      "slice");
+}
+
 llvm::Value* LlvmCodeGenerator::EmitAddress(
     const lowering::BoundPlaceExpression& place) {
     if (place.Kind() == lowering::BoundNodeKind::VariableExpression) {
@@ -1243,25 +1303,34 @@ llvm::Value* LlvmCodeGenerator::EmitAddress(
         // Capture the receiver before evaluating the index, and finish the
         // bounds check before deriving an inbounds address or evaluating a
         // store RHS.
-        llvm::Value* storage = EmitArrayStorage(index.Receiver());
+        const bool slice =
+            index.Receiver().Type().Kind() == semantic::SemanticTypeKind::Slice;
+        llvm::Value* descriptor =
+            slice ? EmitExpression(index.Receiver()) : nullptr;
+        if (slice && descriptor == nullptr) return nullptr;
+        llvm::Value* storage = slice
+                                   ? _builder.CreateExtractValue(descriptor, 0)
+                                   : EmitArrayStorage(index.Receiver());
         if (storage == nullptr) return nullptr;
-        llvm::Value* offset = EmitExpression(index.Index());
+        llvm::Type* sizeType =
+            MapType(semantic::SemanticType(semantic::SemanticTypeKind::USize));
+        llvm::Value* length =
+            slice ? _builder.CreateExtractValue(descriptor, 1)
+                  : llvm::ConstantInt::get(sizeType,
+                                           index.Receiver().Type().Length());
+        llvm::Value* offset =
+            index.HasIndex()
+                ? EmitExpression(index.Index())
+                : (index.FromBack()
+                       ? _builder.CreateSub(length,
+                                            llvm::ConstantInt::get(sizeType, 1))
+                       : llvm::ConstantInt::get(sizeType, 0));
         if (offset == nullptr) return nullptr;
-        llvm::Value* length = llvm::ConstantInt::get(
-            offset->getType(), index.Receiver().Type().Length());
-        llvm::BasicBlock* valid = llvm::BasicBlock::Create(
-            _context, "array.in.bounds", _currentFunction);
-        llvm::BasicBlock* invalid = llvm::BasicBlock::Create(
-            _context, "array.out.of.bounds", _currentFunction);
-        _builder.CreateCondBr(_builder.CreateICmpULT(offset, length), valid,
-                              invalid);
-        _builder.SetInsertPoint(invalid);
-        llvm::FunctionCallee trap = _module->getOrInsertFunction(
-            "llvm.trap",
-            llvm::FunctionType::get(llvm::Type::getVoidTy(_context), false));
-        _builder.CreateCall(trap);
-        _builder.CreateUnreachable();
-        _builder.SetInsertPoint(valid);
+        EmitBoundsCheck(_builder.CreateICmpULT(offset, length));
+        if (slice)
+            return _builder.CreateInBoundsGEP(
+                MapType(*index.Receiver().Type().Target()), storage, offset,
+                "slice.element.address");
         return _builder.CreateInBoundsGEP(
             MapType(index.Receiver().Type()), storage,
             {llvm::ConstantInt::get(offset->getType(), 0), offset},
@@ -1275,6 +1344,9 @@ llvm::Value* LlvmCodeGenerator::EmitAddress(
 llvm::Value* LlvmCodeGenerator::EmitExpression(
     const lowering::BoundExpression& expression) {
     switch (expression.Kind()) {
+        case lowering::BoundNodeKind::SliceExpression:
+            return EmitSlice(
+                static_cast<const lowering::BoundSliceExpression&>(expression));
         case lowering::BoundNodeKind::ArrayExpression:
             return EmitArray(
                 static_cast<const lowering::BoundArrayExpression&>(expression));
@@ -1282,6 +1354,13 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
             const auto& length =
                 static_cast<const lowering::BoundArrayLengthExpression&>(
                     expression);
+            if (length.Receiver().Type().Kind() ==
+                semantic::SemanticTypeKind::Slice) {
+                llvm::Value* descriptor = EmitExpression(length.Receiver());
+                return descriptor == nullptr ? nullptr
+                                             : _builder.CreateExtractValue(
+                                                   descriptor, 1, "slice.len");
+            }
             if (EmitArrayStorage(length.Receiver()) == nullptr) return nullptr;
             return llvm::ConstantInt::get(MapType(expression.Type()),
                                           length.Receiver().Type().Length());

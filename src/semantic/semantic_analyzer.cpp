@@ -153,7 +153,14 @@ const Symbol* SemanticAnalyzer::AddSymbol(std::unique_ptr<Symbol> symbol,
 SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type) {
     const SemanticType result = SemanticType::FromSyntax(type);
     const SemanticType* layer = &result;
-    if (layer->Kind() == SemanticTypeKind::Reference) {
+    if (layer->Kind() == SemanticTypeKind::Slice) {
+        if (!IsArrayElement(layer->Target()->WithoutConst()))
+            Report(diagnostics::DiagnosticCode::UnsupportedCompoundType,
+                   type.Range(),
+                   "slice elements must be scalars, raw pointers, or fixed "
+                   "arrays");
+        layer = layer->Target();
+    } else if (layer->Kind() == SemanticTypeKind::Reference) {
         layer = layer->Target();
         if (layer->Kind() == SemanticTypeKind::Void ||
             layer->Kind() == SemanticTypeKind::String ||
@@ -165,10 +172,10 @@ SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type) {
         }
     }
     while (layer->IsCompound()) {
-        if (layer->Kind() == SemanticTypeKind::Reference) {
+        if (layer->IsBorrowed()) {
             Report(diagnostics::DiagnosticCode::UnsupportedCompoundType,
                    type.Range(),
-                   "nested reference storage is not yet supported: '" +
+                   "nested reference or slice storage is not yet supported: '" +
                        result.Name() + "'");
             break;
         }
@@ -211,10 +218,11 @@ void SemanticAnalyzer::RegisterFunctions(const core::CompilationUnit& unit) {
             parameterTypes.push_back(ResolveType(parameter->Type()));
         }
         const SemanticType returnType = ResolveType(function.ReturnType());
-        if (returnType.Kind() == SemanticTypeKind::Reference) {
+        if (returnType.IsBorrowed()) {
             Report(diagnostics::DiagnosticCode::ReferenceEscape,
                    function.ReturnType().Range(),
-                   "reference returns require a lifetime contract and are not "
+                   "reference and slice returns require a lifetime contract "
+                   "and are not "
                    "yet supported");
         }
         AddSymbol(std::make_unique<FunctionSymbol>(
@@ -420,15 +428,19 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                            "'");
                 variableType = SemanticType::Error();
             }
-            if (variableType.Kind() == SemanticTypeKind::Reference &&
+            if (variable.IsRangeSource() &&
+                variableType.Kind() == SemanticTypeKind::Slice)
+                variableType = SemanticType(SemanticTypeKind::Slice,
+                                            variableType.Target()->WithConst());
+            if (variableType.IsBorrowed() &&
                 variable.Initializer() == nullptr) {
                 Report(
                     diagnostics::DiagnosticCode::ReferenceRequiresInitializer,
                     variable.NameRange(),
-                    "a reference requires an initializer");
+                    "a reference or slice requires an initializer");
             }
             if (variableType.IsConst() && variable.Initializer() == nullptr &&
-                variableType.Kind() != SemanticTypeKind::Reference) {
+                !variableType.IsBorrowed()) {
                 Report(diagnostics::DiagnosticCode::ConstRequiresInitializer,
                        variable.NameRange(),
                        "a const declaration requires an initializer");
@@ -502,10 +514,10 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             AnalyzeBlock(range.Expansion(), true);
             const SemanticType source =
                 _model.TypeOf(*range.Source().Initializer());
-            if (!source.IsError() && source.Kind() != SemanticTypeKind::Array)
+            if (!source.IsError() && !source.IsSequence())
                 Report(diagnostics::DiagnosticCode::IncompatibleType,
                        range.Source().Range(),
-                       "range requires a fixed array value");
+                       "range requires a fixed array or slice value");
             if (range.IndexBinding() != nullptr) {
                 const Symbol* symbol =
                     _model.DeclaredSymbol(*range.IndexBinding());
@@ -515,6 +527,12 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                         Report(diagnostics::DiagnosticCode::IncompatibleType,
                                range.IndexBinding()->NameRange(),
                                "range index must have an integer type");
+                    } else if (source.Kind() == SemanticTypeKind::Slice &&
+                               index.Kind() != SemanticTypeKind::USize) {
+                        Report(diagnostics::DiagnosticCode::IncompatibleType,
+                               range.IndexBinding()->NameRange(),
+                               "slice range indices must use usize because the "
+                               "length is dynamic");
                     } else if (source.Kind() == SemanticTypeKind::Array &&
                                source.Length() != 0) {
                         // Reuse literal representability checks for the
@@ -636,6 +654,11 @@ SemanticType SemanticAnalyzer::AnalyzeExpression(
         case core::AstNodeKind::MemberCallExpression:
             type = AnalyzeMemberCall(
                 static_cast<const core::MemberCallExpression&>(expression));
+            break;
+        case core::AstNodeKind::SliceExpression:
+            type = AnalyzeSlice(
+                static_cast<const core::SliceExpression&>(expression),
+                expected);
             break;
         case core::AstNodeKind::IndexExpression:
             type = AnalyzeIndex(
@@ -786,6 +809,14 @@ void SemanticAnalyzer::RequireUnsafe(source::SourceRange range) {
 }
 
 bool SemanticAnalyzer::IsSafePlace(const core::Expression& expression) const {
+    if (expression.Kind() == core::AstNodeKind::MemberCallExpression) {
+        const auto& call =
+            static_cast<const core::MemberCallExpression&>(expression);
+        return !PlaceType(expression).IsError() &&
+               (_model.TypeOf(call.Receiver()).Kind() ==
+                    SemanticTypeKind::Slice ||
+                IsSafePlace(call.Receiver()));
+    }
     if (expression.Kind() == core::AstNodeKind::ParenthesizedExpression)
         return IsSafePlace(
             static_cast<const core::ParenthesizedExpression&>(expression)
@@ -794,8 +825,13 @@ bool SemanticAnalyzer::IsSafePlace(const core::Expression& expression) const {
         return !PlaceType(expression).IsError();
     if (expression.Kind() == core::AstNodeKind::IndexExpression)
         return !PlaceType(expression).IsError() &&
-               IsSafePlace(static_cast<const core::IndexExpression&>(expression)
-                               .Receiver());
+               (_model.TypeOf(
+                          static_cast<const core::IndexExpression&>(expression)
+                              .Receiver())
+                        .Kind() == SemanticTypeKind::Slice ||
+                IsSafePlace(
+                    static_cast<const core::IndexExpression&>(expression)
+                        .Receiver()));
     if (expression.Kind() == core::AstNodeKind::UnaryExpression) {
         const auto& unary =
             static_cast<const core::UnaryExpression&>(expression);
@@ -808,13 +844,25 @@ bool SemanticAnalyzer::IsSafePlace(const core::Expression& expression) const {
 
 bool SemanticAnalyzer::IsReferencePlace(
     const core::Expression& expression) const {
+    if (expression.Kind() == core::AstNodeKind::MemberCallExpression) {
+        const auto& call =
+            static_cast<const core::MemberCallExpression&>(expression);
+        return _model.TypeOf(call.Receiver()).Kind() ==
+                   SemanticTypeKind::Slice ||
+               IsReferencePlace(call.Receiver());
+    }
     if (expression.Kind() == core::AstNodeKind::ParenthesizedExpression)
         return IsReferencePlace(
             static_cast<const core::ParenthesizedExpression&>(expression)
                 .Inner());
     if (expression.Kind() == core::AstNodeKind::IndexExpression)
-        return IsReferencePlace(
-            static_cast<const core::IndexExpression&>(expression).Receiver());
+        return _model.TypeOf(
+                         static_cast<const core::IndexExpression&>(expression)
+                             .Receiver())
+                       .Kind() == SemanticTypeKind::Slice ||
+               IsReferencePlace(
+                   static_cast<const core::IndexExpression&>(expression)
+                       .Receiver());
     if (expression.Kind() == core::AstNodeKind::UnaryExpression) {
         const auto& unary =
             static_cast<const core::UnaryExpression&>(expression);
@@ -827,6 +875,19 @@ bool SemanticAnalyzer::IsReferencePlace(
 
 SemanticType SemanticAnalyzer::PlaceType(
     const core::Expression& expression) const {
+    if (expression.Kind() == core::AstNodeKind::MemberCallExpression) {
+        const auto& call =
+            static_cast<const core::MemberCallExpression&>(expression);
+        if (call.Member() != "front" && call.Member() != "back")
+            return SemanticType::Error();
+        const SemanticType value = _model.TypeOf(call.Receiver());
+        if (value.Kind() == SemanticTypeKind::Slice) return *value.Target();
+        const SemanticType place = PlaceType(call.Receiver());
+        if (place.Kind() == SemanticTypeKind::Array)
+            return place.IsConst() ? place.Target()->WithConst()
+                                   : *place.Target();
+        return SemanticType::Error();
+    }
     if (expression.Kind() == core::AstNodeKind::ParenthesizedExpression) {
         return PlaceType(
             static_cast<const core::ParenthesizedExpression&>(expression)
@@ -840,6 +901,8 @@ SemanticType SemanticAnalyzer::PlaceType(
     if (expression.Kind() == core::AstNodeKind::IndexExpression) {
         const auto& index =
             static_cast<const core::IndexExpression&>(expression);
+        const SemanticType value = _model.TypeOf(index.Receiver());
+        if (value.Kind() == SemanticTypeKind::Slice) return *value.Target();
         const SemanticType receiver = PlaceType(index.Receiver());
         if (receiver.Kind() == SemanticTypeKind::Array)
             return receiver.IsConst() ? receiver.Target()->WithConst()
@@ -939,8 +1002,7 @@ SemanticType SemanticAnalyzer::AnalyzeUnary(
                    "location");
             return SemanticType::Error();
         }
-        if (target.Kind() == SemanticTypeKind::Reference ||
-            IsReferencePlace(expression.Operand())) {
+        if (target.IsBorrowed() || IsReferencePlace(expression.Operand())) {
             Report(
                 diagnostics::DiagnosticCode::ReferenceEscape,
                 expression.Range(),
@@ -985,10 +1047,8 @@ SemanticType SemanticAnalyzer::AnalyzeBinary(
     if (right.IsInteger() && !expected.IsInteger() &&
         expression.Left().Kind() == core::AstNodeKind::LiteralExpression)
         left = AnalyzeExpression(expression.Left(), right);
-    if (left.Kind() == SemanticTypeKind::Reference ||
-        right.Kind() == SemanticTypeKind::Reference ||
-        left.Kind() == SemanticTypeKind::Array ||
-        right.Kind() == SemanticTypeKind::Array) {
+    if (left.IsBorrowed() || right.IsBorrowed() || left.IsSequence() ||
+        right.IsSequence()) {
         Report(diagnostics::DiagnosticCode::InvalidOperand, expression.Range(),
                "arrays and reference handles do not support binary operators");
         return SemanticType::Error();
@@ -1240,11 +1300,22 @@ SemanticType SemanticAnalyzer::AnalyzeMemberCall(
         arguments.push_back(AnalyzeExpression(*argument));
     }
     if (receiver.IsError()) return SemanticType::Error();
-    if (receiver.Kind() == SemanticTypeKind::Array &&
-        expression.Member() == "len") {
+    if (receiver.IsSequence() &&
+        (expression.Member() == "front" || expression.Member() == "back")) {
         if (!arguments.empty())
             Report(diagnostics::DiagnosticCode::WrongArgumentCount,
-                   expression.Range(), "array len expects no arguments");
+                   expression.Range(), "front/back expect no arguments");
+        if (receiver.Kind() == SemanticTypeKind::Array &&
+            receiver.Length() == 0)
+            Report(diagnostics::DiagnosticCode::ArrayIndexOutOfBounds,
+                   expression.Range(),
+                   "an empty array has no front or back element");
+        return receiver.Target()->WithoutConst();
+    }
+    if (receiver.IsSequence() && expression.Member() == "len") {
+        if (!arguments.empty())
+            Report(diagnostics::DiagnosticCode::WrongArgumentCount,
+                   expression.Range(), "array/slice len expects no arguments");
         return SemanticType(SemanticTypeKind::USize);
     }
     const bool isView = receiver.Kind() == SemanticTypeKind::StringView;
@@ -1305,21 +1376,74 @@ SemanticType SemanticAnalyzer::AnalyzeMemberCall(
     return result;
 }
 
+SemanticType SemanticAnalyzer::AnalyzeSlice(
+    const core::SliceExpression& expression, SemanticType expected) {
+    const SemanticType receiver = AnalyzeExpression(expression.Receiver());
+    for (const core::Expression* bound :
+         {expression.Start(), expression.End()}) {
+        if (bound == nullptr) continue;
+        const SemanticType type =
+            AnalyzeExpression(*bound, SemanticType(SemanticTypeKind::USize));
+        if (!type.IsError() && type.Kind() != SemanticTypeKind::USize)
+            Report(diagnostics::DiagnosticCode::IncompatibleType,
+                   bound->Range(), "slice bounds must have type 'usize'");
+    }
+    if (receiver.IsError()) return receiver;
+    if (!receiver.IsSequence()) {
+        Report(diagnostics::DiagnosticCode::NotIndexable,
+               expression.Receiver().Range(),
+               "slicing requires a fixed array or slice");
+        return SemanticType::Error();
+    }
+    SemanticType element = *receiver.Target();
+    if (receiver.Kind() == SemanticTypeKind::Array) {
+        if (!IsSafePlace(expression.Receiver())) {
+            Report(diagnostics::DiagnosticCode::InvalidReference,
+                   expression.Receiver().Range(),
+                   "a slice requires initialized safe storage, not an array "
+                   "temporary or raw pointee");
+            return SemanticType::Error();
+        }
+        if (PlaceType(expression.Receiver()).IsConst())
+            element = element.WithConst();
+    }
+    if (expected.Kind() == SemanticTypeKind::Slice &&
+        expected.Target()->IsConst())
+        element = element.WithConst();
+    const std::optional<std::uint64_t> start =
+        expression.Start() == nullptr ? std::optional<std::uint64_t>(0)
+                                      : ConstantIndex(*expression.Start());
+    const std::optional<std::uint64_t> end =
+        expression.End() == nullptr
+            ? (receiver.Kind() == SemanticTypeKind::Array
+                   ? std::optional<std::uint64_t>(receiver.Length())
+                   : std::nullopt)
+            : ConstantIndex(*expression.End());
+    if ((start && end && *start > *end) ||
+        (receiver.Kind() == SemanticTypeKind::Array &&
+         ((start && *start > receiver.Length()) ||
+          (end && *end > receiver.Length()))))
+        Report(diagnostics::DiagnosticCode::SliceBounds, expression.Range(),
+               "slice bounds must satisfy 0 <= start <= end <= length");
+    return SemanticType(SemanticTypeKind::Slice, element);
+}
+
 SemanticType SemanticAnalyzer::AnalyzeIndex(
     const core::IndexExpression& expression) {
     const SemanticType receiver = AnalyzeExpression(expression.Receiver());
     const SemanticType index = AnalyzeExpression(
-        expression.Index(), receiver.Kind() == SemanticTypeKind::Array
+        expression.Index(), receiver.IsSequence()
                                 ? SemanticType(SemanticTypeKind::USize)
                                 : SemanticType::Error());
-    if (receiver.Kind() == SemanticTypeKind::Array) {
+    if (receiver.IsSequence()) {
         if (!index.IsError() && index.Kind() != SemanticTypeKind::USize)
             Report(diagnostics::DiagnosticCode::IncompatibleArgument,
                    expression.Index().Range(),
-                   "array index must have type 'usize'");
+                   "array/slice index must have type 'usize'");
         const std::optional<std::uint64_t> constant =
             ConstantIndex(expression.Index());
-        if (!expression.IsRangeElement() &&
+        if (receiver.Kind() == SemanticTypeKind::Array &&
+            !expression.IsRangeElement() &&
             (receiver.Length() == 0 ||
              (constant && *constant >= receiver.Length())))
             Report(diagnostics::DiagnosticCode::ArrayIndexOutOfBounds,

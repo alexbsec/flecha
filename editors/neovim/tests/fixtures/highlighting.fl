@@ -34,3 +34,8 @@ count := values.len();
 
 for (i, value) := range values { value++; }
 loop usize i = 0; i < values.len(); i++ {}
+
+[]const i32 readonly = values[1:3];
+const []i32 fixed = values[:];
+readonly.front();
+fixed.back()++;

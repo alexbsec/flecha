@@ -374,3 +374,28 @@ TEST(LoweringTests, PreservesLoopUpdateAndSnapshotsRangeSources) {
     EXPECT_NE(dump.find("(checked-index load $range0 load $cursor0)"),
               std::string::npos);
 }
+
+TEST(LoweringTests, RepresentsSlicesBoundsAndEndpointPlaces) {
+    LoweredSource result = Lower(
+        "void f() { a := [1, 2, 3]; s := a[1:]; s.front() = 4; "
+        "r := &s.back(); *r = 5; }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.program, nullptr);
+    const std::string dump = DumpBoundProgram(*result.program);
+    EXPECT_NE(dump.find("(slice []i32 load a 1:usize:len)"), std::string::npos);
+    EXPECT_NE(dump.find("(checked-index load s front)"), std::string::npos);
+    EXPECT_NE(dump.find("(address (checked-index load s back))"),
+              std::string::npos);
+}
+
+TEST(LoweringTests, RejectsInvalidSlicesBeforeCodeGeneration) {
+    for (const std::string& source :
+         {"void f() { a := [1]; s := a[:2]; }", "void f() { s := [1][:]; }",
+          "void f() { []u8 s = none; }",
+          "void f() { a := [1]; []const i32 s = a[:]; s.back()++; }"}) {
+        SCOPED_TRACE(source);
+        LoweredSource result = Lower(source);
+        EXPECT_TRUE(result.diagnostics.HasErrors());
+        EXPECT_EQ(result.program, nullptr);
+    }
+}

@@ -50,6 +50,8 @@ class SemanticAnalyzer final {
     SemanticType AnalyzeCall(const core::CallExpression& expression);
     SemanticType AnalyzeMemberCall(
         const core::MemberCallExpression& expression);
+    SemanticType AnalyzeSlice(const core::SliceExpression& expression,
+                              SemanticType expected);
     SemanticType AnalyzeIndex(const core::IndexExpression& expression);
     SemanticType AnalyzeCast(const core::CastExpression& expression);
     [[nodiscard]] bool BorrowsLocalString(

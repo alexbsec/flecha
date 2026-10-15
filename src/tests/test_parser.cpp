@@ -824,7 +824,7 @@ TEST(ParserArrayTests, DistinguishesArrayTypesFromExpressionStatements) {
 TEST(ParserArrayTests, RejectsMalformedLengthsAndInitializersWithoutHanging) {
     for (const std::string& source :
          {"void f([-1]u8 a) {}", "void f([count]u8 a) {}",
-          "void f([1 + 1]u8 a) {}", "void f([]u8 a) {}",
+          "void f([1 + 1]u8 a) {}", "void f([:]u8 a) {}",
           "void f([18446744073709551616]u8 a) {}", "void f() { a := [1; -2]; }",
           "void f() { a := [1; count]; }", "void f() { a := [1; 2, 3]; }",
           "void f() { a := [1, ; }", "void f() { a := [1, 2; }",
@@ -891,5 +891,44 @@ TEST(ParserTests, RejectsMalformedLoopHeadersAndRecovers) {
             EXPECT_FALSE(diagnostics.HasErrors());
         else
             EXPECT_TRUE(diagnostics.HasErrors());
+    }
+}
+
+TEST(ParserSliceTests, ParsesTypesBoundsAndWritableAccessors) {
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource(R"(
+        void f([]const i32 s, const []u8 fixed, [2][]u8 nested) {
+            a := s[:]; b := s[1:]; c := s[:2]; d := s[1:2];
+            fixed.front() = 1; fixed.back()++;
+        }
+    )",
+                            diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const auto& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    EXPECT_EQ(function.Parameters()[0]->Type().TypeForm(), TypeKind::Slice);
+    EXPECT_TRUE(function.Parameters()[0]->Type().Target()->IsConst());
+    EXPECT_TRUE(function.Parameters()[1]->Type().IsConst());
+    for (std::size_t index = 0; index < 4; ++index) {
+        const auto& declaration =
+            static_cast<const VariableDeclarationStatement&>(
+                *function.Body().Statements()[index]);
+        const auto& slice =
+            static_cast<const SliceExpression&>(*declaration.Initializer());
+        EXPECT_EQ(slice.Kind(), AstNodeKind::SliceExpression);
+        EXPECT_EQ(slice.Start() != nullptr, index == 1 || index == 3);
+        EXPECT_EQ(slice.End() != nullptr, index == 2 || index == 3);
+    }
+}
+
+TEST(ParserSliceTests, RecoversFromMalformedSliceExpressions) {
+    for (const std::string& expression :
+         {"a[]", "a[::]", "a[1:2:3]", "a[1:", "a[:;", "a[1:2"}) {
+        SCOPED_TRACE(expression);
+        DiagnosticBag diagnostics;
+        EXPECT_NE(ParseSource("void f() { " + expression + "; } void g() {}",
+                              diagnostics),
+                  nullptr);
+        EXPECT_TRUE(diagnostics.HasErrors());
     }
 }

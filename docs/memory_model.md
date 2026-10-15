@@ -566,7 +566,8 @@ Next proposals to settle:
 
 1. Borrowed-result contracts; fixed mutable-reference moves are currently rejected.
 2. Reference borrowing of strings/views and nested reference storage.
-3. Lifetime and alias checking for slices.
+3. Lifetime contracts for returned borrowed values; local slice lifetime and
+   alias checking is implemented in [checked_slices.md](checked_slices.md).
 4. Deferred capture/order rules and ownership-effect contracts on functions.
 5. Any migration of existing string copies to moves. No such migration is
    agreed or implemented by this document.
