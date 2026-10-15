@@ -1225,3 +1225,22 @@ TEST(ParserAllocationTests, ParsesCompoundTypeArgumentsAndRejectsMalformedNew) {
         EXPECT_TRUE(invalid.HasErrors()) << source;
     }
 }
+
+TEST(ParserTests, PreservesOwnershipContractsWithoutChangingPointerTypes) {
+    DiagnosticBag diagnostics;
+    const auto unit = ParseSource(
+        "unsafe (own *const i32, error) f(own *i32 p, lend *const i32 q) { "
+        "return (p, none); }",
+        diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const auto& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    const auto& result = *function.ReturnType().Elements()[0];
+    EXPECT_EQ(result.Contract(), OwnershipContract::Own);
+    EXPECT_EQ(result.TypeForm(), TypeKind::Pointer);
+    EXPECT_TRUE(result.Target()->IsConst());
+    EXPECT_EQ(function.Parameters()[0]->Type().Contract(),
+              OwnershipContract::Own);
+    EXPECT_EQ(function.Parameters()[1]->Type().Contract(),
+              OwnershipContract::Lend);
+}

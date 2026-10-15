@@ -51,6 +51,8 @@ const KeywordMap KEYWORDS = {
     {"jumpto", TokenType::JumpTo},
     {"error", TokenType::Error},
     {"const", TokenType::Const},
+    {"own", TokenType::Own},
+    {"lend", TokenType::Lend},
     {"constptr", TokenType::ConstPtr},
     {"constref", TokenType::ConstRef},
     {"volatile", TokenType::Volatile},

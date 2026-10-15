@@ -576,6 +576,12 @@ known invalid frees, tracked null dereferences, and ownership effects the curren
 checker cannot verify. Unsafe permission does not bypass these checks; unknown
 external pointer validity still requires a caller contract.
 
+Raw-pointer contracts use `lend *T` parameters, consuming `own *T` parameters,
+`own *T` returns (including tuple elements), and `own *T` structure fields.
+References never take either qualifier. Ownership remains separate from const
+and nullability. See [ownership contracts](docs/ownership_contracts.md) for
+transfer, teardown, and initial implementation restrictions.
+
 The language should avoid hidden allocation in:
 
 - tuple construction;

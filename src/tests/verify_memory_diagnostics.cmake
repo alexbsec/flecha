@@ -8,7 +8,7 @@ execute_process(
 if(result EQUAL 0 OR EXISTS "${FLECHA_OUTPUT}")
     message(FATAL_ERROR "invalid ownership reached object emission: ${output} ${errors}")
 endif()
-foreach(code IN ITEMS FLECHA-S0048 FLECHA-S0049 FLECHA-S0050)
+foreach(code IN ITEMS FLECHA-S0048 FLECHA-S0049 FLECHA-S0050 FLECHA-S0052)
     if(NOT errors MATCHES "${code}:")
         message(FATAL_ERROR "missing ${code}: ${errors}")
     endif()

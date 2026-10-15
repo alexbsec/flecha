@@ -112,7 +112,8 @@ bool Parser::StartsType() const {
     if (Check(TokenType::Ampersand) && Peek(1).type == TokenType::Identifier &&
         Peek(1).value == "raw")
         return false;
-    if (Check(TokenType::Const) || Check(TokenType::ConstPtr) ||
+    if (Check(TokenType::Own) || Check(TokenType::Lend) ||
+        Check(TokenType::Const) || Check(TokenType::ConstPtr) ||
         Check(TokenType::ConstRef))
         return true;
     std::size_t offset = 0;
@@ -144,6 +145,9 @@ bool Parser::StartsType() const {
 }
 
 bool Parser::ScanType(std::size_t& offset) const {
+    if (Peek(offset).type == TokenType::Own ||
+        Peek(offset).type == TokenType::Lend)
+        ++offset;
     if (Peek(offset).type == TokenType::Const) ++offset;
     const TokenType token = Peek(offset).type;
     if (token == TokenType::Mul || token == TokenType::Ampersand ||
@@ -198,7 +202,25 @@ void Parser::ReportUnexpectedToken(std::string_view context) {
                         "unexpected " + tokenText + " " + std::string(context));
 }
 
-std::unique_ptr<TypeNode> Parser::ParseType() {
+std::unique_ptr<TypeNode> Parser::ParseType(bool allowOwn, bool allowLend,
+                                            bool allowTupleOwners) {
+    if (Check(TokenType::Own) || Check(TokenType::Lend)) {
+        const Token contract = Advance();
+        auto type = ParseType();
+        if (!type) return nullptr;
+        if (type->TypeForm() != TypeKind::Pointer ||
+            (contract.type == TokenType::Own ? !allowOwn : !allowLend)) {
+            _diagnostics.Report(
+                diagnostics::DiagnosticCode::UnexpectedToken, contract.range,
+                "ownership contracts require a raw pointer parameter, owning "
+                "return, or owning field; references never own or lend");
+            return nullptr;
+        }
+        type->SetContract(contract.type == TokenType::Own
+                              ? OwnershipContract::Own
+                              : OwnershipContract::Lend);
+        return type;
+    }
     const source::SourceLocation start = Current().range.start;
     source::SourceRange qualifierRange;
     const bool explicitConst = Check(TokenType::Const);
@@ -248,7 +270,7 @@ std::unique_ptr<TypeNode> Parser::ParseType() {
     if (Match(TokenType::LParen)) {
         std::vector<std::unique_ptr<TypeNode>> elements;
         do {
-            auto element = ParseType();
+            auto element = ParseType(allowTupleOwners, false, allowTupleOwners);
             if (element == nullptr) return nullptr;
             elements.push_back(std::move(element));
         } while (Match(TokenType::Comma) && !Check(TokenType::RParen));
@@ -338,7 +360,7 @@ std::unique_ptr<TypeNode> Parser::ParseType() {
 
 std::unique_ptr<Parameter> Parser::ParseParameter() {
     const source::SourceLocation start = Current().range.start;
-    std::unique_ptr<TypeNode> type = ParseType();
+    std::unique_ptr<TypeNode> type = ParseType(true, true);
     if (type == nullptr) {
         return nullptr;
     }
@@ -365,7 +387,7 @@ std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
             ReportUnexpectedToken("after duplicate function modifier");
         modifiers.push_back(modifier);
     }
-    std::unique_ptr<TypeNode> returnType = ParseType();
+    std::unique_ptr<TypeNode> returnType = ParseType(true, false, true);
     if (returnType == nullptr) {
         return nullptr;
     }
@@ -495,7 +517,7 @@ std::unique_ptr<StructureDeclaration> Parser::ParseStructureDeclaration() {
                 continue;
             }
         }
-        auto type = ParseType();
+        auto type = ParseType(true);
         if (!type) return nullptr;
         const auto fieldStart = type->Range().start;
         const Token* field = Consume(TokenType::Identifier, "field name");

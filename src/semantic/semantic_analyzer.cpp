@@ -552,6 +552,22 @@ SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
     GenerateInitializers();
     for (const auto& structure : _model._structures)
         for (const auto& field : structure->fields)
+            if (field.syntax->Type().Contract() ==
+                core::OwnershipContract::Own) {
+                if (!structure->tear)
+                    Report(diagnostics::DiagnosticCode::InvalidLifecycle,
+                           field.syntax->Range(),
+                           "an owning field requires an explicit tear that "
+                           "discharges its allocation");
+                if (field.syntax->Initializer())
+                    Report(diagnostics::DiagnosticCode::UnverifiedOwnership,
+                           field.syntax->Range(),
+                           "initialize owning fields in build; declaration "
+                           "initializers are not yet supported");
+            }
+
+    for (const auto& structure : _model._structures)
+        for (const auto& field : structure->fields)
             if (field.syntax->Initializer()) {
                 const SemanticType actual =
                     AnalyzeExpression(*field.syntax->Initializer(), field.type);

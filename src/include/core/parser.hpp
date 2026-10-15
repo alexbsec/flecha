@@ -35,7 +35,9 @@ class Parser {
     std::unique_ptr<ErrorDeclaration> ParseErrorDeclaration();
     std::unique_ptr<Declaration> ParseDeclaration();
     std::unique_ptr<FunctionDeclaration> ParseFunctionDeclaration();
-    std::unique_ptr<TypeNode> ParseType();
+    std::unique_ptr<TypeNode> ParseType(bool allowOwn = false,
+                                        bool allowLend = false,
+                                        bool allowTupleOwners = false);
     std::optional<std::uint64_t> ParseArrayLength();
     std::unique_ptr<Expression> ParseArrayExpression();
     std::unique_ptr<Parameter> ParseParameter();
