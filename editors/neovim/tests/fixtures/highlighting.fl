@@ -5,11 +5,11 @@ stringv Echo(stringv value) {
     letter := '\n';
     message := "flecha\n";
 
-    while true and count > 0 {
+    while true and count > 0 && count != 7 {
         if count == 2 or false {
             count = count.cast<i64> as i32;
             jumpto final_position;
-        } also count % 2 == 0 {
+        } also count % 2 == 0 || count == 4 {
             proceed;
         } else {
             break;

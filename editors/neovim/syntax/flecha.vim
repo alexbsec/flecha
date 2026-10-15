@@ -11,7 +11,8 @@ syntax keyword flechaType f32 f64 bool char void stringv
 syntax keyword flechaModifier unsafe export extern inline comptime const volatile
 syntax keyword flechaConditional if else also
 syntax keyword flechaRepeat while
-syntax keyword flechaStatement return yield proceed break jumpto
+syntax keyword flechaStatement return yield proceed break
+syntax keyword flechaJump jumpto nextgroup=flechaJumpTarget skipwhite
 syntax keyword flechaCast as
 syntax keyword flechaDeclaration error
 syntax keyword flechaBoolean true false
@@ -22,6 +23,7 @@ syntax match flechaOperator /:=\|===\|!==\|==\|!=\|<=\|>=\|&&\|||\|[=+*\/%^!<>-]
 syntax match flechaFunction /\<[A-Za-z_][A-Za-z0-9_]*\>\ze\s*(/
 syntax match flechaCastMethod /\.cast\>\ze\s*</
 syntax match flechaLabel /#\s*[A-Za-z_][A-Za-z0-9_]*/
+syntax match flechaJumpTarget /\<[A-Za-z_][A-Za-z0-9_]*\>/ contained
 
 syntax match flechaNumber /\<\d\+\>/
 syntax match flechaFloat /\<\d\+\.\d\+\>/
@@ -40,6 +42,7 @@ highlight default link flechaModifier StorageClass
 highlight default link flechaConditional Conditional
 highlight default link flechaRepeat Repeat
 highlight default link flechaStatement Statement
+highlight default link flechaJump Statement
 highlight default link flechaCast Keyword
 highlight default link flechaDeclaration Keyword
 highlight default link flechaBoolean Boolean
@@ -49,6 +52,7 @@ highlight default link flechaOperator Operator
 highlight default link flechaFunction Function
 highlight default link flechaCastMethod Function
 highlight default link flechaLabel Label
+highlight default link flechaJumpTarget Label
 highlight default link flechaNumber Number
 highlight default link flechaFloat Float
 highlight default link flechaString String
