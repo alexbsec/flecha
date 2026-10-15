@@ -175,6 +175,63 @@ llvm::Value* LlvmCodeGenerator::EmitRuntimeOutput(
     return _builder.CreateCall(emitNewline);
 }
 
+llvm::Value* LlvmCodeGenerator::EmitStringViewOperation(
+    const lowering::BoundStringViewOperationExpression& expression) {
+    llvm::Value* receiver = EmitExpression(expression.Receiver());
+    if (receiver == nullptr) return nullptr;
+    llvm::Value* data =
+        _builder.CreateExtractValue(receiver, 0, "stringv.data");
+    llvm::Value* length =
+        _builder.CreateExtractValue(receiver, 1, "stringv.length");
+
+    if (expression.Operation() == lowering::StringViewOperation::Length) {
+        return _builder.CreateZExtOrTrunc(
+            length, llvm::Type::getInt32Ty(_context), "stringv.len");
+    }
+
+    std::vector<llvm::Value*> arguments;
+    for (const std::unique_ptr<lowering::BoundExpression>& argument :
+         expression.Arguments()) {
+        llvm::Value* value = EmitExpression(*argument);
+        if (value == nullptr) return nullptr;
+        arguments.push_back(_builder.CreateZExtOrTrunc(
+            value, llvm::Type::getInt32Ty(_context), "stringv.index"));
+    }
+
+    if (expression.Operation() == lowering::StringViewOperation::At) {
+        llvm::FunctionType* atType = llvm::FunctionType::get(
+            llvm::Type::getInt8Ty(_context),
+            {data->getType(), length->getType(),
+             llvm::Type::getInt32Ty(_context)},
+            false);
+        llvm::FunctionCallee at = _module->getOrInsertFunction(
+            "flecha_runtime_v1_string_view_at", atType);
+        return _builder.CreateCall(at, {data, length, arguments.front()},
+                                   "stringv.at");
+    }
+
+    llvm::FunctionType* checkType = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(_context),
+        {length->getType(), llvm::Type::getInt32Ty(_context),
+         llvm::Type::getInt32Ty(_context)},
+        false);
+    llvm::FunctionCallee check = _module->getOrInsertFunction(
+        "flecha_runtime_v1_string_view_check_substr", checkType);
+    _builder.CreateCall(check, {length, arguments[0], arguments[1]});
+    llvm::Value* start = _builder.CreateZExt(arguments[0], length->getType(),
+                                             "stringv.substr.start");
+    llvm::Value* substringData =
+        _builder.CreateInBoundsGEP(llvm::Type::getInt8Ty(_context), data,
+                                   start, "stringv.substr.data");
+    llvm::Value* substringLength = _builder.CreateZExt(
+        arguments[1], length->getType(), "stringv.substr.length");
+    llvm::StructType* type = StringViewType();
+    llvm::Value* substring = llvm::UndefValue::get(type);
+    substring = _builder.CreateInsertValue(substring, substringData, 0);
+    return _builder.CreateInsertValue(substring, substringLength, 1,
+                                      "stringv.substr");
+}
+
 llvm::FunctionType* LlvmCodeGenerator::MapFunctionType(
     const semantic::FunctionSymbol& function) {
     llvm::Type* returnType = MapType(function.ReturnType());
@@ -737,6 +794,11 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
                 function, arguments,
                 function->getReturnType()->isVoidTy() ? "" : "call");
         }
+        case lowering::BoundNodeKind::StringViewOperationExpression:
+            return EmitStringViewOperation(
+                static_cast<
+                    const lowering::BoundStringViewOperationExpression&>(
+                    expression));
         case lowering::BoundNodeKind::FunctionExpression:
             return _functions.at(
                 &static_cast<const lowering::BoundFunctionExpression&>(

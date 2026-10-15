@@ -71,6 +71,10 @@ TEST(DiagnosticTests, SemanticCodesAreStableAndContiguous) {
               "FLECHA-S0016");
     EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::InvalidCast),
               "FLECHA-S0017");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::InvalidMember),
+              "FLECHA-S0018");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::NotIndexable),
+              "FLECHA-S0019");
 }
 
 TEST(DiagnosticTests, CompilerCodesAreStableAndContiguous) {

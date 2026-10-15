@@ -30,8 +30,11 @@ enum class BoundNodeKind {
     BinaryExpression,
     AssignmentExpression,
     CallExpression,
+    StringViewOperationExpression,
     CastExpression,
 };
+
+enum class StringViewOperation { Length, At, Substring };
 
 class BoundNode {
    public:
@@ -211,6 +214,34 @@ class BoundCallExpression final : public BoundExpression {
 
    private:
     const semantic::FunctionSymbol& _function;
+    std::vector<std::unique_ptr<BoundExpression>> _arguments;
+};
+
+class BoundStringViewOperationExpression final : public BoundExpression {
+   public:
+    BoundStringViewOperationExpression(
+        source::SourceRange range, semantic::SemanticType type,
+        StringViewOperation operation,
+        std::unique_ptr<BoundExpression> receiver,
+        std::vector<std::unique_ptr<BoundExpression>> arguments)
+        : BoundExpression(range, type),
+          _operation(operation),
+          _receiver(std::move(receiver)),
+          _arguments(std::move(arguments)) {}
+
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::StringViewOperationExpression;
+    }
+    [[nodiscard]] StringViewOperation Operation() const { return _operation; }
+    [[nodiscard]] const BoundExpression& Receiver() const { return *_receiver; }
+    [[nodiscard]] const std::vector<std::unique_ptr<BoundExpression>>&
+    Arguments() const {
+        return _arguments;
+    }
+
+   private:
+    StringViewOperation _operation;
+    std::unique_ptr<BoundExpression> _receiver;
     std::vector<std::unique_ptr<BoundExpression>> _arguments;
 };
 

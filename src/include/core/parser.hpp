@@ -51,6 +51,8 @@ class Parser {
     std::unique_ptr<Expression> ParseBinaryExpression(int minimumPrecedence);
     std::unique_ptr<Expression> ParseUnaryExpression();
     std::unique_ptr<Expression> ParsePostfixExpression();
+    std::vector<std::unique_ptr<Expression>> ParseArgumentList(
+        source::SourceLocation& end);
     std::unique_ptr<Expression> ParsePrimaryExpression();
     [[nodiscard]] int BinaryPrecedence(TokenType type) const;
     [[nodiscard]] int UnaryPrecedence(TokenType type) const;

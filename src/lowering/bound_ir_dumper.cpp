@@ -234,6 +234,27 @@ class Dumper final {
                 _stream << ")";
                 break;
             }
+            case BoundNodeKind::StringViewOperationExpression: {
+                const BoundStringViewOperationExpression& operation =
+                    static_cast<const BoundStringViewOperationExpression&>(
+                        expression);
+                const char* name = "len";
+                if (operation.Operation() == StringViewOperation::At) {
+                    name = "at";
+                } else if (operation.Operation() ==
+                           StringViewOperation::Substring) {
+                    name = "substr";
+                }
+                _stream << "(stringv." << name << " ";
+                WriteExpression(operation.Receiver());
+                for (const std::unique_ptr<BoundExpression>& argument :
+                     operation.Arguments()) {
+                    _stream << " ";
+                    WriteExpression(*argument);
+                }
+                _stream << ")";
+                break;
+            }
             default:
                 break;
         }

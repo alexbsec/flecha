@@ -438,6 +438,42 @@ TEST(ParserCallTests, ReportsTrailingComma) {
               "expected an argument after ','");
 }
 
+TEST(ParserStringViewTests, ParsesMembersIndexingAndPostfixChains) {
+    DiagnosticBag diagnostics;
+    std::unique_ptr<CompilationUnit> unit = ParseSource(
+        "stringv test(stringv text) { return text.substr(0, 3); } "
+        "char first(stringv text) { return text.at(0); } "
+        "char indexed(stringv text) { return text.substr(1, 2)[0]; }",
+        diagnostics);
+
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const FunctionDeclaration& substringFunction =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    const ReturnStatement& substringReturn =
+        static_cast<const ReturnStatement&>(
+            *substringFunction.Body().Statements()[0]);
+    const MemberCallExpression& substring =
+        static_cast<const MemberCallExpression&>(*substringReturn.Value());
+    EXPECT_EQ(substring.Member(), "substr");
+    EXPECT_EQ(substring.Arguments().size(), 2);
+
+    const FunctionDeclaration& atFunction =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[1]);
+    const ReturnStatement& atReturn = static_cast<const ReturnStatement&>(
+        *atFunction.Body().Statements()[0]);
+    EXPECT_EQ(static_cast<const MemberCallExpression&>(*atReturn.Value())
+                  .Member(),
+              "at");
+
+    const FunctionDeclaration& indexFunction =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[2]);
+    const ReturnStatement& indexReturn = static_cast<const ReturnStatement&>(
+        *indexFunction.Body().Statements()[0]);
+    const IndexExpression& index =
+        static_cast<const IndexExpression&>(*indexReturn.Value());
+    EXPECT_EQ(index.Receiver().Kind(), AstNodeKind::MemberCallExpression);
+}
+
 TEST(ParserConditionalTests, ParsesConditionalAlsoClauses) {
     DiagnosticBag diagnostics;
     std::unique_ptr<CompilationUnit> unit = ParseSource(

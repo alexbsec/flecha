@@ -172,6 +172,49 @@ TEST(SemanticBuiltInTests, ValidatesStandardOutputArguments) {
         nullptr);
 }
 
+TEST(SemanticStringViewTests, TypesEveryStringViewOperation) {
+    Analysis analysis = Analyze(
+        "void Main() { text := \"flecha\"; length := text.len(); "
+        "first := text.at(0); last := text[5 as u32]; "
+        "middle := text.substr(1, 3); }");
+
+    ASSERT_FALSE(analysis.diagnostics.HasErrors());
+    const FunctionDeclaration& function = FunctionAt(analysis, 0);
+    EXPECT_EQ(analysis.model.TypeOf(*VariableAt(function, 1).Initializer())
+                  .Kind(),
+              SemanticTypeKind::U32);
+    EXPECT_EQ(analysis.model.TypeOf(*VariableAt(function, 2).Initializer())
+                  .Kind(),
+              SemanticTypeKind::Char);
+    EXPECT_EQ(analysis.model.TypeOf(*VariableAt(function, 3).Initializer())
+                  .Kind(),
+              SemanticTypeKind::Char);
+    EXPECT_EQ(analysis.model.TypeOf(*VariableAt(function, 4).Initializer())
+                  .Kind(),
+              SemanticTypeKind::StringView);
+}
+
+TEST(SemanticStringViewTests, DiagnosesInvalidMembersIndicesAndArguments) {
+    Analysis invalidMember =
+        Analyze("void Main() { text := \"x\"; text.missing(); }");
+    EXPECT_NE(FindDiagnostic(invalidMember, DiagnosticCode::InvalidMember),
+              nullptr);
+
+    Analysis nonStringIndex = Analyze("void Main() { value := 1; value[0]; }");
+    EXPECT_NE(FindDiagnostic(nonStringIndex, DiagnosticCode::NotIndexable),
+              nullptr);
+
+    Analysis wrongIndex =
+        Analyze("void Main() { text := \"x\"; text.at(true); }");
+    EXPECT_NE(FindDiagnostic(wrongIndex, DiagnosticCode::IncompatibleArgument),
+              nullptr);
+
+    Analysis wrongCount =
+        Analyze("void Main() { text := \"x\"; text.substr(0); }");
+    EXPECT_NE(FindDiagnostic(wrongCount, DiagnosticCode::WrongArgumentCount),
+              nullptr);
+}
+
 TEST(SemanticDeclarationTests, BindsEveryNameToItsResolvedSymbol) {
     Analysis analysis =
         Analyze("i32 identity(i32 value) { copy := value; return copy; }");

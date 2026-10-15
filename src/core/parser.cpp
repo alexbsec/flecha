@@ -645,79 +645,104 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
         }
 
         if (Match(TokenType::Dot)) {
-            const Token* castName = Consume(TokenType::Identifier, "'cast'");
-            if (castName == nullptr) return expression;
-            if (castName->value != "cast") {
-                _diagnostics.Report(diagnostics::DiagnosticCode::UnexpectedToken,
-                                    castName->range,
-                                    "expected 'cast' after '.'");
+            const Token* member =
+                Consume(TokenType::Identifier, "member name after '.'");
+            if (member == nullptr) return expression;
+            if (member->value == "cast" && Match(TokenType::Less)) {
+                std::unique_ptr<TypeNode> targetType = ParseType();
+                if (targetType == nullptr) return expression;
+                const Token* close =
+                    Consume(TokenType::Greater, "'>' after cast type");
+                const source::SourceLocation end = close == nullptr
+                                                       ? targetType->Range().end
+                                                       : close->range.end;
+                expression = std::make_unique<CastExpression>(
+                    source::SourceRange{expression->Range().start, end},
+                    std::move(expression), std::move(targetType));
+                continue;
+            }
+            if (!Match(TokenType::LParen)) {
+                _diagnostics.Report(diagnostics::DiagnosticCode::ExpectedToken,
+                                    Current().range,
+                                    "expected '(' after member name");
                 return expression;
             }
-            if (Consume(TokenType::Less, "'<' after 'cast'") == nullptr) {
-                return expression;
-            }
-            std::unique_ptr<TypeNode> targetType = ParseType();
-            if (targetType == nullptr) return expression;
-            const Token* close =
-                Consume(TokenType::Greater, "'>' after cast type");
-            const source::SourceLocation end =
-                close == nullptr ? targetType->Range().end : close->range.end;
-            expression = std::make_unique<CastExpression>(
+            source::SourceLocation end = member->range.end;
+            std::vector<std::unique_ptr<Expression>> arguments =
+                ParseArgumentList(end);
+            expression = std::make_unique<MemberCallExpression>(
                 source::SourceRange{expression->Range().start, end},
-                std::move(expression), std::move(targetType));
+                std::move(expression), member->value, member->range,
+                std::move(arguments));
+            continue;
+        }
+
+        if (Match(TokenType::LBracket)) {
+            std::unique_ptr<Expression> index = ParseExpression();
+            if (index == nullptr) return expression;
+            const Token* close =
+                Consume(TokenType::RBracket, "']' after index");
+            const source::SourceLocation end = close == nullptr
+                                                   ? index->Range().end
+                                                   : close->range.end;
+            expression = std::make_unique<IndexExpression>(
+                source::SourceRange{expression->Range().start, end},
+                std::move(expression), std::move(index));
             continue;
         }
 
         if (!Match(TokenType::LParen)) break;
-        std::vector<std::unique_ptr<Expression>> arguments;
-
-        while (!Check(TokenType::RParen) && !IsAtEnd()) {
-            std::unique_ptr<Expression> argument = ParseExpression();
-            if (argument == nullptr) {
-                while (!IsAtEnd() && !Check(TokenType::Comma) &&
-                       !Check(TokenType::RParen) &&
-                       !Check(TokenType::SemiColon)) {
-                    Advance();
-                }
-            } else {
-                arguments.push_back(std::move(argument));
-            }
-
-            if (Match(TokenType::Comma)) {
-                if (Check(TokenType::RParen)) {
-                    _diagnostics.Report(
-                        diagnostics::DiagnosticCode::ExpectedToken,
-                        Current().range, "expected an argument after ','");
-                }
-                continue;
-            }
-            if (!Check(TokenType::RParen)) {
-                _diagnostics.Report(diagnostics::DiagnosticCode::ExpectedToken,
-                                    Current().range,
-                                    "expected ',' or ')' after argument");
-                while (!IsAtEnd() && !Check(TokenType::RParen) &&
-                       !Check(TokenType::SemiColon)) {
-                    Advance();
-                }
-            }
-            break;
-        }
-
-        const Token* closeParen =
-            Consume(TokenType::RParen, "')' after arguments");
         source::SourceLocation end = expression->Range().end;
-        if (closeParen != nullptr) {
-            end = closeParen->range.end;
-        } else if (!arguments.empty()) {
-            end = arguments.back()->Range().end;
-        }
-
+        std::vector<std::unique_ptr<Expression>> arguments =
+            ParseArgumentList(end);
         expression = std::make_unique<CallExpression>(
             source::SourceRange{expression->Range().start, end},
             std::move(expression), std::move(arguments));
     }
 
     return expression;
+}
+
+std::vector<std::unique_ptr<Expression>> Parser::ParseArgumentList(
+    source::SourceLocation& end) {
+    std::vector<std::unique_ptr<Expression>> arguments;
+    while (!Check(TokenType::RParen) && !IsAtEnd()) {
+        std::unique_ptr<Expression> argument = ParseExpression();
+        if (argument == nullptr) {
+            while (!IsAtEnd() && !Check(TokenType::Comma) &&
+                   !Check(TokenType::RParen) &&
+                   !Check(TokenType::SemiColon)) {
+                Advance();
+            }
+        } else {
+            end = argument->Range().end;
+            arguments.push_back(std::move(argument));
+        }
+
+        if (Match(TokenType::Comma)) {
+            if (Check(TokenType::RParen)) {
+                _diagnostics.Report(diagnostics::DiagnosticCode::ExpectedToken,
+                                    Current().range,
+                                    "expected an argument after ','");
+            }
+            continue;
+        }
+        if (!Check(TokenType::RParen)) {
+            _diagnostics.Report(diagnostics::DiagnosticCode::ExpectedToken,
+                                Current().range,
+                                "expected ',' or ')' after argument");
+            while (!IsAtEnd() && !Check(TokenType::RParen) &&
+                   !Check(TokenType::SemiColon)) {
+                Advance();
+            }
+        }
+        break;
+    }
+
+    const Token* closeParen =
+        Consume(TokenType::RParen, "')' after arguments");
+    if (closeParen != nullptr) end = closeParen->range.end;
+    return arguments;
 }
 
 std::unique_ptr<Expression> Parser::ParsePrimaryExpression() {

@@ -171,6 +171,37 @@ TEST(LoweringTests, DumpsDeterministicHumanReadableIr) {
     EXPECT_NE(dump.find("return load answer"), std::string::npos);
 }
 
+TEST(LoweringTests, NormalizesStringViewMembersAndIndexSyntax) {
+    LoweredSource result = Lower(
+        "i32 main() { text := \"flecha\"; first := text.at(0); "
+        "same := text[0]; part := text.substr(1, 3); length := text.len(); "
+        "return 0; }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.program, nullptr);
+    const std::string dump = DumpBoundProgram(*result.program);
+    EXPECT_NE(dump.find("(stringv.at"), std::string::npos);
+    EXPECT_NE(dump.find("(stringv.at"), dump.rfind("(stringv.at"));
+    EXPECT_NE(dump.find("(stringv.substr"), std::string::npos);
+    EXPECT_NE(dump.find("(stringv.len"), std::string::npos);
+
+    const BoundFunction& function = *result.program->Functions()[0];
+    const BoundVariableDeclarationStatement& atDeclaration =
+        static_cast<const BoundVariableDeclarationStatement&>(
+            *function.Body().Statements()[1]);
+    const BoundVariableDeclarationStatement& indexDeclaration =
+        static_cast<const BoundVariableDeclarationStatement&>(
+            *function.Body().Statements()[2]);
+    const BoundStringViewOperationExpression& at =
+        static_cast<const BoundStringViewOperationExpression&>(
+            atDeclaration.Initializer());
+    const BoundStringViewOperationExpression& index =
+        static_cast<const BoundStringViewOperationExpression&>(
+            indexDeclaration.Initializer());
+    EXPECT_EQ(at.Operation(), StringViewOperation::At);
+    EXPECT_EQ(index.Operation(), StringViewOperation::At);
+}
+
 TEST(LoweringTests, SafelyRepresentsFunctionReferences) {
     LoweredSource result =
         Lower("i32 helper() { return 1; } i32 main() { helper; return 0; }");

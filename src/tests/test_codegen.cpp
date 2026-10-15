@@ -180,6 +180,24 @@ TEST(LlvmCodeGeneratorTests, EmitsStringViewsAndContentEquality) {
     EXPECT_NE(ir.find("{ ptr, i64 }"), std::string::npos);
 }
 
+TEST(LlvmCodeGeneratorTests, EmitsCheckedStringViewOperations) {
+    GeneratedSource result = Generate(
+        "i32 main() { text := \"flecha\"; first := text.at(0); "
+        "last := text[5]; part := text.substr(1, 3); length := text.len(); "
+        "return 0; }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("@flecha_runtime_v1_string_view_at"),
+              std::string::npos);
+    EXPECT_NE(ir.find("@flecha_runtime_v1_string_view_check_substr"),
+              std::string::npos);
+    EXPECT_NE(ir.find("getelementptr inbounds i8"), std::string::npos);
+    EXPECT_NE(ir.find("stringv.len"), std::string::npos);
+}
+
 TEST(LlvmCodeGeneratorTests, EmitsLengthAwareStandardOutput) {
     GeneratedSource result =
         Generate("i32 main() { stdout(\"Flecha\"); "

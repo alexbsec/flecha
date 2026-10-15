@@ -56,6 +56,8 @@ class LlvmCodeGenerator final {
         llvm::Value* left, llvm::Value* right, bool negate);
     [[nodiscard]] llvm::Value* EmitRuntimeOutput(
         llvm::Value* value, semantic::SemanticType type, bool newline);
+    [[nodiscard]] llvm::Value* EmitStringViewOperation(
+        const lowering::BoundStringViewOperationExpression& expression);
     [[nodiscard]] llvm::AllocaInst* CreateEntryAlloca(
         const semantic::VariableSymbol& variable);
     bool Fail(std::string message);

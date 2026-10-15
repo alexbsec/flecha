@@ -33,6 +33,9 @@ class SemanticAnalyzer final {
     SemanticType AnalyzeAssignment(
         const core::AssignmentExpression& expression);
     SemanticType AnalyzeCall(const core::CallExpression& expression);
+    SemanticType AnalyzeMemberCall(
+        const core::MemberCallExpression& expression);
+    SemanticType AnalyzeIndex(const core::IndexExpression& expression);
     SemanticType AnalyzeCast(const core::CastExpression& expression);
     const Symbol* AddSymbol(std::unique_ptr<Symbol> symbol,
                             const core::AstNode& declaration);
