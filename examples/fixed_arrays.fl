@@ -1,0 +1,44 @@
+// Build: build/flecha build examples/fixed_arrays.fl -o build/fixed_arrays
+// Prints 1 through 5, each on its own line, and exits with 0.
+
+void sort(&[5]i32 values) {
+    usize pass = 0;
+    while pass < (*values).len() {
+        usize index = 0;
+        while index + 1 < (*values).len() {
+            if (*values)[index] > (*values)[index + 1] {
+                i32 temporary = (*values)[index];
+                (*values)[index] = (*values)[index + 1];
+                (*values)[index + 1] = temporary;
+            }
+            index = index + 1;
+        }
+        pass = pass + 1;
+    }
+}
+
+i32 main() {
+    [5]i32 original = [5, 1, 4, 2, 3];
+    sorted := original; // Copies the elements into independent inline storage.
+    sort(&sorted);
+    if original[0] != 5 { return 1; }
+
+    usize index = 0;
+    while index < sorted.len() {
+        stdoutln(sorted[index]);
+        index = index + 1;
+    }
+
+    [4]u8 zeros = none;
+    [4]u8 repeated = [7; 4];
+    const [4]u8 fixed = repeated;
+    [0]u8 empty = [];
+    if zeros[0] != 0 or fixed[3] != 7 or empty.len() != 0 { return 2; }
+
+    [2][3]u8 grid = [[1, 2, 3], [4, 5, 6]];
+    cell := &grid[1][2];
+    *cell = 42;
+    // cell's last use has passed; direct access is permitted again.
+    if grid[1][2] != 42 { return 3; }
+    return 0;
+}

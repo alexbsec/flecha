@@ -1,0 +1,145 @@
+[4]u8 make_array() { return [1, 2, 3, 4]; }
+
+[4]u8 change_copy([4]u8 values) {
+    values[0] = 99;
+    return values;
+}
+
+void fill_array(&[4]u8 values) {
+    usize index = 0;
+    while index < (*values).len() {
+        (*values)[index] = (index as u8) + 1;
+        index = index + 1;
+    }
+}
+
+u8 next_value(&u8 calls) {
+    *calls = *calls + 1;
+    return *calls;
+}
+
+usize next_index(&u8 calls) {
+    *calls = *calls + 1;
+    return 1;
+}
+
+[2]u8 next_array(&u8 calls) {
+    *calls = *calls + 1;
+    return [5, 6];
+}
+
+i32 exercise_arrays() {
+    values := make_array();
+    copy := change_copy(values);
+    if values[0] != 1 or copy[0] != 99 { return 1; }
+    copy = none;
+    fill_array(&copy);
+    if copy[3] != 4 or copy.len() != 4 { return 2; }
+
+    [4]u8 delayed;
+    if values[0] == 1 { delayed = values; } else { delayed = none; }
+    if delayed[2] != 3 { return 3; }
+    element := &values[1];
+    *element = 42;
+    if values[1] != 42 { return 4; }
+
+    const [4]u8 immutable = values;
+    copied := immutable;
+    copied[0] = 9;
+    if immutable[0] != 1 { return 5; }
+
+    [2][3]u8 grid = [[1, 2, 3], [4, 5, 6]];
+    gridCopy := grid;
+    gridCopy[0][0] = 9;
+    gridCopy[1] = [7; 3];
+    if grid[0][0] != 1 or gridCopy[1][2] != 7 { return 6; }
+    row := &grid[1];
+    (*row)[2] = 42;
+    if grid[1][2] != 42 { return 7; }
+
+    [0]u8 empty = [];
+    [2][0]u8 emptyRows = [empty; 2];
+    if empty.len() != 0 or emptyRows[1].len() != 0 { return 8; }
+    [3]bool flags = [true, false, true];
+    flags[1] = true;
+    if !flags[1] { return 9; }
+
+    u8 scalar = 0;
+    unsafe {
+        [2]*u8 pointers = [&raw scalar, null];
+        *pointers[0] = 42;
+        p := &raw values[0];
+        *p = 7;
+        const [1]*u8 fixed = [&raw scalar];
+        *fixed[0] = 43;
+        *[2][3]u8 matrixPointer = &raw grid;
+        (*matrixPointer)[0][1] = 8;
+    }
+    if scalar != 43 or values[0] != 7 or grid[0][1] != 8 { return 10; }
+    return 42;
+}
+
+i32 exercise_array_evaluation() {
+    u8 calls = 0;
+    repeated := [next_value(&calls); 4];
+    if calls != 1 or repeated[0] != 1 or repeated[3] != 1 { return 1; }
+    zeroRepeat := [next_value(&calls); 0];
+    if calls != 2 or zeroRepeat.len() != 0 { return 2; }
+    listed := [next_value(&calls), next_value(&calls)];
+    if calls != 4 or listed[0] != 3 or listed[1] != 4 { return 3; }
+    listed[next_index(&calls)] = next_value(&calls);
+    if calls != 6 or listed[1] != 6 { return 4; }
+    if next_array(&calls)[next_index(&calls)] != 6 or calls != 8 { return 5; }
+    if next_array(&calls).len() != 2 or calls != 9 { return 6; }
+    [3][2]u8 nestedRepeat = [next_array(&calls); 3];
+    if calls != 10 or nestedRepeat[2][1] != 6 { return 7; }
+    // Repeated initialization uses a loop with storage reused on each iteration.
+    u8 step = 0;
+    while step < 2 {
+        local := [next_value(&calls); 3];
+        if local[2] != calls { return 8; }
+        step = step + 1;
+        if step == 1 { proceed; }
+    }
+    if calls != 12 { return 9; }
+    return 42;
+}
+
+u8 array_read(usize index) {
+    [2]u8 values = [7, 8];
+    return values[index];
+}
+
+u8 array_write(usize index) {
+    [2]u8 values = none;
+    values[index] = 42;
+    return values[index];
+}
+
+u8 array_borrow(usize index) {
+    [2]u8 values = [7, 8];
+    ref := &values[index];
+    return *ref;
+}
+
+unsafe u8 array_unsafe_read(usize index) {
+    [2]u8 values = [7, 8];
+    return values[index];
+}
+
+u8 array_nested_read(usize row, usize column) {
+    [2][2]u8 values = [[1, 2], [3, 4]];
+    return values[row][column];
+}
+
+u8 array_store_before_rhs(usize index) {
+    [2]u8 values = none;
+    // This output must never happen when the index is invalid.
+    values[index] = announce_array_write();
+    return values[0];
+}
+
+u8 announce_array_write() {
+    stdoutln("unexpected RHS evaluation");
+    return 42;
+}

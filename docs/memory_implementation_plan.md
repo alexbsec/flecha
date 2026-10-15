@@ -1,7 +1,10 @@
 # Memory feature implementation order
 
-Status: const types and unsafe pointers are merged. Checked stack references
-are implemented on `feat/checked-references`; subsequent milestones remain planned.
+Status: const types, unsafe pointers, and checked references are merged.
+Fixed arrays are implemented on `codex/fixed-arrays`, prioritized ahead of
+`defer`. The same working branch now includes the requested array-range and
+counted-loop follow-up; see [iteration.md](iteration.md). Checked slices are the
+remaining half of the array/slice milestone.
 
 Based on the agreed rules in [memory_model.md](memory_model.md), with the
 const-type milestone merged into `master` at `c9e6ee4`. Each milestone should be a separate feature
@@ -248,6 +251,10 @@ pointer slots and supported reference-to-pointer slots; const violations fail.
 
 ## 9. Inline arrays and checked slices
 
+Fixed-array behavior is implemented and documented in [fixed arrays](fixed_arrays.md).
+This stage was moved ahead of defer at the user's request. Slices/subslicing
+and borrowed range checks remain planned; fixed-array length syntax is `[N]T`.
+
 Proposed branch: `feat/arrays-slices`. Depends on: 1, 2, and 3.
 
 - Finalize fixed-array syntax and whole-value initialization. Implement contiguous
@@ -298,6 +305,5 @@ syntax, including the now-rejected inline unsafe-call form. Treat it as design
 input, not an executable acceptance fixture; create focused fixtures for each
 milestone and reconcile that example separately.
 
-The first implementation task is milestone 1 on `feat/const-types`. This roadmap
-itself changes documentation only and does not authorize committing, pushing,
-opening a PR, or merging.
+The next array milestone is checked slices. The roadmap itself does not
+authorize committing, pushing, opening a PR, or merging.

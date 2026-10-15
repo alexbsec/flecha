@@ -135,6 +135,12 @@ class BorrowChecker final {
 
     void CollectUses(const core::Expression& expression, Symbols& uses) const {
         switch (expression.Kind()) {
+            case Kind::ArrayExpression:
+                for (const auto& element :
+                     static_cast<const core::ArrayExpression&>(expression)
+                         .Elements())
+                    CollectUses(*element, uses);
+                break;
             case Kind::NameExpression: {
                 const Symbol* symbol = Named(expression);
                 if (IsReference(symbol)) uses.insert(symbol);
@@ -369,6 +375,18 @@ class BorrowChecker final {
         const core::Expression& inner = Unwrap(expression);
         const Symbol* symbol = Named(inner);
         if (symbol != nullptr) return {{{symbol, {}}}, nullptr, 0};
+        if (inner.Kind() == Kind::IndexExpression) {
+            const auto& index =
+                static_cast<const core::IndexExpression&>(inner);
+            Value value = Place(index.Receiver());
+            const Symbols previousPinned = _pinned;
+            if (value.handle != nullptr) _pinned.insert(value.handle);
+            for (const Origin& origin : value.origins)
+                _pinned.insert(origin.parents.begin(), origin.parents.end());
+            (void)Evaluate(index.Index());
+            _pinned = previousPinned;
+            return value;
+        }
         if (inner.Kind() == Kind::UnaryExpression) {
             const auto& unary =
                 static_cast<const core::UnaryExpression&>(inner);
@@ -377,6 +395,7 @@ class BorrowChecker final {
                 SemanticTypeKind::Reference)
                 return value;
         }
+        if (inner.Kind() != Kind::UnaryExpression) (void)Evaluate(inner);
         return {};
     }
 
@@ -395,6 +414,12 @@ class BorrowChecker final {
 
     Value Evaluate(const core::Expression& expression) {
         switch (expression.Kind()) {
+            case Kind::ArrayExpression:
+                for (const auto& element :
+                     static_cast<const core::ArrayExpression&>(expression)
+                         .Elements())
+                    (void)Evaluate(*element);
+                return {};
             case Kind::ParenthesizedExpression:
                 return Evaluate(Unwrap(expression));
             case Kind::NameExpression: {
@@ -415,6 +440,11 @@ class BorrowChecker final {
             case Kind::UnaryExpression: {
                 const auto& unary =
                     static_cast<const core::UnaryExpression&>(expression);
+                if (unary.OperatorType() == TokenType::Increment) {
+                    CheckAccess(Place(unary.Operand()), true,
+                                expression.Range());
+                    return {};
+                }
                 if (unary.OperatorType() == TokenType::Ampersand)
                     return Borrow(
                         Place(unary.Operand()),
@@ -506,8 +536,13 @@ class BorrowChecker final {
             case Kind::IndexExpression: {
                 const auto& index =
                     static_cast<const core::IndexExpression&>(expression);
-                (void)Evaluate(index.Receiver());
-                (void)Evaluate(index.Index());
+                if (_model.TypeOf(index.Receiver()).Kind() ==
+                    SemanticTypeKind::Array) {
+                    CheckAccess(Place(expression), false, expression.Range());
+                } else {
+                    (void)Evaluate(index.Receiver());
+                    (void)Evaluate(index.Index());
+                }
                 return {};
             }
             default:

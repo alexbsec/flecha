@@ -77,7 +77,7 @@ overloads are not yet part of the language model.
 ## Diagnostics and recovery
 
 Semantic diagnostics use stable codes `FLECHA-S0001` through
-`FLECHA-S0032`. The table below lists the initial binding/type codes; later
+`FLECHA-S0036`. The table below lists the initial binding/type codes; later
 feature documents describe their additional codes. Declaration-name diagnostics use the exact identifier token
 range retained by the AST; expression diagnostics use exact half-open AST
 ranges. The analyzer returns an error type after a failed resolution or type
@@ -103,3 +103,24 @@ statements continue to produce useful diagnostics.
 Parser diagnostics remain separate. In particular, `FLECHA-P0003` preserves
 the parser's invalid-assignment-target report, and semantic analysis adds
 `FLECHA-S0004` when the recovered AST is analyzed.
+
+## Fixed arrays
+
+Array types retain their element type and literal length. Array initializer
+elements receive contextual types; indexing resolves to a writable place only
+when its receiver is addressable array storage. Const propagates through nested
+array storage. The shared flow graph traverses list elements in order and repeat
+initializers once; element stores never establish whole-array initialization.
+Borrow analysis maps element places to the root array's owner. See
+[fixed arrays](fixed_arrays.md) for the executable contract.
+
+### Range and counted-loop analysis
+
+Range bindings use Go-style index/value order, with inferred `usize` indices.
+The source must be a fixed array; explicit index types must represent every
+possible index and element bindings follow ordinary assignment compatibility.
+Range source snapshots and iteration declarations use the shared scope,
+initialization, and borrow analysis. The CFG routes `proceed` through counted-loop
+updates, and header variables end at the loop boundary. Integer postfix increment
+requires initialized writable storage and participates in borrow checking as a
+write. See [iteration.md](iteration.md) for syntax and exact evaluation rules.

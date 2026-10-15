@@ -51,6 +51,17 @@ call assert_notequal('flechaModifier', s:HighlightAt('constval', 0))
 call assert_equal('flechaRawAddress', s:HighlightAt('&raw', 1))
 call assert_notequal('flechaRawAddress', s:HighlightAt('raw :=', 0))
 
+call assert_equal('flechaNumber', s:HighlightAt('[5]i32', 1))
+call assert_equal('flechaType', s:HighlightAt('[5]i32', 3))
+call assert_equal('flechaNumber', s:HighlightAt('[7; 5]', 4))
+call assert_equal('flechaOperator', s:HighlightAt('&values[1]', 0))
+call assert_equal('flechaFunction', s:HighlightAt('values.len()', 7))
+
+call assert_equal('flechaRepeat', s:HighlightAt('for (i', 0))
+call assert_equal('flechaRepeat', s:HighlightAt('range values', 0))
+call assert_equal('flechaRepeat', s:HighlightAt('loop usize', 0))
+call assert_equal('flechaOperator', s:HighlightAt('value++', 5))
+
 if !empty(v:errors)
     for error in v:errors
         echomsg error

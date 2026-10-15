@@ -498,3 +498,60 @@ TEST(CodeGeneratorTests, EmitsCheckedReferencesAsAddressesAndReborrowingCalls) {
     EXPECT_NE(ir.find("call void @bump(ptr"), std::string::npos);
     EXPECT_NE(ir.find("mul i8"), std::string::npos);
 }
+
+TEST(CodeGeneratorTests, EmitsAggregateValuesAndBoundsCheckedElementAddresses) {
+    GeneratedSource result = Generate(
+        "[2]u8 make() { return [1, 2]; }"
+        "[2]u8 copy([2]u8 value) { return value; }"
+        "u8 access(usize i) { a := copy(make()); a[i] = 4; return a[i]; }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("define [2 x i8] @make()"), std::string::npos);
+    EXPECT_NE(ir.find("define [2 x i8] @copy([2 x i8] %value)"),
+              std::string::npos);
+    EXPECT_NE(ir.find("icmp ult i64"), std::string::npos);
+    EXPECT_NE(ir.find("call void @llvm.trap()"), std::string::npos);
+    EXPECT_NE(ir.find("getelementptr inbounds [2 x i8]"), std::string::npos);
+}
+
+TEST(CodeGeneratorTests, EmitsRepeatLoopWithoutDuplicatingInitializerCalls) {
+    GeneratedSource result = Generate(
+        "u8 once() { return 7; }"
+        "u8 f(usize i) { a := [once(); 4096]; return a[i]; }"
+        "usize g() { a := [once(); 0]; return a.len(); }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    const std::size_t first = ir.find("call i8 @once()");
+    const std::size_t second = ir.find("call i8 @once()", first + 1);
+    ASSERT_NE(first, std::string::npos);
+    ASSERT_NE(second, std::string::npos);
+    EXPECT_EQ(ir.find("call i8 @once()", second + 1), std::string::npos);
+    EXPECT_NE(ir.find("array.repeat.index = phi i64"), std::string::npos);
+    EXPECT_LT(ir.size(), 10000);
+}
+
+TEST(CodeGeneratorTests, EmitsLoopUpdateTargetsAndSingleEvaluationIncrements) {
+    GeneratedSource result = Generate(
+        "usize index() { return 0; } "
+        "[2]i32 values() { return [1, 2]; } "
+        "i32 f() { a := [10, 20]; old := a[index()]++; "
+        "loop i := 0; i < 2; i++ { proceed; } "
+        "for (i, v) := range values() { proceed; } return old; }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("br label %loop.update"), std::string::npos);
+    const std::size_t indexCall = ir.find("call i64 @index()");
+    ASSERT_NE(indexCall, std::string::npos);
+    EXPECT_EQ(ir.find("call i64 @index()", indexCall + 1), std::string::npos);
+    const std::size_t sourceCall = ir.find("call [2 x i32] @values()");
+    ASSERT_NE(sourceCall, std::string::npos);
+    EXPECT_EQ(ir.find("call [2 x i32] @values()", sourceCall + 1),
+              std::string::npos);
+    EXPECT_NE(ir.find("increment.old = load i32"), std::string::npos);
+}

@@ -23,12 +23,16 @@ enum class BoundNodeKind {
     BreakStatement,
     JumpToStatement,
     PositionStatement,
+    ArrayExpression,
+    ArrayElementExpression,
+    ArrayLengthExpression,
     LiteralExpression,
     VariableExpression,
     DereferenceExpression,
     AddressExpression,
     FunctionExpression,
     UnaryExpression,
+    IncrementExpression,
     BinaryExpression,
     AssignmentExpression,
     CallExpression,
@@ -100,6 +104,64 @@ class BoundLiteralExpression final : public BoundExpression {
 class BoundPlaceExpression : public BoundExpression {
    public:
     using BoundExpression::BoundExpression;
+};
+
+class BoundArrayExpression final : public BoundExpression {
+   public:
+    BoundArrayExpression(source::SourceRange range, semantic::SemanticType type,
+                         std::vector<std::unique_ptr<BoundExpression>> elements,
+                         bool repeat)
+        : BoundExpression(range, type),
+          _elements(std::move(elements)),
+          _repeat(repeat) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::ArrayExpression;
+    }
+    [[nodiscard]] const std::vector<std::unique_ptr<BoundExpression>>&
+    Elements() const {
+        return _elements;
+    }
+    [[nodiscard]] bool IsRepeat() const { return _repeat; }
+
+   private:
+    std::vector<std::unique_ptr<BoundExpression>> _elements;
+    bool _repeat;
+};
+
+class BoundArrayElementExpression final : public BoundPlaceExpression {
+   public:
+    BoundArrayElementExpression(source::SourceRange range,
+                                std::unique_ptr<BoundExpression> receiver,
+                                std::unique_ptr<BoundExpression> index)
+        : BoundPlaceExpression(range,
+                               receiver->Type().Target()->WithoutConst()),
+          _receiver(std::move(receiver)),
+          _index(std::move(index)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::ArrayElementExpression;
+    }
+    [[nodiscard]] const BoundExpression& Receiver() const { return *_receiver; }
+    [[nodiscard]] const BoundExpression& Index() const { return *_index; }
+
+   private:
+    std::unique_ptr<BoundExpression> _receiver;
+    std::unique_ptr<BoundExpression> _index;
+};
+
+class BoundArrayLengthExpression final : public BoundExpression {
+   public:
+    BoundArrayLengthExpression(source::SourceRange range,
+                               std::unique_ptr<BoundExpression> receiver)
+        : BoundExpression(
+              range, semantic::SemanticType(semantic::SemanticTypeKind::USize)),
+          _receiver(std::move(receiver)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::ArrayLengthExpression;
+    }
+    [[nodiscard]] const BoundExpression& Receiver() const { return *_receiver; }
+
+   private:
+    std::unique_ptr<BoundExpression> _receiver;
 };
 
 class BoundDereferenceExpression final : public BoundPlaceExpression {
@@ -223,6 +285,23 @@ class BoundBinaryExpression final : public BoundExpression {
     std::unique_ptr<BoundExpression> _left;
     TokenType _operatorType;
     std::unique_ptr<BoundExpression> _right;
+};
+
+class BoundIncrementExpression final : public BoundExpression {
+   public:
+    BoundIncrementExpression(source::SourceRange range,
+                             std::unique_ptr<BoundPlaceExpression> target)
+        : BoundExpression(range, target->Type().WithoutConst()),
+          _target(std::move(target)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::IncrementExpression;
+    }
+    [[nodiscard]] const BoundPlaceExpression& Target() const {
+        return *_target;
+    }
+
+   private:
+    std::unique_ptr<BoundPlaceExpression> _target;
 };
 
 class BoundAssignmentExpression final : public BoundExpression {
@@ -403,10 +482,12 @@ class BoundWhileStatement final : public BoundStatement {
    public:
     BoundWhileStatement(source::SourceRange range,
                         std::unique_ptr<BoundExpression> condition,
-                        std::unique_ptr<BoundBlockStatement> body)
+                        std::unique_ptr<BoundBlockStatement> body,
+                        std::unique_ptr<BoundExpression> update = nullptr)
         : BoundStatement(range),
           _condition(std::move(condition)),
-          _body(std::move(body)) {}
+          _body(std::move(body)),
+          _update(std::move(update)) {}
     [[nodiscard]] BoundNodeKind Kind() const override {
         return BoundNodeKind::WhileStatement;
     }
@@ -414,10 +495,14 @@ class BoundWhileStatement final : public BoundStatement {
         return *_condition;
     }
     [[nodiscard]] const BoundBlockStatement& Body() const { return *_body; }
+    [[nodiscard]] const BoundExpression* Update() const {
+        return _update.get();
+    }
 
    private:
     std::unique_ptr<BoundExpression> _condition;
     std::unique_ptr<BoundBlockStatement> _body;
+    std::unique_ptr<BoundExpression> _update;
 };
 
 class BoundProceedStatement final : public BoundStatement {

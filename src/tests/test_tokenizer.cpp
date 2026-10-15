@@ -352,3 +352,17 @@ TEST(TokenizerTests, RecognizesConstAliasesAndReferenceMarker) {
                   tokens[index].value);
     }
 }
+
+TEST(TokenizerTests, RecognizesLoopKeywordsAndAdjacentIncrement) {
+    const std::vector<Token> tokens = Tokenize("for loop range x++ x + +1");
+    const std::vector<TokenType> expected{
+        TokenType::For,        TokenType::Loop,      TokenType::Range,
+        TokenType::Identifier, TokenType::Increment, TokenType::Identifier,
+        TokenType::Add,        TokenType::Add,       TokenType::NumberLiteral,
+        TokenType::EOF_TOKEN};
+    ASSERT_EQ(tokens.size(), expected.size());
+    for (std::size_t index = 0; index < expected.size(); ++index)
+        EXPECT_EQ(tokens[index].type, expected[index]);
+    EXPECT_EQ(tokens[4].value, "++");
+    EXPECT_EQ(tokens[4].range.end.offset - tokens[4].range.start.offset, 2);
+}

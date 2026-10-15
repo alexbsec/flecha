@@ -148,6 +148,12 @@ class Dumper final {
                 WriteExpression(whileStatement.Condition());
                 _stream << "\n";
                 WriteBlock(whileStatement.Body());
+                if (whileStatement.Update() != nullptr) {
+                    Indent();
+                    _stream << "update ";
+                    WriteExpression(*whileStatement.Update());
+                    _stream << "\n";
+                }
                 break;
             }
             case BoundNodeKind::ProceedStatement:
@@ -175,6 +181,35 @@ class Dumper final {
 
     void WriteExpression(const BoundExpression& expression) {
         switch (expression.Kind()) {
+            case BoundNodeKind::ArrayExpression: {
+                const auto& array =
+                    static_cast<const BoundArrayExpression&>(expression);
+                _stream << (array.IsRepeat() ? "(repeat " : "(array ")
+                        << array.Type().Name();
+                for (const auto& element : array.Elements()) {
+                    _stream << " ";
+                    WriteExpression(*element);
+                }
+                _stream << ")";
+                break;
+            }
+            case BoundNodeKind::ArrayElementExpression: {
+                const auto& index =
+                    static_cast<const BoundArrayElementExpression&>(expression);
+                _stream << "(checked-index ";
+                WriteExpression(index.Receiver());
+                _stream << " ";
+                WriteExpression(index.Index());
+                _stream << ")";
+                break;
+            }
+            case BoundNodeKind::ArrayLengthExpression:
+                _stream << "(array-len ";
+                WriteExpression(
+                    static_cast<const BoundArrayLengthExpression&>(expression)
+                        .Receiver());
+                _stream << ")";
+                break;
             case BoundNodeKind::DereferenceExpression:
                 _stream << "(deref ";
                 WriteExpression(
@@ -208,6 +243,13 @@ class Dumper final {
                                expression)
                                .Symbol()
                                .Name();
+                break;
+            case BoundNodeKind::IncrementExpression:
+                _stream << "(post-increment ";
+                WriteExpression(
+                    static_cast<const BoundIncrementExpression&>(expression)
+                        .Target());
+                _stream << ")";
                 break;
             case BoundNodeKind::UnaryExpression: {
                 const BoundUnaryExpression& unary =
@@ -278,11 +320,9 @@ class Dumper final {
                 } else if (operation.Operation() ==
                            StringViewOperation::ToString) {
                     name = "string";
-                } else if (operation.Operation() ==
-                           StringViewOperation::View) {
+                } else if (operation.Operation() == StringViewOperation::View) {
                     name = "view";
-                } else if (operation.Operation() ==
-                           StringViewOperation::Copy) {
+                } else if (operation.Operation() == StringViewOperation::Copy) {
                     name = "copy";
                 }
                 _stream << "(string." << name << " ";

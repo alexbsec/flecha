@@ -1,6 +1,6 @@
 # Checked stack references
 
-Checked references are implemented for initialized scalar and raw-pointer
+Checked references are implemented for initialized scalar, fixed-array, and raw-pointer
 storage. They borrow storage without allocating, owning, or extending its
 lifetime. See [the runnable example](../examples/checked_references.fl).
 
@@ -79,6 +79,14 @@ returned, even when a caller could in principle prove them valid. It does not
 use condition/value correlation to prove paths impossible. Temporary borrows
 may remain live through their entire expression. Rebinding or moving the handle
 used to address a pending indirect assignment is rejected.
+
+## References to arrays
+
+Fixed arrays and their elements can now be borrowed: `&[N]T ref = &array` or
+`&T element = &array[index]`. Borrowing an element protects the whole root
+array; disjoint-index analysis is deferred. Const array storage produces
+read-only references. See [fixed arrays](fixed_arrays.md) for indexing,
+initialization, and lifetime restrictions.
 
 ## References to pointers
 

@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -32,6 +33,8 @@ class Parser {
     std::unique_ptr<Declaration> ParseDeclaration();
     std::unique_ptr<FunctionDeclaration> ParseFunctionDeclaration();
     std::unique_ptr<TypeNode> ParseType();
+    std::optional<std::uint64_t> ParseArrayLength();
+    std::unique_ptr<Expression> ParseArrayExpression();
     std::unique_ptr<Parameter> ParseParameter();
     std::unique_ptr<BlockStatement> ParseBlockStatement(bool isUnsafe = false);
     std::unique_ptr<Statement> ParseStatement();
@@ -40,6 +43,8 @@ class Parser {
     std::unique_ptr<ReturnStatement> ParseReturnStatement();
     std::unique_ptr<IfStatement> ParseIfStatement();
     std::unique_ptr<WhileStatement> ParseWhileStatement();
+    std::unique_ptr<Statement> ParseLoopStatement();
+    std::unique_ptr<RangeStatement> ParseRangeStatement();
     std::unique_ptr<ProceedStatement> ParseProceedStatement();
     std::unique_ptr<BreakStatement> ParseBreakStatement();
     std::unique_ptr<JumpToStatement> ParseJumpToStatement();
@@ -63,6 +68,7 @@ class Parser {
 
     std::vector<Token> _tokens;
     std::size_t _position = 0;
+    std::size_t _rangeId = 0;
     diagnostics::DiagnosticBag& _diagnostics;
 };
 

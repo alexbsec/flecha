@@ -22,6 +22,7 @@ enum class AstNodeKind {
     ReturnStatement,
     IfStatement,
     WhileStatement,
+    RangeStatement,
     ProceedStatement,
     BreakStatement,
     JumpToStatement,
@@ -30,6 +31,7 @@ enum class AstNodeKind {
     AlsoClause,
     VariableDeclarationStatement,
     ExpressionStatement,
+    ArrayExpression,
     LiteralExpression,
     NameExpression,
     ParenthesizedExpression,
@@ -94,7 +96,7 @@ enum class PrimitiveType {
     StringView,
 };
 
-enum class TypeKind { Primitive, Pointer, Reference };
+enum class TypeKind { Primitive, Pointer, Reference, Array };
 
 class TypeNode final : public AstNode {
    public:
@@ -108,9 +110,10 @@ class TypeNode final : public AstNode {
 
     TypeNode(source::SourceRange range, TypeKind typeKind,
              std::unique_ptr<TypeNode> target, bool isConst = false,
-             source::SourceRange qualifierRange = {})
+             source::SourceRange qualifierRange = {}, std::uint64_t length = 0)
         : AstNode(range),
           _typeKind(typeKind),
+          _length(length),
           _target(std::move(target)),
           _isConst(isConst),
           _qualifierRange(qualifierRange) {
@@ -121,6 +124,7 @@ class TypeNode final : public AstNode {
         return AstNodeKind::Type;
     }
     [[nodiscard]] TypeKind TypeForm() const { return _typeKind; }
+    [[nodiscard]] std::uint64_t Length() const { return _length; }
     [[nodiscard]] PrimitiveType Type() const {
         assert(_typeKind == TypeKind::Primitive);
         return _type;
@@ -133,6 +137,7 @@ class TypeNode final : public AstNode {
 
    private:
     TypeKind _typeKind;
+    std::uint64_t _length = 0;
     PrimitiveType _type = PrimitiveType::Void;
     std::unique_ptr<TypeNode> _target;
     bool _isConst;
@@ -354,11 +359,13 @@ class WhileStatement final : public Statement {
     WhileStatement(source::SourceRange range,
                    std::unique_ptr<Expression> condition,
                    std::unique_ptr<BlockStatement> body,
-                   std::unique_ptr<AlsoClause> alsoClause)
+                   std::unique_ptr<AlsoClause> alsoClause,
+                   std::unique_ptr<Expression> update = nullptr)
         : Statement(range),
           _condition(std::move(condition)),
           _body(std::move(body)),
-          _alsoClause(std::move(alsoClause)) {}
+          _alsoClause(std::move(alsoClause)),
+          _update(std::move(update)) {}
 
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::WhileStatement;
@@ -366,11 +373,13 @@ class WhileStatement final : public Statement {
     [[nodiscard]] const Expression& Condition() const { return *_condition; }
     [[nodiscard]] const BlockStatement& Body() const { return *_body; }
     [[nodiscard]] const AlsoClause* Also() const { return _alsoClause.get(); }
+    [[nodiscard]] const Expression* Update() const { return _update.get(); }
 
    private:
     std::unique_ptr<Expression> _condition;
     std::unique_ptr<BlockStatement> _body;
     std::unique_ptr<AlsoClause> _alsoClause;
+    std::unique_ptr<Expression> _update;
 };
 
 class ProceedStatement final : public Statement {
@@ -413,9 +422,7 @@ class PositionStatement final : public Statement {
    public:
     PositionStatement(source::SourceRange range, std::string name,
                       source::SourceRange nameRange)
-        : Statement(range),
-          _name(std::move(name)),
-          _nameRange(nameRange) {}
+        : Statement(range), _name(std::move(name)), _nameRange(nameRange) {}
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::PositionStatement;
     }
@@ -475,6 +482,63 @@ class ExpressionStatement final : public Statement {
 
    private:
     std::unique_ptr<Expression> _expression;
+};
+
+class ArrayExpression final : public Expression {
+   public:
+    ArrayExpression(source::SourceRange range,
+                    std::vector<std::unique_ptr<Expression>> elements,
+                    bool repeat = false, std::uint64_t length = 0)
+        : Expression(range),
+          _elements(std::move(elements)),
+          _repeat(repeat),
+          _length(repeat ? length : _elements.size()) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::ArrayExpression;
+    }
+    [[nodiscard]] const std::vector<std::unique_ptr<Expression>>& Elements()
+        const {
+        return _elements;
+    }
+    [[nodiscard]] bool IsRepeat() const { return _repeat; }
+    [[nodiscard]] std::uint64_t Length() const { return _length; }
+
+   private:
+    std::vector<std::unique_ptr<Expression>> _elements;
+    bool _repeat;
+    std::uint64_t _length;
+};
+
+// Range syntax is normalized into an array snapshot, a private usize cursor,
+// and a while loop. Retain the source/binding metadata for range-specific
+// checks.
+class RangeStatement final : public Statement {
+   public:
+    RangeStatement(source::SourceRange range,
+                   std::unique_ptr<BlockStatement> expansion,
+                   const VariableDeclarationStatement* source,
+                   const VariableDeclarationStatement* indexBinding)
+        : Statement(range),
+          _expansion(std::move(expansion)),
+          _source(source),
+          _indexBinding(indexBinding) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::RangeStatement;
+    }
+    [[nodiscard]] const BlockStatement& Expansion() const {
+        return *_expansion;
+    }
+    [[nodiscard]] const VariableDeclarationStatement& Source() const {
+        return *_source;
+    }
+    [[nodiscard]] const VariableDeclarationStatement* IndexBinding() const {
+        return _indexBinding;
+    }
+
+   private:
+    std::unique_ptr<BlockStatement> _expansion;
+    const VariableDeclarationStatement* _source;
+    const VariableDeclarationStatement* _indexBinding;
 };
 
 class LiteralExpression final : public Expression {
@@ -632,10 +696,10 @@ class CallExpression final : public Expression {
 
 class MemberCallExpression final : public Expression {
    public:
-    MemberCallExpression(
-        source::SourceRange range, std::unique_ptr<Expression> receiver,
-        std::string member, source::SourceRange memberRange,
-        std::vector<std::unique_ptr<Expression>> arguments)
+    MemberCallExpression(source::SourceRange range,
+                         std::unique_ptr<Expression> receiver,
+                         std::string member, source::SourceRange memberRange,
+                         std::vector<std::unique_ptr<Expression>> arguments)
         : Expression(range),
           _receiver(std::move(receiver)),
           _member(std::move(member)),
@@ -666,20 +730,24 @@ class IndexExpression final : public Expression {
    public:
     IndexExpression(source::SourceRange range,
                     std::unique_ptr<Expression> receiver,
-                    std::unique_ptr<Expression> index)
+                    std::unique_ptr<Expression> index,
+                    bool isRangeElement = false)
         : Expression(range),
           _receiver(std::move(receiver)),
-          _index(std::move(index)) {}
+          _index(std::move(index)),
+          _isRangeElement(isRangeElement) {}
 
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::IndexExpression;
     }
     [[nodiscard]] const Expression& Receiver() const { return *_receiver; }
     [[nodiscard]] const Expression& Index() const { return *_index; }
+    [[nodiscard]] bool IsRangeElement() const { return _isRangeElement; }
 
    private:
     std::unique_ptr<Expression> _receiver;
     std::unique_ptr<Expression> _index;
+    bool _isRangeElement;
 };
 
 }  // namespace flecha::core

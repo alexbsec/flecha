@@ -780,3 +780,116 @@ TEST(ParserUnsafeTests, RejectsStandaloneUnsafeCallAndDuplicateModifiers) {
         EXPECT_TRUE(diagnostics.HasErrors());
     }
 }
+
+TEST(ParserArrayTests, ParsesNestedTypesListsAndRepeatsWithRanges) {
+    const std::string source =
+        "const [2][3]u8 f() { return [[1, 2, 3], [4; 3]]; }";
+    DiagnosticBag diagnostics;
+    std::unique_ptr<CompilationUnit> unit = ParseSource(source, diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const auto& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    const TypeNode& type = function.ReturnType();
+    EXPECT_EQ(type.TypeForm(), TypeKind::Array);
+    EXPECT_TRUE(type.IsConst());
+    EXPECT_EQ(type.Length(), 2);
+    EXPECT_EQ(type.Target()->Length(), 3);
+    EXPECT_EQ(type.Target()->Target()->Type(), PrimitiveType::U8);
+    EXPECT_EQ(source.substr(type.Range().start.offset, type.Range().Length()),
+              "const [2][3]u8");
+    const auto& outer =
+        static_cast<const ArrayExpression&>(ReturnedExpression(*unit));
+    EXPECT_EQ(outer.Length(), 2);
+    EXPECT_FALSE(outer.IsRepeat());
+    const auto& repeat =
+        static_cast<const ArrayExpression&>(*outer.Elements()[1]);
+    EXPECT_TRUE(repeat.IsRepeat());
+    EXPECT_EQ(repeat.Length(), 3);
+    EXPECT_EQ(repeat.Elements().size(), 1);
+    EXPECT_EQ(
+        source.substr(repeat.Range().start.offset, repeat.Range().Length()),
+        "[4; 3]");
+}
+
+TEST(ParserArrayTests, DistinguishesArrayTypesFromExpressionStatements) {
+    DiagnosticBag diagnostics;
+    std::unique_ptr<CompilationUnit> unit = ParseSource(
+        "void f() { [2]u8 a = [1, 2,]; a[0] = 3; [1, 2][0]; [];} "
+        "void g(&[2]u8 a, *[2]u8 b) {}",
+        diagnostics);
+    EXPECT_FALSE(diagnostics.HasErrors());
+    ASSERT_EQ(unit->Declarations().size(), 2);
+}
+
+TEST(ParserArrayTests, RejectsMalformedLengthsAndInitializersWithoutHanging) {
+    for (const std::string& source :
+         {"void f([-1]u8 a) {}", "void f([count]u8 a) {}",
+          "void f([1 + 1]u8 a) {}", "void f([]u8 a) {}",
+          "void f([18446744073709551616]u8 a) {}", "void f() { a := [1; -2]; }",
+          "void f() { a := [1; count]; }", "void f() { a := [1; 2, 3]; }",
+          "void f() { a := [1, ; }", "void f() { a := [1, 2; }",
+          "void f() { a := [1; 18446744073709551616]; }"}) {
+        SCOPED_TRACE(source);
+        DiagnosticBag diagnostics;
+        EXPECT_NE(ParseSource(source, diagnostics), nullptr);
+        EXPECT_TRUE(diagnostics.HasErrors());
+    }
+}
+
+TEST(ParserTests, NormalizesCountedLoopsWithASeparateUpdateAndHeaderScope) {
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource(
+        "void f() { loop u32 i = 1; i <= 4; i++ { proceed; } }", diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const auto& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    const auto& scope =
+        static_cast<const BlockStatement&>(*function.Body().Statements()[0]);
+    ASSERT_EQ(scope.Statements().size(), 2);
+    EXPECT_EQ(scope.Statements()[0]->Kind(),
+              AstNodeKind::VariableDeclarationStatement);
+    const auto& loop =
+        static_cast<const WhileStatement&>(*scope.Statements()[1]);
+    ASSERT_NE(loop.Update(), nullptr);
+    EXPECT_EQ(
+        static_cast<const UnaryExpression&>(*loop.Update()).OperatorType(),
+        TokenType::Increment);
+    EXPECT_EQ(loop.Body().Statements()[0]->Kind(),
+              AstNodeKind::ProceedStatement);
+}
+
+TEST(ParserTests, ParsesTypedInferredAndDiscardedRangeBindings) {
+    for (const std::string& header :
+         {"for i := range a", "for (i, v) := range a",
+          "for (u32 i, i32 v) = range a", "for (_, v) := range a",
+          "for (_, _) := range a"}) {
+        SCOPED_TRACE(header);
+        DiagnosticBag diagnostics;
+        auto unit = ParseSource("void f() { a := [1, 2]; " + header + " {} }",
+                                diagnostics);
+        ASSERT_FALSE(diagnostics.HasErrors());
+        const auto& function =
+            static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+        EXPECT_EQ(function.Body().Statements()[1]->Kind(),
+                  AstNodeKind::RangeStatement);
+    }
+}
+
+TEST(ParserTests, RejectsMalformedLoopHeadersAndRecovers) {
+    for (const std::string& header :
+         {"for (i v) := range a {}", "for (i, v) = range a {}",
+          "for (u32 i, i32 v) := range a {}", "for i := a {}",
+          "for (i, v, w) := range a {}", "loop u32 i = 0; i < 2 i++ {}",
+          "loop i := 0; i < 2; {}"}) {
+        SCOPED_TRACE(header);
+        DiagnosticBag diagnostics;
+        auto unit =
+            ParseSource("void f() { " + header + " } void g() {}", diagnostics);
+        ASSERT_NE(unit, nullptr);
+        // A counted loop may omit its update clause.
+        if (header == "loop i := 0; i < 2; {}")
+            EXPECT_FALSE(diagnostics.HasErrors());
+        else
+            EXPECT_TRUE(diagnostics.HasErrors());
+    }
+}
