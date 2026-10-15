@@ -34,7 +34,14 @@ enum class BoundNodeKind {
     CastExpression,
 };
 
-enum class StringViewOperation { Length, At, Substring };
+enum class StringViewOperation {
+    Length,
+    At,
+    Substring,
+    ToString,
+    View,
+    Copy,
+};
 
 class BoundNode {
    public:

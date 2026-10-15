@@ -34,6 +34,8 @@ std::string_view SemanticType::Name() const {
             return "char";
         case SemanticTypeKind::Void:
             return "void";
+        case SemanticTypeKind::String:
+            return "string";
         case SemanticTypeKind::StringView:
             return "stringv";
         case SemanticTypeKind::Null:
@@ -61,6 +63,7 @@ bool SemanticType::IsNumeric() const { return IsInteger() || IsFloating(); }
 bool SemanticType::IsPrintable() const {
     return IsNumeric() || _kind == SemanticTypeKind::Bool ||
            _kind == SemanticTypeKind::Char ||
+           _kind == SemanticTypeKind::String ||
            _kind == SemanticTypeKind::StringView;
 }
 
@@ -96,6 +99,8 @@ SemanticType SemanticType::FromSyntax(core::PrimitiveType type) {
             return SemanticType(SemanticTypeKind::Char);
         case core::PrimitiveType::Void:
             return SemanticType(SemanticTypeKind::Void);
+        case core::PrimitiveType::String:
+            return SemanticType(SemanticTypeKind::String);
         case core::PrimitiveType::StringView:
             return SemanticType(SemanticTypeKind::StringView);
     }
@@ -105,6 +110,10 @@ SemanticType SemanticType::FromSyntax(core::PrimitiveType type) {
 bool IsAssignable(SemanticType destination, SemanticType source) {
     if (destination.IsError() || source.IsError()) return true;
     if (destination == source) return true;
+    if (destination.Kind() == SemanticTypeKind::String &&
+        source.Kind() == SemanticTypeKind::StringView) {
+        return true;
+    }
     return source.Kind() == SemanticTypeKind::None &&
            destination.Kind() != SemanticTypeKind::Void &&
            destination.Kind() != SemanticTypeKind::Function;
@@ -112,6 +121,16 @@ bool IsAssignable(SemanticType destination, SemanticType source) {
 
 bool CanExplicitlyCast(SemanticType source, SemanticType destination) {
     if (source.IsError() || destination.IsError()) return true;
+    if (source == destination) return true;
+    if ((source.Kind() == SemanticTypeKind::StringView &&
+         destination.Kind() == SemanticTypeKind::String) ||
+        (source.Kind() == SemanticTypeKind::String &&
+         destination.Kind() == SemanticTypeKind::StringView) ||
+        (destination.Kind() == SemanticTypeKind::String &&
+         (source.IsNumeric() || source.Kind() == SemanticTypeKind::Bool ||
+          source.Kind() == SemanticTypeKind::Char))) {
+        return true;
+    }
     return source.IsNumeric() && destination.IsNumeric();
 }
 

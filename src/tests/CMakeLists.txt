@@ -45,3 +45,12 @@ add_test(
         -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/string_view_operations_test
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_string_view_operations.cmake
 )
+
+add_test(
+    NAME NativeRuntimeTests.OwningStrings
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/owning_string.fl
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/owning_string_test
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_owning_string.cmake
+)

@@ -30,3 +30,18 @@ The runtime also owns dynamic safety checks. Version 1 provides checked
 `stringv` byte access and substring bounds validation. Invalid indices print a
 runtime diagnostic to standard error and terminate the process rather than
 allowing an out-of-bounds memory access.
+
+## Planned owning string ABI
+
+The owning `string` type is specified in [`string.md`](string.md). Its planned
+ABI representation contains a mutable data pointer, byte length, and capacity.
+Runtime entry points will construct a string from a view, clone it, concatenate
+values, and destroy its allocation. Constructors and formatters receive an
+explicit output pointer rather than returning the three-field structure by
+value. This avoids platform-specific aggregate return conventions and keeps
+the compiler/runtime boundary stable.
+
+No C++ standard-library type or exception may cross this boundary. Allocation
+failure and invalid dynamic operations must use the runtime failure mechanism.
+Object-only compilation may leave owning-string runtime symbols unresolved in
+the same way it currently leaves output and bounds-check symbols unresolved.

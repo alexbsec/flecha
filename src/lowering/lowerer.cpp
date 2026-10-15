@@ -272,6 +272,12 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                 operation = StringViewOperation::At;
             } else if (member.Member() == "substr") {
                 operation = StringViewOperation::Substring;
+            } else if (member.Member() == "string") {
+                operation = StringViewOperation::ToString;
+            } else if (member.Member() == "view") {
+                operation = StringViewOperation::View;
+            } else if (member.Member() == "copy") {
+                operation = StringViewOperation::Copy;
             }
             std::vector<std::unique_ptr<BoundExpression>> arguments;
             arguments.reserve(member.Arguments().size());

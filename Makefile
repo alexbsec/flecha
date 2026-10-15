@@ -8,7 +8,8 @@ TEST_BUILD_DIR ?= build-tests
 .PHONY: help configure build configure-tests build-tests test \
 	test-semantic llvm-poc native-poc native-if-also native-functions \
 	native-while native-loop-control native-casts native-string-view \
-	native-string-view-operations native-stdout test-neovim clean
+	native-string-view-operations native-owning-string native-stdout \
+	test-neovim clean
 
 help:
 	@echo "Flecha build targets:"
@@ -25,6 +26,7 @@ help:
 	@echo "  make native-casts   Build and test numeric casts"
 	@echo "  make native-string-view Build and test borrowed strings"
 	@echo "  make native-string-view-operations Build and test stringv operations"
+	@echo "  make native-owning-string Build and test owning strings"
 	@echo "  make native-stdout  Build and test standard output"
 	@echo "  make clean          Clean generated build artifacts"
 	@echo ""
@@ -124,6 +126,17 @@ native-string-view-operations: build
 		test "$$output" = "NgpmCmEKbGVjCg=="; \
 		test $$result -eq 42
 	@echo "Native string-view operations printed expected text and returned 42"
+
+native-owning-string: build
+	$(BUILD_DIR)/flecha build src/tests/fixtures/owning_string.fl \
+		-o $(BUILD_DIR)/owning_string
+	@test -f $(BUILD_DIR)/owning_string.o
+	@$(BUILD_DIR)/owning_string > $(BUILD_DIR)/owning_string.actual; \
+		result=$$?; \
+		output=`base64 -w 0 $(BUILD_DIR)/owning_string.actual`; \
+		test "$$output" = "aGkgbW9tCjQyCg=="; \
+		test $$result -eq 42
+	@echo "Native owning-string example printed expected text and returned 42"
 
 native-stdout: build
 	$(BUILD_DIR)/flecha build src/tests/fixtures/stdout.fl \

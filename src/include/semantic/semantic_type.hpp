@@ -23,6 +23,7 @@ enum class SemanticTypeKind {
     Bool,
     Char,
     Void,
+    String,
     StringView,
     Null,
     None,

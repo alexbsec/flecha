@@ -1,0 +1,19 @@
+i32 main() {
+    string greeting = "hi mom".string();
+    string copied = greeting;
+    string returned = Echo(copied);
+    string answer = 42.string();
+    stringv borrowed = returned.cast<stringv>;
+
+    stdoutln(greeting);
+    stdoutln(answer);
+
+    if borrowed == "hi mom" and answer.view() == "42" {
+        return 42;
+    }
+    return 0;
+}
+
+string Echo(string value) {
+    return value;
+}

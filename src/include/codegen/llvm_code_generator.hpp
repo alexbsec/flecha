@@ -30,6 +30,7 @@ class LlvmCodeGenerator final {
    private:
     [[nodiscard]] llvm::Type* MapType(semantic::SemanticType type);
     [[nodiscard]] llvm::StructType* StringViewType();
+    [[nodiscard]] llvm::StructType* StringType();
     [[nodiscard]] llvm::FunctionType* MapFunctionType(
         const semantic::FunctionSymbol& function);
     bool DeclareFunctions(const lowering::BoundProgram& program);
@@ -58,6 +59,15 @@ class LlvmCodeGenerator final {
         llvm::Value* value, semantic::SemanticType type, bool newline);
     [[nodiscard]] llvm::Value* EmitStringViewOperation(
         const lowering::BoundStringViewOperationExpression& expression);
+    [[nodiscard]] llvm::Value* EmitOwnedString(
+        llvm::Value* value, semantic::SemanticType sourceType);
+    [[nodiscard]] llvm::Value* EmitStringView(llvm::Value* value,
+                                               semantic::SemanticType type);
+    void EmitStringDestroy(llvm::Value* value);
+    void EmitOwnedStringCleanups();
+    [[nodiscard]] llvm::Value* CoerceValue(
+        llvm::Value* value, semantic::SemanticType sourceType,
+        semantic::SemanticType destinationType);
     [[nodiscard]] llvm::AllocaInst* CreateEntryAlloca(
         const semantic::VariableSymbol& variable);
     bool Fail(std::string message);
@@ -74,7 +84,10 @@ class LlvmCodeGenerator final {
     std::unordered_map<std::string, llvm::BasicBlock*> _positions;
     std::vector<llvm::BasicBlock*> _proceedTargets;
     std::vector<llvm::BasicBlock*> _breakTargets;
+    std::vector<llvm::AllocaInst*> _ownedStrings;
     llvm::Function* _currentFunction = nullptr;
+    semantic::SemanticType _currentReturnType{
+        semantic::SemanticTypeKind::Void};
     std::string _error;
 };
 

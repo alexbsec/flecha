@@ -77,6 +77,8 @@ llvm::Type* LlvmCodeGenerator::MapType(semantic::SemanticType type) {
             return llvm::Type::getVoidTy(_context);
         case semantic::SemanticTypeKind::StringView:
             return StringViewType();
+        case semantic::SemanticTypeKind::String:
+            return StringType();
         default:
             Fail("LLVM type is not implemented for '" +
                  std::string(type.Name()) + "'");
@@ -93,12 +95,140 @@ llvm::StructType* LlvmCodeGenerator::StringViewType() {
                    llvm::IntegerType::get(_context, width)});
 }
 
+llvm::StructType* LlvmCodeGenerator::StringType() {
+    const unsigned width = _dataLayout.has_value()
+                               ? _dataLayout->getPointerSizeInBits()
+                               : 64;
+    llvm::Type* sizeType = llvm::IntegerType::get(_context, width);
+    return llvm::StructType::get(
+        _context, {llvm::PointerType::getUnqual(_context), sizeType, sizeType});
+}
+
+llvm::Value* LlvmCodeGenerator::EmitStringView(
+    llvm::Value* value, semantic::SemanticType type) {
+    if (type.Kind() == semantic::SemanticTypeKind::StringView) return value;
+    if (type.Kind() != semantic::SemanticTypeKind::String) {
+        Fail("cannot borrow type '" + std::string(type.Name()) +
+             "' as stringv");
+        return nullptr;
+    }
+    llvm::StructType* viewType = StringViewType();
+    llvm::Value* view = llvm::UndefValue::get(viewType);
+    view = _builder.CreateInsertValue(
+        view, _builder.CreateExtractValue(value, 0, "string.data"), 0);
+    return _builder.CreateInsertValue(
+        view, _builder.CreateExtractValue(value, 1, "string.length"), 1,
+        "string.view");
+}
+
+llvm::Value* LlvmCodeGenerator::EmitOwnedString(
+    llvm::Value* value, semantic::SemanticType sourceType) {
+    llvm::StructType* resultType = StringType();
+    llvm::AllocaInst* output =
+        _builder.CreateAlloca(resultType, nullptr, "string.result");
+    if (sourceType.Kind() == semantic::SemanticTypeKind::String) {
+        llvm::Value* data =
+            _builder.CreateExtractValue(value, 0, "string.copy.data");
+        llvm::Value* length =
+            _builder.CreateExtractValue(value, 1, "string.copy.length");
+        llvm::FunctionType* cloneType = llvm::FunctionType::get(
+            llvm::Type::getVoidTy(_context),
+            {output->getType(), data->getType(), length->getType()}, false);
+        llvm::FunctionCallee clone = _module->getOrInsertFunction(
+            "flecha_runtime_v1_string_clone", cloneType);
+        _builder.CreateCall(clone, {output, data, length});
+        return _builder.CreateLoad(resultType, output, "string.copy");
+    }
+    if (sourceType.Kind() == semantic::SemanticTypeKind::StringView) {
+        llvm::Value* data =
+            _builder.CreateExtractValue(value, 0, "stringv.data");
+        llvm::Value* length =
+            _builder.CreateExtractValue(value, 1, "stringv.length");
+        llvm::FunctionType* fromViewType = llvm::FunctionType::get(
+            llvm::Type::getVoidTy(_context),
+            {output->getType(), data->getType(), length->getType()}, false);
+        llvm::FunctionCallee fromView = _module->getOrInsertFunction(
+            "flecha_runtime_v1_string_from_view", fromViewType);
+        _builder.CreateCall(fromView, {output, data, length});
+        return _builder.CreateLoad(resultType, output, "string");
+    }
+
+    std::string suffix;
+    switch (sourceType.Kind()) {
+        case semantic::SemanticTypeKind::I8: suffix = "i8"; break;
+        case semantic::SemanticTypeKind::I16: suffix = "i16"; break;
+        case semantic::SemanticTypeKind::I32: suffix = "i32"; break;
+        case semantic::SemanticTypeKind::I64: suffix = "i64"; break;
+        case semantic::SemanticTypeKind::ISize: suffix = "isize"; break;
+        case semantic::SemanticTypeKind::U8: suffix = "u8"; break;
+        case semantic::SemanticTypeKind::U16: suffix = "u16"; break;
+        case semantic::SemanticTypeKind::U32: suffix = "u32"; break;
+        case semantic::SemanticTypeKind::U64: suffix = "u64"; break;
+        case semantic::SemanticTypeKind::USize: suffix = "usize"; break;
+        case semantic::SemanticTypeKind::F32: suffix = "f32"; break;
+        case semantic::SemanticTypeKind::F64: suffix = "f64"; break;
+        case semantic::SemanticTypeKind::Bool:
+            suffix = "bool";
+            value = _builder.CreateZExt(
+                value, llvm::Type::getInt8Ty(_context), "string.bool");
+            break;
+        case semantic::SemanticTypeKind::Char: suffix = "char"; break;
+        default:
+            Fail("cannot convert type '" + std::string(sourceType.Name()) +
+                 "' to string");
+            return nullptr;
+    }
+    llvm::FunctionType* formatType = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(_context),
+        {output->getType(), value->getType()}, false);
+    llvm::FunctionCallee format = _module->getOrInsertFunction(
+        "flecha_runtime_v1_string_from_" + suffix, formatType);
+    _builder.CreateCall(format, {output, value});
+    return _builder.CreateLoad(resultType, output, "string.format");
+}
+
+void LlvmCodeGenerator::EmitStringDestroy(llvm::Value* value) {
+    llvm::Value* data =
+        _builder.CreateExtractValue(value, 0, "string.destroy.data");
+    llvm::FunctionType* destroyType = llvm::FunctionType::get(
+        llvm::Type::getVoidTy(_context), {data->getType()}, false);
+    llvm::FunctionCallee destroy = _module->getOrInsertFunction(
+        "flecha_runtime_v1_string_destroy", destroyType);
+    _builder.CreateCall(destroy, {data});
+}
+
+void LlvmCodeGenerator::EmitOwnedStringCleanups() {
+    for (auto iterator = _ownedStrings.rbegin();
+         iterator != _ownedStrings.rend(); ++iterator) {
+        EmitStringDestroy(_builder.CreateLoad(StringType(), *iterator,
+                                              "string.cleanup"));
+    }
+}
+
+llvm::Value* LlvmCodeGenerator::CoerceValue(
+    llvm::Value* value, semantic::SemanticType sourceType,
+    semantic::SemanticType destinationType) {
+    if (sourceType == destinationType) return value;
+    if (destinationType.Kind() == semantic::SemanticTypeKind::String) {
+        return EmitOwnedString(value, sourceType);
+    }
+    if (destinationType.Kind() == semantic::SemanticTypeKind::StringView &&
+        sourceType.Kind() == semantic::SemanticTypeKind::String) {
+        return EmitStringView(value, sourceType);
+    }
+    Fail("LLVM coercion is not implemented from '" +
+         std::string(sourceType.Name()) + "' to '" +
+         std::string(destinationType.Name()) + "'");
+    return nullptr;
+}
+
 llvm::Value* LlvmCodeGenerator::EmitRuntimeOutput(
     llvm::Value* value, semantic::SemanticType type, bool newline) {
     std::string suffix;
     std::vector<llvm::Value*> arguments;
     std::vector<llvm::Type*> parameterTypes;
-    if (type.Kind() == semantic::SemanticTypeKind::StringView) {
+    if (type.Kind() == semantic::SemanticTypeKind::StringView ||
+        type.Kind() == semantic::SemanticTypeKind::String) {
         suffix = "string_view";
         llvm::Value* data =
             _builder.CreateExtractValue(value, 0, "stdout.data");
@@ -179,10 +309,22 @@ llvm::Value* LlvmCodeGenerator::EmitStringViewOperation(
     const lowering::BoundStringViewOperationExpression& expression) {
     llvm::Value* receiver = EmitExpression(expression.Receiver());
     if (receiver == nullptr) return nullptr;
+    if (expression.Operation() == lowering::StringViewOperation::ToString) {
+        return EmitOwnedString(receiver, expression.Receiver().Type());
+    }
+    if (expression.Operation() == lowering::StringViewOperation::Copy) {
+        return EmitOwnedString(receiver, expression.Receiver().Type());
+    }
+    if (expression.Operation() == lowering::StringViewOperation::View) {
+        return EmitStringView(receiver, expression.Receiver().Type());
+    }
+    llvm::Value* view =
+        EmitStringView(receiver, expression.Receiver().Type());
+    if (view == nullptr) return nullptr;
     llvm::Value* data =
-        _builder.CreateExtractValue(receiver, 0, "stringv.data");
+        _builder.CreateExtractValue(view, 0, "stringv.data");
     llvm::Value* length =
-        _builder.CreateExtractValue(receiver, 1, "stringv.length");
+        _builder.CreateExtractValue(view, 1, "stringv.length");
 
     if (expression.Operation() == lowering::StringViewOperation::Length) {
         return _builder.CreateZExtOrTrunc(
@@ -267,7 +409,12 @@ llvm::AllocaInst* LlvmCodeGenerator::CreateEntryAlloca(
     llvm::IRBuilder<> entryBuilder(_context);
     llvm::BasicBlock& entry = _currentFunction->getEntryBlock();
     entryBuilder.SetInsertPoint(&entry, entry.begin());
-    return entryBuilder.CreateAlloca(type, nullptr, variable.Name());
+    llvm::AllocaInst* storage =
+        entryBuilder.CreateAlloca(type, nullptr, variable.Name());
+    if (variable.Type().Kind() == semantic::SemanticTypeKind::String) {
+        entryBuilder.CreateStore(llvm::Constant::getNullValue(type), storage);
+    }
+    return storage;
 }
 
 bool LlvmCodeGenerator::EmitFunction(
@@ -277,6 +424,8 @@ bool LlvmCodeGenerator::EmitFunction(
     _positions.clear();
     _proceedTargets.clear();
     _breakTargets.clear();
+    _ownedStrings.clear();
+    _currentReturnType = boundFunction.Symbol().ReturnType();
     llvm::BasicBlock* entry =
         llvm::BasicBlock::Create(_context, "entry", _currentFunction);
     _builder.SetInsertPoint(entry);
@@ -289,7 +438,12 @@ bool LlvmCodeGenerator::EmitFunction(
         argument.setName(parameter.Name());
         llvm::AllocaInst* storage = CreateEntryAlloca(parameter);
         if (storage == nullptr) return false;
-        _builder.CreateStore(&argument, storage);
+        llvm::Value* parameterValue = &argument;
+        if (parameter.Type().Kind() == semantic::SemanticTypeKind::String) {
+            parameterValue = EmitOwnedString(parameterValue, parameter.Type());
+            _ownedStrings.push_back(storage);
+        }
+        _builder.CreateStore(parameterValue, storage);
         _variables.emplace(&parameter, storage);
     }
 
@@ -297,6 +451,7 @@ bool LlvmCodeGenerator::EmitFunction(
     if (_builder.GetInsertBlock()->getTerminator() == nullptr) {
         if (boundFunction.Symbol().ReturnType().Kind() ==
             semantic::SemanticTypeKind::Void) {
+            EmitOwnedStringCleanups();
             _builder.CreateRetVoid();
         } else {
             _builder.CreateUnreachable();
@@ -366,11 +521,33 @@ bool LlvmCodeGenerator::EmitStatement(
                     statement);
             llvm::Value* value = EmitExpression(declaration.Initializer());
             if (value == nullptr) return false;
+            if (declaration.Variable().Type().Kind() ==
+                    semantic::SemanticTypeKind::String &&
+                declaration.Initializer().Type().Kind() ==
+                    semantic::SemanticTypeKind::String &&
+                declaration.Initializer().Kind() ==
+                    lowering::BoundNodeKind::VariableExpression) {
+                value = EmitOwnedString(value,
+                                        declaration.Initializer().Type());
+            } else {
+                value = CoerceValue(value, declaration.Initializer().Type(),
+                                    declaration.Variable().Type());
+            }
+            if (value == nullptr) return false;
             llvm::AllocaInst* storage =
                 CreateEntryAlloca(declaration.Variable());
             if (storage == nullptr) return false;
+            if (declaration.Variable().Type().Kind() ==
+                semantic::SemanticTypeKind::String) {
+                EmitStringDestroy(_builder.CreateLoad(
+                    StringType(), storage, "string.previous"));
+            }
             _builder.CreateStore(value, storage);
             _variables.emplace(&declaration.Variable(), storage);
+            if (declaration.Variable().Type().Kind() ==
+                semantic::SemanticTypeKind::String) {
+                _ownedStrings.push_back(storage);
+            }
             return true;
         }
         case lowering::BoundNodeKind::ExpressionStatement:
@@ -382,11 +559,25 @@ bool LlvmCodeGenerator::EmitStatement(
             const lowering::BoundReturnStatement& returnStatement =
                 static_cast<const lowering::BoundReturnStatement&>(statement);
             if (returnStatement.Expression() == nullptr) {
+                EmitOwnedStringCleanups();
                 _builder.CreateRetVoid();
                 return true;
             }
             llvm::Value* value = EmitExpression(*returnStatement.Expression());
             if (value == nullptr) return false;
+            const semantic::SemanticType sourceType =
+                returnStatement.Expression()->Type();
+            if (_currentReturnType.Kind() ==
+                    semantic::SemanticTypeKind::String &&
+                sourceType.Kind() == semantic::SemanticTypeKind::String &&
+                returnStatement.Expression()->Kind() ==
+                    lowering::BoundNodeKind::VariableExpression) {
+                value = EmitOwnedString(value, sourceType);
+            } else {
+                value = CoerceValue(value, sourceType, _currentReturnType);
+            }
+            if (value == nullptr) return false;
+            EmitOwnedStringCleanups();
             _builder.CreateRet(value);
             return true;
         }
@@ -561,7 +752,19 @@ llvm::Value* LlvmCodeGenerator::EmitCast(
     llvm::Type* targetType = MapType(expression.Type());
     if (targetType == nullptr) return nullptr;
     const semantic::SemanticType sourceType = expression.Value().Type();
+    if (sourceType.Kind() == semantic::SemanticTypeKind::String &&
+        expression.Type().Kind() == semantic::SemanticTypeKind::String) {
+        return EmitOwnedString(value, sourceType);
+    }
     if (sourceType == expression.Type()) return value;
+
+    if (expression.Type().Kind() == semantic::SemanticTypeKind::String) {
+        return EmitOwnedString(value, sourceType);
+    }
+    if (sourceType.Kind() == semantic::SemanticTypeKind::String &&
+        expression.Type().Kind() == semantic::SemanticTypeKind::StringView) {
+        return EmitStringView(value, sourceType);
+    }
 
     if (sourceType.IsInteger() && expression.Type().IsInteger()) {
         return _builder.CreateIntCast(value, targetType,
@@ -620,10 +823,15 @@ llvm::Value* LlvmCodeGenerator::EmitBinary(
     llvm::Value* left = EmitExpression(expression.Left());
     llvm::Value* right = EmitExpression(expression.Right());
     if (left == nullptr || right == nullptr) return nullptr;
-    if (expression.Left().Type().Kind() ==
-            semantic::SemanticTypeKind::StringView &&
-        expression.Right().Type().Kind() ==
-            semantic::SemanticTypeKind::StringView &&
+    const bool leftString = expression.Left().Type().Kind() ==
+                                semantic::SemanticTypeKind::StringView ||
+                            expression.Left().Type().Kind() ==
+                                semantic::SemanticTypeKind::String;
+    const bool rightString = expression.Right().Type().Kind() ==
+                                 semantic::SemanticTypeKind::StringView ||
+                             expression.Right().Type().Kind() ==
+                                 semantic::SemanticTypeKind::String;
+    if (leftString && rightString &&
         (expression.OperatorType() == TokenType::Equal ||
          expression.OperatorType() == TokenType::NotEqual ||
          expression.OperatorType() == TokenType::StrictEqual ||
@@ -631,7 +839,9 @@ llvm::Value* LlvmCodeGenerator::EmitBinary(
         const bool negate = expression.OperatorType() == TokenType::NotEqual ||
                             expression.OperatorType() ==
                                 TokenType::StrictNotEqual;
-        return EmitStringViewEquality(left, right, negate);
+        return EmitStringViewEquality(
+            EmitStringView(left, expression.Left().Type()),
+            EmitStringView(right, expression.Right().Type()), negate);
     }
     const bool floating = expression.Left().Type().IsFloating();
     const bool unsignedValue = IsUnsigned(expression.Left().Type());
@@ -765,6 +975,24 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
                     expression);
             llvm::Value* value = EmitExpression(assignment.Value());
             if (value == nullptr) return nullptr;
+            if (assignment.Target().Type().Kind() ==
+                    semantic::SemanticTypeKind::String &&
+                assignment.Value().Type().Kind() ==
+                    semantic::SemanticTypeKind::String &&
+                assignment.Value().Kind() ==
+                    lowering::BoundNodeKind::VariableExpression) {
+                value = EmitOwnedString(value, assignment.Value().Type());
+            } else {
+                value = CoerceValue(value, assignment.Value().Type(),
+                                    assignment.Target().Type());
+            }
+            if (value == nullptr) return nullptr;
+            if (assignment.Target().Type().Kind() ==
+                semantic::SemanticTypeKind::String) {
+                EmitStringDestroy(_builder.CreateLoad(
+                    StringType(), _variables.at(&assignment.Target()),
+                    "string.old"));
+            }
             _builder.CreateStore(value, _variables.at(&assignment.Target()));
             return value;
         }
@@ -773,11 +1001,21 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
                 static_cast<const lowering::BoundCallExpression&>(expression);
             std::vector<llvm::Value*> arguments;
             arguments.reserve(call.Arguments().size());
+            std::size_t argumentIndex = 0;
             for (const std::unique_ptr<lowering::BoundExpression>& argument :
                  call.Arguments()) {
                 llvm::Value* value = EmitExpression(*argument);
                 if (value == nullptr) return nullptr;
+                if (call.Function().BuiltIn() ==
+                        semantic::BuiltInFunction::None &&
+                    argumentIndex < call.Function().ParameterTypes().size()) {
+                    value = CoerceValue(
+                        value, argument->Type(),
+                        call.Function().ParameterTypes()[argumentIndex]);
+                    if (value == nullptr) return nullptr;
+                }
                 arguments.push_back(value);
+                ++argumentIndex;
             }
             if (call.Function().BuiltIn() ==
                 semantic::BuiltInFunction::Stdout) {

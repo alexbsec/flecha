@@ -27,3 +27,31 @@ TEST(RuntimeStringViewTests, RejectsInvalidBounds) {
     EXPECT_DEATH(flecha_runtime_v1_string_view_check_substr(6, 5, 2),
                  "out of bounds");
 }
+
+TEST(RuntimeStringTests, OwnsClonesAndDestroysIndependentStorage) {
+    FlechaRuntimeString first{};
+    flecha_runtime_v1_string_from_view(&first, "hi mom", 6);
+    ASSERT_NE(first.data, nullptr);
+    EXPECT_EQ(first.length, 6);
+    EXPECT_EQ(first.capacity, 6);
+    EXPECT_STREQ(first.data, "hi mom");
+
+    FlechaRuntimeString copy{};
+    flecha_runtime_v1_string_clone(&copy, first.data, first.length);
+    ASSERT_NE(copy.data, nullptr);
+    EXPECT_NE(copy.data, first.data);
+    EXPECT_EQ(copy.length, first.length);
+    EXPECT_STREQ(copy.data, first.data);
+
+    flecha_runtime_v1_string_destroy(copy.data);
+    flecha_runtime_v1_string_destroy(first.data);
+}
+
+TEST(RuntimeStringTests, EmptyStringNeedsNoAllocation) {
+    FlechaRuntimeString empty{};
+    flecha_runtime_v1_string_from_view(&empty, "", 0);
+    EXPECT_EQ(empty.data, nullptr);
+    EXPECT_EQ(empty.length, 0);
+    EXPECT_EQ(empty.capacity, 0);
+    flecha_runtime_v1_string_destroy(empty.data);
+}

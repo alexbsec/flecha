@@ -71,6 +71,8 @@ TEST(SemanticTypeTests, RepresentsEverySyntaxPrimitive) {
     EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::Bool).Name(), "bool");
     EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::Char).Name(), "char");
     EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::Void).Name(), "void");
+    EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::String).Name(),
+              "string");
     EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::StringView).Name(),
               "stringv");
     EXPECT_TRUE(IsAssignable(SemanticType(SemanticTypeKind::I32),
@@ -213,6 +215,44 @@ TEST(SemanticStringViewTests, DiagnosesInvalidMembersIndicesAndArguments) {
         Analyze("void Main() { text := \"x\"; text.substr(0); }");
     EXPECT_NE(FindDiagnostic(wrongCount, DiagnosticCode::WrongArgumentCount),
               nullptr);
+}
+
+TEST(SemanticStringTests, SupportsOwningConversionsAndLiteralMembers) {
+    Analysis analysis = Analyze(
+        "string FromLiteral() { string first = \"hi mom\".string(); "
+        "string second = \"hi mom\".cast<string>; "
+        "stringv borrowed = first.view(); "
+        "stringv symmetric = second.cast<stringv>; "
+        "string copied = first.copy(); return copied; }");
+
+    ASSERT_FALSE(analysis.diagnostics.HasErrors());
+    const FunctionDeclaration& function = FunctionAt(analysis, 0);
+    EXPECT_EQ(analysis.model.DeclaredSymbol(VariableAt(function, 0))
+                  ->Type()
+                  .Kind(),
+              SemanticTypeKind::String);
+    EXPECT_EQ(analysis.model.DeclaredSymbol(VariableAt(function, 2))
+                  ->Type()
+                  .Kind(),
+              SemanticTypeKind::StringView);
+}
+
+TEST(SemanticStringTests, FormatsScalarsOnlyAsOwningStrings) {
+    Analysis valid = Analyze(
+        "void Main() { integer := 42.string(); decimal := 1.5.string(); "
+        "boolean := true.string(); character := 'x'.string(); "
+        "castValue := 42.cast<string>; }");
+    ASSERT_FALSE(valid.diagnostics.HasErrors());
+    const FunctionDeclaration& function = FunctionAt(valid, 0);
+    for (std::size_t index = 0; index < 5; ++index) {
+        EXPECT_EQ(valid.model.DeclaredSymbol(VariableAt(function, index))
+                      ->Type()
+                      .Kind(),
+                  SemanticTypeKind::String);
+    }
+
+    Analysis invalid = Analyze("void Main() { value := 42.cast<stringv>; }");
+    EXPECT_NE(FindDiagnostic(invalid, DiagnosticCode::InvalidCast), nullptr);
 }
 
 TEST(SemanticDeclarationTests, BindsEveryNameToItsResolvedSymbol) {

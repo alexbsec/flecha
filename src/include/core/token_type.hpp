@@ -22,6 +22,7 @@ enum class TokenType {
     Char,
     Bool,
     Void,
+    String,
     StringView,
 
     // Operators

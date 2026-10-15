@@ -3,6 +3,7 @@
 #include <cinttypes>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 
 extern "C" {
 
@@ -96,5 +97,104 @@ void flecha_runtime_v1_string_view_check_substr(size_t length, uint32_t start,
         std::abort();
     }
 }
+
+void flecha_runtime_v1_string_from_view(FlechaRuntimeString* output,
+                                        const char* data, size_t length) {
+    if (length == 0) {
+        *output = {nullptr, 0, 0};
+        return;
+    }
+    if (length == SIZE_MAX) {
+        (void)std::fputs(
+            "Flecha runtime error: string allocation size overflow\n", stderr);
+        std::abort();
+    }
+    char* owned = static_cast<char*>(std::malloc(length + 1));
+    if (owned == nullptr) {
+        (void)std::fputs("Flecha runtime error: string allocation failed\n",
+                         stderr);
+        std::abort();
+    }
+    std::memcpy(owned, data, length);
+    owned[length] = '\0';
+    *output = {owned, length, length};
+}
+
+void flecha_runtime_v1_string_clone(FlechaRuntimeString* output,
+                                    const char* data, size_t length) {
+    flecha_runtime_v1_string_from_view(output, data, length);
+}
+
+void flecha_runtime_v1_string_destroy(char* data) {
+    std::free(data);
+}
+
+#define FLECHA_FORMAT_STRING_FUNCTION(name, type, format)                    \
+    void flecha_runtime_v1_string_from_##name(                               \
+        FlechaRuntimeString* output, type value) {                           \
+        char buffer[128];                                                     \
+        const int length = std::snprintf(buffer, sizeof(buffer), format,      \
+                                         value);                              \
+        if (length < 0 || static_cast<size_t>(length) >= sizeof(buffer)) {    \
+            (void)std::fputs(                                                 \
+                "Flecha runtime error: scalar formatting failed\n", stderr); \
+            std::abort();                                                     \
+        }                                                                     \
+        flecha_runtime_v1_string_from_view(                                  \
+            output, buffer, static_cast<size_t>(length));                    \
+    }
+
+FLECHA_FORMAT_STRING_FUNCTION(i8, int8_t, "%" PRId8)
+FLECHA_FORMAT_STRING_FUNCTION(i16, int16_t, "%" PRId16)
+FLECHA_FORMAT_STRING_FUNCTION(i32, int32_t, "%" PRId32)
+FLECHA_FORMAT_STRING_FUNCTION(i64, int64_t, "%" PRId64)
+FLECHA_FORMAT_STRING_FUNCTION(isize, intptr_t, "%" PRIdPTR)
+FLECHA_FORMAT_STRING_FUNCTION(u8, uint8_t, "%" PRIu8)
+FLECHA_FORMAT_STRING_FUNCTION(u16, uint16_t, "%" PRIu16)
+FLECHA_FORMAT_STRING_FUNCTION(u32, uint32_t, "%" PRIu32)
+FLECHA_FORMAT_STRING_FUNCTION(u64, uint64_t, "%" PRIu64)
+FLECHA_FORMAT_STRING_FUNCTION(usize, uintptr_t, "%" PRIuPTR)
+
+void flecha_runtime_v1_string_from_f32(FlechaRuntimeString* output,
+                                       float value) {
+    char buffer[128];
+    const int length = std::snprintf(buffer, sizeof(buffer), "%.9g",
+                                     static_cast<double>(value));
+    if (length < 0 || static_cast<size_t>(length) >= sizeof(buffer)) {
+        (void)std::fputs(
+            "Flecha runtime error: scalar formatting failed\n", stderr);
+        std::abort();
+    }
+    flecha_runtime_v1_string_from_view(output, buffer,
+                                       static_cast<size_t>(length));
+}
+
+void flecha_runtime_v1_string_from_f64(FlechaRuntimeString* output,
+                                       double value) {
+    char buffer[128];
+    const int length =
+        std::snprintf(buffer, sizeof(buffer), "%.17g", value);
+    if (length < 0 || static_cast<size_t>(length) >= sizeof(buffer)) {
+        (void)std::fputs(
+            "Flecha runtime error: scalar formatting failed\n", stderr);
+        std::abort();
+    }
+    flecha_runtime_v1_string_from_view(output, buffer,
+                                       static_cast<size_t>(length));
+}
+
+void flecha_runtime_v1_string_from_bool(FlechaRuntimeString* output,
+                                        uint8_t value) {
+    const char* text = value == 0 ? "false" : "true";
+    flecha_runtime_v1_string_from_view(output, text, value == 0 ? 5 : 4);
+}
+
+void flecha_runtime_v1_string_from_char(FlechaRuntimeString* output,
+                                        uint8_t value) {
+    const char character = static_cast<char>(value);
+    flecha_runtime_v1_string_from_view(output, &character, 1);
+}
+
+#undef FLECHA_FORMAT_STRING_FUNCTION
 
 }  // extern "C"
