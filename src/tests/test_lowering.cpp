@@ -57,9 +57,10 @@ TEST(LoweringTests, ResolvesDeclarationsNamesAssignmentsAndCalls) {
             *mainFunction.Body().Statements()[0]);
     EXPECT_EQ(declaration.Variable().Name(), "value");
     EXPECT_EQ(declaration.Variable().Type().Kind(), SemanticTypeKind::I32);
-    ASSERT_EQ(declaration.Initializer().Kind(), BoundNodeKind::CallExpression);
+    ASSERT_NE(declaration.Initializer(), nullptr);
+    ASSERT_EQ(declaration.Initializer()->Kind(), BoundNodeKind::CallExpression);
     const BoundCallExpression& call =
-        static_cast<const BoundCallExpression&>(declaration.Initializer());
+        static_cast<const BoundCallExpression&>(*declaration.Initializer());
     EXPECT_EQ(call.Function().Name(), "add");
     EXPECT_EQ(call.Arguments().size(), 2);
 
@@ -120,10 +121,11 @@ TEST(LoweringTests, PreservesEveryCastInAChain) {
     const BoundVariableDeclarationStatement& declaration =
         static_cast<const BoundVariableDeclarationStatement&>(
             *function.Body().Statements()[0]);
-    ASSERT_EQ(declaration.Initializer().Kind(),
+    ASSERT_NE(declaration.Initializer(), nullptr);
+    ASSERT_EQ(declaration.Initializer()->Kind(),
               BoundNodeKind::CastExpression);
     const BoundCastExpression& outer =
-        static_cast<const BoundCastExpression&>(declaration.Initializer());
+        static_cast<const BoundCastExpression&>(*declaration.Initializer());
     EXPECT_EQ(outer.Type().Kind(), SemanticTypeKind::I32);
     ASSERT_EQ(outer.Value().Kind(), BoundNodeKind::CastExpression);
     const BoundCastExpression& middle =
@@ -194,10 +196,10 @@ TEST(LoweringTests, NormalizesStringViewMembersAndIndexSyntax) {
             *function.Body().Statements()[2]);
     const BoundStringViewOperationExpression& at =
         static_cast<const BoundStringViewOperationExpression&>(
-            atDeclaration.Initializer());
+            *atDeclaration.Initializer());
     const BoundStringViewOperationExpression& index =
         static_cast<const BoundStringViewOperationExpression&>(
-            indexDeclaration.Initializer());
+            *indexDeclaration.Initializer());
     EXPECT_EQ(at.Operation(), StringViewOperation::At);
     EXPECT_EQ(index.Operation(), StringViewOperation::At);
 }

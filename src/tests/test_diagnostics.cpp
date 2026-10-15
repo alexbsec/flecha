@@ -75,6 +75,12 @@ TEST(DiagnosticTests, SemanticCodesAreStableAndContiguous) {
               "FLECHA-S0018");
     EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::NotIndexable),
               "FLECHA-S0019");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::BorrowEscapesOwner),
+              "FLECHA-S0020");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::UninitializedVariable),
+              "FLECHA-S0021");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::BorrowRequiresInitializer),
+              "FLECHA-S0022");
 }
 
 TEST(DiagnosticTests, CompilerCodesAreStableAndContiguous) {

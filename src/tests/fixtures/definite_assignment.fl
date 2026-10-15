@@ -1,0 +1,15 @@
+i32 main() {
+    i32 answer;
+    string message;
+
+    if true {
+        answer = 42;
+        message = "initialized";
+    } else {
+        answer = 0;
+        message = "unreachable";
+    }
+
+    stdoutln(message);
+    return answer;
+}

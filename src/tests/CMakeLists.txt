@@ -63,3 +63,12 @@ add_test(
         -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/owning_string_scalars_test
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_owning_string_scalars.cmake
 )
+
+add_test(
+    NAME NativeSemanticTests.DefiniteAssignment
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/definite_assignment.fl
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/definite_assignment_test
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_definite_assignment.cmake
+)

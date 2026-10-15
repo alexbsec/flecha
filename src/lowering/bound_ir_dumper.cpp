@@ -98,8 +98,11 @@ class Dumper final {
                     static_cast<const BoundVariableDeclarationStatement&>(
                         statement);
                 _stream << "local " << declaration.Variable().Name() << ": "
-                        << declaration.Variable().Type().Name() << " = ";
-                WriteExpression(declaration.Initializer());
+                        << declaration.Variable().Type().Name();
+                if (declaration.Initializer() != nullptr) {
+                    _stream << " = ";
+                    WriteExpression(*declaration.Initializer());
+                }
                 _stream << "\n";
                 break;
             }

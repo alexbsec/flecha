@@ -305,9 +305,11 @@ Parser::ParseVariableDeclarationStatement() {
     const source::SourceLocation start = Current().range.start;
     std::unique_ptr<TypeNode> type;
     const Token* name = nullptr;
+    bool hasInitializer = false;
     if (IsInferredVariableDeclaration()) {
         name = &Advance();
         Advance();
+        hasInitializer = true;
     } else {
         type = ParseType();
         if (type == nullptr) {
@@ -318,20 +320,25 @@ Parser::ParseVariableDeclarationStatement() {
         if (name == nullptr) {
             return nullptr;
         }
-        if (Consume(TokenType::Assign, "'=' after variable name") == nullptr) {
-            return nullptr;
+        if (Check(TokenType::Assign)) {
+            Advance();
+            hasInitializer = true;
         }
     }
 
-    std::unique_ptr<Expression> initializer = ParseExpression();
-    if (initializer == nullptr) {
-        return nullptr;
+    std::unique_ptr<Expression> initializer;
+    if (hasInitializer) {
+        initializer = ParseExpression();
+        if (initializer == nullptr) return nullptr;
     }
 
     const Token* semicolon =
         Consume(TokenType::SemiColon, "';' after variable declaration");
     const source::SourceLocation end =
-        semicolon == nullptr ? initializer->Range().end : semicolon->range.end;
+        semicolon == nullptr
+            ? (initializer == nullptr ? name->range.end
+                                      : initializer->Range().end)
+            : semicolon->range.end;
     return std::make_unique<VariableDeclarationStatement>(
         source::SourceRange{start, end}, std::move(type), name->value,
         std::move(initializer), name->range);

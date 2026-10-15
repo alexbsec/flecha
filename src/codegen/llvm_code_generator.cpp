@@ -597,10 +597,13 @@ bool LlvmCodeGenerator::EmitStatement(
             const lowering::BoundVariableDeclarationStatement& declaration =
                 static_cast<const lowering::BoundVariableDeclarationStatement&>(
                     statement);
-            llvm::Value* value = EmitExpression(declaration.Initializer());
-            if (value == nullptr) return false;
-            value = CoerceValue(value, declaration.Initializer().Type(),
-                                declaration.Variable().Type());
+            llvm::Value* value = nullptr;
+            if (declaration.Initializer() != nullptr) {
+                value = EmitExpression(*declaration.Initializer());
+                if (value == nullptr) return false;
+                value = CoerceValue(value, declaration.Initializer()->Type(),
+                                    declaration.Variable().Type());
+            }
             if (value != nullptr && declaration.Variable().Type().Kind() ==
                                         semantic::SemanticTypeKind::String) {
                 value = EmitOwnedString(
@@ -608,16 +611,15 @@ bool LlvmCodeGenerator::EmitStatement(
                                semantic::SemanticTypeKind::String),
                     false);
             }
-            if (value == nullptr) return false;
             llvm::AllocaInst* storage =
                 CreateEntryAlloca(declaration.Variable());
             if (storage == nullptr) return false;
-            if (declaration.Variable().Type().Kind() ==
+            if (value != nullptr && declaration.Variable().Type().Kind() ==
                 semantic::SemanticTypeKind::String) {
                 EmitStringDestroy(_builder.CreateLoad(
                     StringType(), storage, "string.previous"));
             }
-            _builder.CreateStore(value, storage);
+            if (value != nullptr) _builder.CreateStore(value, storage);
             _variables.emplace(&declaration.Variable(), storage);
             if (declaration.Variable().Type().Kind() ==
                 semantic::SemanticTypeKind::String) {

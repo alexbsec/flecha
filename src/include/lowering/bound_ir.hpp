@@ -283,8 +283,8 @@ class BoundVariableDeclarationStatement final : public BoundStatement {
     [[nodiscard]] const semantic::VariableSymbol& Variable() const {
         return _variable;
     }
-    [[nodiscard]] const BoundExpression& Initializer() const {
-        return *_initializer;
+    [[nodiscard]] const BoundExpression* Initializer() const {
+        return _initializer.get();
     }
 
    private:

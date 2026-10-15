@@ -76,9 +76,12 @@ std::unique_ptr<BoundStatement> Lowerer::LowerStatement(
             const semantic::VariableSymbol& symbol =
                 static_cast<const semantic::VariableSymbol&>(
                     *_semanticModel->DeclaredSymbol(declaration));
+            std::unique_ptr<BoundExpression> initializer;
+            if (declaration.Initializer() != nullptr) {
+                initializer = LowerExpression(*declaration.Initializer());
+            }
             return std::make_unique<BoundVariableDeclarationStatement>(
-                declaration.Range(), symbol,
-                LowerExpression(*declaration.Initializer()));
+                declaration.Range(), symbol, std::move(initializer));
         }
         case core::AstNodeKind::ExpressionStatement: {
             const core::ExpressionStatement& expressionStatement =
