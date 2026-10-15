@@ -34,6 +34,18 @@ class SemanticAnalyzer final {
     void RegisterErrorTypes(const core::CompilationUnit& unit);
     SemanticType AnalyzeMemberAccess(
         const core::MemberAccessExpression& expression);
+    void RegisterStructures(const core::CompilationUnit& unit);
+    void ResolveStructureFields();
+    void RegisterFunction(const core::FunctionDeclaration& function,
+                          bool generated = false);
+    void GenerateInitializers();
+    SemanticType AnalyzeBuild(const core::BuildExpression& expression);
+    SemanticType AnalyzeStructureCall(
+        const core::MemberCallExpression& expression, SemanticType receiver);
+    void CheckCopy(const core::Expression& expression, SemanticType type);
+    void CheckMethodAccess(const FunctionSymbol& function,
+                           source::SourceRange range);
+    const StructureType* CurrentOwner() const;
     void RegisterBuiltIns();
     void RegisterFunctions(const core::CompilationUnit& unit);
     void AnalyzeFunction(const core::FunctionDeclaration& function);
@@ -78,6 +90,9 @@ class SemanticAnalyzer final {
     std::unordered_set<const Symbol*> _localStringBorrows;
     std::size_t _loopDepth = 0;
     bool _inUnsafe = false;
+    const Symbol* _buildSelf = nullptr;
+    bool _allowBuildSelf = false;
+    std::size_t _buildDepth = 0;
 };
 
 }  // namespace flecha::semantic

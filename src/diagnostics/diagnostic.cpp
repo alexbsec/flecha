@@ -96,6 +96,14 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0039";
         case DiagnosticCode::InvalidErrorDeclaration:
             return "FLECHA-S0041";
+        case DiagnosticCode::InvalidStructure:
+            return "FLECHA-S0043";
+        case DiagnosticCode::PrivateAccess:
+            return "FLECHA-S0044";
+        case DiagnosticCode::InvalidLifecycle:
+            return "FLECHA-S0045";
+        case DiagnosticCode::NonCopyableValue:
+            return "FLECHA-S0046";
         case DiagnosticCode::UnknownType:
             return "FLECHA-S0042";
         case DiagnosticCode::InvalidDestructure:

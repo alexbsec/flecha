@@ -172,3 +172,12 @@ loop usize index = 0; index < values.len(); index++ {}
 
 Range values are copies from a snapshot evaluated once before the loop. Use the
 counted form or index-only range with explicit indexing to mutate the original.
+
+## Structure elements
+
+Arrays also support [structure](structures.md) elements. Their fields are
+constructed in place and destroyed in reverse element order. Copyable elements
+clone owned fields; arrays containing a custom tear are noncopyable. An unsafe
+tear makes the containing array immovable. Such arrays require an initializer
+and fresh elements rather than copies. These rules also apply when arrays are
+structure fields.

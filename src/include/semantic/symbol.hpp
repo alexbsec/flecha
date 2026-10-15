@@ -2,6 +2,7 @@
 #define FLECHA_SEMANTIC_SYMBOL_HPP
 
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -10,7 +11,13 @@
 
 namespace flecha::semantic {
 
-enum class SymbolKind { Function, Parameter, LocalVariable, ErrorType };
+enum class SymbolKind {
+    Function,
+    Parameter,
+    LocalVariable,
+    ErrorType,
+    StructureType
+};
 
 enum class BuiltInFunction { None, Stdout, StdoutLine };
 
@@ -59,20 +66,27 @@ class FunctionSymbol final : public Symbol {
                    std::vector<SemanticType> parameterTypes,
                    source::SourceRange declarationRange,
                    BuiltInFunction builtIn = BuiltInFunction::None,
-                   bool isUnsafe = false)
+                   bool isUnsafe = false, const StructureType* owner = nullptr,
+                   bool isPrivate = false, bool hasReceiver = false)
         : Symbol(SymbolKind::Function, std::move(name),
                  SemanticType(SemanticTypeKind::Function), declarationRange,
                  false),
           _returnType(returnType),
           _parameterTypes(std::move(parameterTypes)),
           _builtIn(builtIn),
-          _isUnsafe(isUnsafe) {}
+          _isUnsafe(isUnsafe),
+          _owner(owner),
+          _isPrivate(isPrivate),
+          _hasReceiver(hasReceiver) {}
 
     [[nodiscard]] SemanticType ReturnType() const { return _returnType; }
     [[nodiscard]] const std::vector<SemanticType>& ParameterTypes() const {
         return _parameterTypes;
     }
     [[nodiscard]] bool IsUnsafe() const { return _isUnsafe; }
+    const StructureType* Owner() const { return _owner; }
+    bool IsPrivate() const { return _isPrivate; }
+    bool HasReceiver() const { return _hasReceiver; }
     [[nodiscard]] BuiltInFunction BuiltIn() const { return _builtIn; }
 
    private:
@@ -80,6 +94,25 @@ class FunctionSymbol final : public Symbol {
     std::vector<SemanticType> _parameterTypes;
     BuiltInFunction _builtIn;
     bool _isUnsafe;
+    const StructureType* _owner;
+    bool _isPrivate;
+    bool _hasReceiver;
+};
+
+struct StructureField final {
+    std::string name;
+    SemanticType type;
+    const core::StructureField* syntax;
+};
+
+struct StructureType final {
+    std::string name;
+    const core::StructureDeclaration* syntax = nullptr;
+    std::vector<StructureField> fields;
+    std::unordered_map<std::string, const FunctionSymbol*> methods;
+    const FunctionSymbol* init = nullptr;
+    const FunctionSymbol* tear = nullptr;
+    bool validLayout = false;
 };
 
 }  // namespace flecha::semantic

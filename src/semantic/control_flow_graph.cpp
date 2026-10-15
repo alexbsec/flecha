@@ -254,6 +254,28 @@ class GraphBuilder final {
 
     NodeId BuildExpression(const core::Expression& expression, NodeId next) {
         switch (expression.Kind()) {
+            case core::AstNodeKind::BuildExpression: {
+                const auto& build =
+                    static_cast<const core::BuildExpression&>(expression);
+                const Symbol* self = _model.DeclaredSymbol(expression);
+                // Construction self is a temporary capability. A reference to
+                // one of its fields must not escape and bypass loans on the
+                // completed destination variable.
+                _graph.symbolScopes[self] = &build.Body();
+                const NodeId body = BuildBlock(build.Body(), next);
+                const NodeId start = AddNode({body});
+                _graph.nodes[start].reset = self;
+                _graph.nodes[start].write = self;
+                return start;
+            }
+            case core::AstNodeKind::MemberAccessExpression: {
+                const auto& field =
+                    static_cast<const core::MemberAccessExpression&>(
+                        expression);
+                return _model.FieldFor(field)
+                           ? BuildExpression(field.Receiver(), next)
+                           : next;
+            }
             case core::AstNodeKind::SliceExpression: {
                 const auto& slice =
                     static_cast<const core::SliceExpression&>(expression);
@@ -350,7 +372,9 @@ class GraphBuilder final {
                      argument != call.Arguments().rend(); ++argument) {
                     next = BuildExpression(**argument, next);
                 }
-                return BuildExpression(call.Receiver(), next);
+                return call.Access() == TokenType::Scope
+                           ? next
+                           : BuildExpression(call.Receiver(), next);
             }
             case core::AstNodeKind::IndexExpression: {
                 const auto& index =

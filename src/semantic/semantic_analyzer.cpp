@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <charconv>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -27,6 +28,7 @@ bool IsArrayElement(SemanticType type) {
     if (type.Kind() == SemanticTypeKind::Array)
         return IsArrayElement(*type.Target());
     return type.IsNumeric() || type.IsErrorValue() ||
+           type.Kind() == SemanticTypeKind::Structure ||
            type.Kind() == SemanticTypeKind::Bool ||
            type.Kind() == SemanticTypeKind::Char ||
            type.Kind() == SemanticTypeKind::Pointer;
@@ -37,6 +39,18 @@ bool IsArrayElement(SemanticType type) {
 std::optional<std::uint64_t> StorageSize(SemanticType type) {
     constexpr std::uint64_t MAX_BYTES =
         std::numeric_limits<std::ptrdiff_t>::max() / 8;
+    if (type.Kind() == SemanticTypeKind::Structure) {
+        if (!type.Structure()->validLayout) return std::nullopt;
+        std::uint64_t size = 0;
+        for (const auto& field : type.Structure()->fields) {
+            const auto bytes = StorageSize(field.type);
+            if (!bytes || *bytes > MAX_BYTES - 16 ||
+                size > MAX_BYTES - *bytes - 16)
+                return std::nullopt;
+            size += *bytes + 16;
+        }
+        return size;
+    }
     if (type.Kind() == SemanticTypeKind::Tuple) {
         std::uint64_t size = 0;
         for (const auto& field : type.Elements()) {
@@ -174,7 +188,9 @@ const Symbol* SemanticAnalyzer::AddSymbol(std::unique_ptr<Symbol> symbol,
 SemanticType SemanticAnalyzer::ResolveTypeSyntax(const core::TypeNode& type) {
     if (type.TypeForm() == core::TypeKind::Named) {
         const Symbol* symbol = _currentScope->Lookup(type.Name());
-        if (symbol == nullptr || symbol->Kind() != SymbolKind::ErrorType) {
+        if (symbol == nullptr ||
+            (symbol->Kind() != SymbolKind::ErrorType &&
+             symbol->Kind() != SymbolKind::StructureType)) {
             Report(diagnostics::DiagnosticCode::UnknownType, type.Range(),
                    "unknown type '" + type.Name() + "'");
             return SemanticType::Error();
@@ -220,10 +236,10 @@ SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type) {
         if (layer->Kind() == SemanticTypeKind::Void ||
             layer->Kind() == SemanticTypeKind::String ||
             layer->Kind() == SemanticTypeKind::StringView) {
-            Report(
-                diagnostics::DiagnosticCode::UnsupportedCompoundType,
-                type.Range(),
-                "references currently require scalar or raw-pointer storage");
+            Report(diagnostics::DiagnosticCode::UnsupportedCompoundType,
+                   type.Range(),
+                   "references currently require scalar, array, structure, or "
+                   "raw-pointer storage");
         }
     }
     while (layer->Target() != nullptr) {
@@ -241,6 +257,7 @@ SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type) {
     if (layer->Kind() == SemanticTypeKind::Tuple)
         ValidateTupleType(*layer, type.Range());
     if (result.Kind() == SemanticTypeKind::Reference &&
+        result.Target()->Kind() == SemanticTypeKind::Tuple &&
         result.Target()->OwnsStorage())
         Report(diagnostics::DiagnosticCode::UnsupportedCompoundType,
                type.Range(),
@@ -260,6 +277,7 @@ void SemanticAnalyzer::ValidateTupleType(SemanticType type,
             ValidateArrayType(element, range);
         else if (!element.IsError() && !element.IsErrorValue() &&
                  !element.IsNumeric() &&
+                 element.Kind() != SemanticTypeKind::Structure &&
                  element.Kind() != SemanticTypeKind::Bool &&
                  element.Kind() != SemanticTypeKind::Char &&
                  element.Kind() != SemanticTypeKind::Pointer &&
@@ -267,7 +285,8 @@ void SemanticAnalyzer::ValidateTupleType(SemanticType type,
             Report(diagnostics::DiagnosticCode::InvalidTuple, range,
                    "tuple elements must be owned values: scalars, error "
                    "values, raw "
-                   "pointers, strings, fixed arrays, or tuples; found '" +
+                   "pointers, strings, structures, fixed arrays, or tuples; "
+                   "found '" +
                        element.Name() + "'");
     }
 }
@@ -341,6 +360,9 @@ void SemanticAnalyzer::AnalyzeDestructure(
                    "destructuring requires a tuple value");
         return;
     }
+    if (value.ContainsStructure() && !value.IsCopyable())
+        Report(diagnostics::DiagnosticCode::NonCopyableValue, statement.Range(),
+               "destructuring cannot copy or move a non-copyable structure");
     if (statement.Bindings().size() != value.Elements().size() ||
         statement.Bindings().size() < 2) {
         Report(diagnostics::DiagnosticCode::InvalidDestructure,
@@ -413,41 +435,115 @@ void SemanticAnalyzer::RegisterErrorTypes(const core::CompilationUnit& unit) {
 }
 
 void SemanticAnalyzer::RegisterFunctions(const core::CompilationUnit& unit) {
-    for (const std::unique_ptr<core::Declaration>& declaration :
-         unit.Declarations()) {
-        if (declaration->Kind() != core::AstNodeKind::FunctionDeclaration) {
-            continue;
+    for (const auto& declaration : unit.Declarations())
+        if (declaration->Kind() == core::AstNodeKind::FunctionDeclaration)
+            RegisterFunction(
+                static_cast<const core::FunctionDeclaration&>(*declaration));
+}
+
+void SemanticAnalyzer::RegisterFunction(
+    const core::FunctionDeclaration& function, bool generated) {
+    StructureType* owner = nullptr;
+    if (!function.Owner().empty()) {
+        const Symbol* type = _currentScope->Lookup(function.Owner());
+        if (!type || type->Kind() != SymbolKind::StructureType) {
+            Report(diagnostics::DiagnosticCode::UnknownType,
+                   function.NameRange(),
+                   "unknown structure '" + function.Owner() + "'");
+        } else
+            owner = const_cast<StructureType*>(type->Type().Structure());
+    }
+    std::vector<SemanticType> parameterTypes;
+    bool receiver = false;
+    for (const auto& parameter : function.Parameters()) {
+        SemanticType type = ResolveType(parameter->Type());
+        if (parameter->Name() == "self") {
+            receiver = owner && parameterTypes.empty() &&
+                       (type.Kind() == SemanticTypeKind::Reference ||
+                        type.Kind() == SemanticTypeKind::Pointer) &&
+                       type.Target()->Structure() == owner;
+            if (!receiver)
+                Report(diagnostics::DiagnosticCode::InvalidStructure,
+                       parameter->Range(),
+                       "self must be the first parameter and borrow or point "
+                       "to the owning structure");
         }
-        const core::FunctionDeclaration& function =
-            static_cast<const core::FunctionDeclaration&>(*declaration);
-        std::vector<SemanticType> parameterTypes;
-        parameterTypes.reserve(function.Parameters().size());
-        for (const std::unique_ptr<core::Parameter>& parameter :
-             function.Parameters()) {
-            parameterTypes.push_back(ResolveType(parameter->Type()));
-        }
-        const SemanticType returnType = ResolveType(function.ReturnType());
-        if (returnType.IsBorrowed()) {
-            Report(diagnostics::DiagnosticCode::ReferenceEscape,
-                   function.ReturnType().Range(),
-                   "reference and slice returns require a lifetime contract "
-                   "and are not "
-                   "yet supported");
-        }
-        AddSymbol(std::make_unique<FunctionSymbol>(
-                      function.Name(), returnType, std::move(parameterTypes),
-                      function.NameRange(), BuiltInFunction::None,
-                      function.IsUnsafe()),
-                  function);
+        parameterTypes.push_back(type);
+    }
+    const SemanticType returnType = ResolveType(function.ReturnType());
+    if (returnType.IsBorrowed())
+        Report(diagnostics::DiagnosticCode::ReferenceEscape,
+               function.ReturnType().Range(),
+               "reference and slice returns require a lifetime contract and "
+               "are not yet supported");
+    const bool lifecycle =
+        owner && (function.Name() == "init" || function.Name() == "tear");
+    if (function.HasModifier(core::FunctionModifier::Override) !=
+        (lifecycle && !generated))
+        Report(diagnostics::DiagnosticCode::InvalidLifecycle,
+               function.NameRange(),
+               "override is required exactly when replacing init or tear");
+    if (function.HasModifier(core::FunctionModifier::Private) && !owner)
+        Report(diagnostics::DiagnosticCode::InvalidStructure,
+               function.NameRange(), "private requires a structure method");
+    if (owner && function.Name() == "init" &&
+        (receiver || returnType.WithoutConst() != SemanticType(owner)))
+        Report(diagnostics::DiagnosticCode::InvalidLifecycle, function.Range(),
+               "init must be static and return its structure type");
+    if (owner && function.Name() == "tear" &&
+        (returnType.Kind() != SemanticTypeKind::Void ||
+         parameterTypes.size() != 1 || !receiver ||
+         parameterTypes[0].Kind() != SemanticTypeKind::Reference ||
+         parameterTypes[0].Target()->IsConst()))
+        Report(diagnostics::DiagnosticCode::InvalidLifecycle, function.Range(),
+               "tear must return void and take only &self");
+    const std::string name =
+        owner ? owner->name + "::" + function.Name() : function.Name();
+    const auto* symbol = static_cast<const FunctionSymbol*>(AddSymbol(
+        std::make_unique<FunctionSymbol>(
+            name, returnType, std::move(parameterTypes), function.NameRange(),
+            BuiltInFunction::None, function.IsUnsafe(), owner,
+            function.HasModifier(core::FunctionModifier::Private), receiver),
+        function));
+    if (owner && symbol) {
+        owner->methods.emplace(function.Name(), symbol);
+        if (function.Name() == "init") owner->init = symbol;
+        if (function.Name() == "tear") owner->tear = symbol;
+        for (const auto& field : owner->fields)
+            if (field.name == function.Name())
+                Report(diagnostics::DiagnosticCode::DuplicateDeclaration,
+                       function.NameRange(),
+                       "method conflicts with field '" + field.name + "'");
     }
 }
 
 SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
     _model = SemanticModel{};
+    _currentFunction = nullptr;
+    _inUnsafe = false;
+    _buildSelf = nullptr;
+    _allowBuildSelf = false;
+    _buildDepth = 0;
     _currentScope = &AddScope(nullptr);
     RegisterBuiltIns();
     RegisterErrorTypes(unit);
+    RegisterStructures(unit);
+    ResolveStructureFields();
     RegisterFunctions(unit);
+    GenerateInitializers();
+    for (const auto& structure : _model._structures)
+        for (const auto& field : structure->fields)
+            if (field.syntax->Initializer()) {
+                const SemanticType actual =
+                    AnalyzeExpression(*field.syntax->Initializer(), field.type);
+                if (!IsAssignable(field.type, actual))
+                    Report(diagnostics::DiagnosticCode::IncompatibleType,
+                           field.syntax->Initializer()->Range(),
+                           TypeMismatch(field.type, actual));
+                CheckCopy(*field.syntax->Initializer(), field.type);
+            }
+    for (const auto& function : _model._generatedFunctions)
+        AnalyzeFunction(*function);
     for (const std::unique_ptr<core::Declaration>& declaration :
          unit.Declarations()) {
         if (declaration->Kind() == core::AstNodeKind::FunctionDeclaration) {
@@ -463,6 +559,8 @@ SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
 void SemanticAnalyzer::AnalyzeFunction(
     const core::FunctionDeclaration& function) {
     const std::size_t diagnosticsBefore = _diagnostics.Diagnostics().size();
+    _buildSelf = nullptr;
+    _buildDepth = 0;
     const Symbol* functionBase = _model.DeclaredSymbol(function);
     if (functionBase != nullptr &&
         functionBase->Kind() == SymbolKind::Function) {
@@ -471,6 +569,12 @@ void SemanticAnalyzer::AnalyzeFunction(
         _currentFunction = nullptr;
     }
 
+    if (_currentFunction)
+        for (const auto& type : _currentFunction->ParameterTypes())
+            if (type.ContainsStructure() && !type.IsCopyable())
+                Report(diagnostics::DiagnosticCode::NonCopyableValue,
+                       function.NameRange(),
+                       "non-copyable structure parameters must be borrowed");
     _positions.clear();
     _localStringBorrows.clear();
     _loopDepth = 0;
@@ -643,6 +747,12 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                            "'");
                 variableType = SemanticType::Error();
             }
+            if (variable.Initializer())
+                CheckCopy(*variable.Initializer(), variableType);
+            if (variableType.ContainsStructure() && !variable.Initializer())
+                Report(diagnostics::DiagnosticCode::InvalidStructure,
+                       variable.NameRange(),
+                       "structure storage requires an initializer");
             if (variable.IsRangeSource() &&
                 variableType.Kind() == SemanticTypeKind::Slice)
                 variableType = SemanticType(SemanticTypeKind::Slice,
@@ -741,6 +851,13 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                 returnStatement.Value() == nullptr
                     ? SemanticType(SemanticTypeKind::Void)
                     : AnalyzeExpression(*returnStatement.Value(), expected);
+            if (returnStatement.Value())
+                CheckCopy(*returnStatement.Value(), expected);
+            if (_buildDepth != 0)
+                Report(diagnostics::DiagnosticCode::InvalidStructure,
+                       returnStatement.Range(),
+                       "return cannot leave a build block; validate before "
+                       "constructing");
             if (!IsAssignable(expected, actual)) {
                 const source::SourceRange range =
                     returnStatement.Value() == nullptr
@@ -850,6 +967,10 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             }
             break;
         case core::AstNodeKind::JumpToStatement: {
+            if (_buildDepth)
+                Report(diagnostics::DiagnosticCode::InvalidStructure,
+                       statement.Range(),
+                       "jumpto cannot cross construction boundaries");
             const core::JumpToStatement& jump =
                 static_cast<const core::JumpToStatement&>(statement);
             if (_loopDepth == 0) {
@@ -865,6 +986,10 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             break;
         }
         case core::AstNodeKind::PositionStatement:
+            if (_buildDepth)
+                Report(diagnostics::DiagnosticCode::InvalidStructure,
+                       statement.Range(),
+                       "positions inside build blocks are not supported");
             break;
         default:
             break;
@@ -918,6 +1043,10 @@ SemanticType SemanticAnalyzer::AnalyzeExpression(
             type = AnalyzeCall(
                 static_cast<const core::CallExpression&>(expression));
             break;
+        case core::AstNodeKind::BuildExpression:
+            type = AnalyzeBuild(
+                static_cast<const core::BuildExpression&>(expression));
+            break;
         case core::AstNodeKind::MemberAccessExpression:
             type = AnalyzeMemberAccess(
                 static_cast<const core::MemberAccessExpression&>(expression));
@@ -952,7 +1081,8 @@ void SemanticAnalyzer::ValidateArrayType(SemanticType type,
         Report(diagnostics::DiagnosticCode::InvalidArrayElement, range,
                "array elements must be unqualified scalars, error values, raw "
                "pointers, or "
-               "arrays of those types; use const [N]T for a read-only array");
+               "structures, or arrays of those types; use const [N]T for a "
+               "read-only array");
     } else if (!StorageSize(type)) {
         Report(diagnostics::DiagnosticCode::InvalidArrayLength, range,
                "array layout exceeds the supported native size");
@@ -1069,10 +1199,14 @@ SemanticType SemanticAnalyzer::AnalyzeName(
                "unknown name '" + expression.Name() + "'");
         return SemanticType::Error();
     }
-    if (symbol->Kind() == SymbolKind::ErrorType) {
+    if (symbol == _buildSelf && !_allowBuildSelf)
+        Report(
+            diagnostics::DiagnosticCode::InvalidStructure, expression.Range(),
+            "an unfinished build value cannot escape or receive method calls");
+    if (symbol->Kind() == SymbolKind::ErrorType ||
+        symbol->Kind() == SymbolKind::StructureType) {
         Report(diagnostics::DiagnosticCode::InvalidOperand, expression.Range(),
-               "error type '" + expression.Name() +
-                   "' is not a value; select a variant");
+               "type '" + expression.Name() + "' is not a value");
         return SemanticType::Error();
     }
     _model._bindings.emplace(&expression, symbol);
@@ -1086,6 +1220,60 @@ SemanticType SemanticAnalyzer::AnalyzeMemberAccess(
         symbol = _currentScope->Lookup(
             static_cast<const core::NameExpression&>(expression.Receiver())
                 .Name());
+    if (!symbol || symbol->Kind() != SymbolKind::ErrorType) {
+        const bool previousAllow = _allowBuildSelf;
+        const core::Expression* base = &expression.Receiver();
+        while (base->Kind() == core::AstNodeKind::ParenthesizedExpression)
+            base = &static_cast<const core::ParenthesizedExpression&>(*base)
+                        .Inner();
+        // Only direct field access may name unfinished self. An enclosing
+        // field selection must not grant permission to copy(self).field.
+        _allowBuildSelf = base->Kind() == core::AstNodeKind::NameExpression;
+        SemanticType receiver = AnalyzeExpression(expression.Receiver());
+        _allowBuildSelf = previousAllow;
+        SemanticType storage = PlaceType(expression.Receiver());
+        if (expression.Access() == TokenType::Arrow) {
+            if (receiver.Kind() != SemanticTypeKind::Reference &&
+                receiver.Kind() != SemanticTypeKind::Pointer) {
+                Report(diagnostics::DiagnosticCode::InvalidMember,
+                       expression.Range(),
+                       "'->' requires a pointer or reference");
+                return SemanticType::Error();
+            }
+            if (receiver.Kind() == SemanticTypeKind::Pointer)
+                RequireUnsafe(expression.Range());
+            storage = *receiver.Target();
+            receiver = storage;
+        } else if (expression.Access() != TokenType::Dot ||
+                   receiver.Kind() != SemanticTypeKind::Structure) {
+            Report(
+                diagnostics::DiagnosticCode::InvalidMember, expression.Range(),
+                "structure values use '.', pointers and references use '->'");
+            return SemanticType::Error();
+        }
+        if (receiver.Kind() != SemanticTypeKind::Structure) {
+            Report(diagnostics::DiagnosticCode::InvalidMember,
+                   expression.Range(), "field access requires a structure");
+            return SemanticType::Error();
+        }
+        for (const auto& field : receiver.Structure()->fields)
+            if (field.name == expression.Member()) {
+                if (field.syntax->IsPrivate() &&
+                    CurrentOwner() != receiver.Structure())
+                    Report(diagnostics::DiagnosticCode::PrivateAccess,
+                           expression.MemberRange(),
+                           "field '" + field.name + "' is private");
+                _model._fields[&expression] = &field;
+                return field.type.WithoutConst();
+            }
+        Report(diagnostics::DiagnosticCode::InvalidMember,
+               expression.MemberRange(),
+               "unknown field '" + expression.Member() + "'");
+        return SemanticType::Error();
+    }
+    if (expression.Access() != TokenType::Dot)
+        Report(diagnostics::DiagnosticCode::InvalidMember, expression.Range(),
+               "error variants use '.'");
     if (symbol == nullptr || symbol->Kind() != SymbolKind::ErrorType) {
         Report(diagnostics::DiagnosticCode::InvalidMember,
                expression.Receiver().Range(),
@@ -1112,6 +1300,15 @@ void SemanticAnalyzer::RequireUnsafe(source::SourceRange range) {
 }
 
 bool SemanticAnalyzer::IsSafePlace(const core::Expression& expression) const {
+    if (expression.Kind() == core::AstNodeKind::MemberAccessExpression) {
+        const auto& field =
+            static_cast<const core::MemberAccessExpression&>(expression);
+        return _model.FieldFor(field) &&
+               (field.Access() == TokenType::Arrow
+                    ? _model.TypeOf(field.Receiver()).Kind() ==
+                          SemanticTypeKind::Reference
+                    : IsSafePlace(field.Receiver()));
+    }
     if (expression.Kind() == core::AstNodeKind::MemberCallExpression) {
         const auto& call =
             static_cast<const core::MemberCallExpression&>(expression);
@@ -1147,6 +1344,14 @@ bool SemanticAnalyzer::IsSafePlace(const core::Expression& expression) const {
 
 bool SemanticAnalyzer::IsReferencePlace(
     const core::Expression& expression) const {
+    if (expression.Kind() == core::AstNodeKind::MemberAccessExpression) {
+        const auto& field =
+            static_cast<const core::MemberAccessExpression&>(expression);
+        return field.Access() == TokenType::Arrow
+                   ? _model.TypeOf(field.Receiver()).Kind() ==
+                         SemanticTypeKind::Reference
+                   : IsReferencePlace(field.Receiver());
+    }
     if (expression.Kind() == core::AstNodeKind::MemberCallExpression) {
         const auto& call =
             static_cast<const core::MemberCallExpression&>(expression);
@@ -1178,6 +1383,17 @@ bool SemanticAnalyzer::IsReferencePlace(
 
 SemanticType SemanticAnalyzer::PlaceType(
     const core::Expression& expression) const {
+    if (expression.Kind() == core::AstNodeKind::MemberAccessExpression) {
+        const auto& field =
+            static_cast<const core::MemberAccessExpression&>(expression);
+        const StructureField* resolved = _model.FieldFor(field);
+        if (!resolved) return SemanticType::Error();
+        SemanticType receiver = field.Access() == TokenType::Arrow
+                                    ? *_model.TypeOf(field.Receiver()).Target()
+                                    : PlaceType(field.Receiver());
+        if (receiver.IsError()) return receiver;
+        return receiver.IsConst() ? resolved->type.WithConst() : resolved->type;
+    }
     if (expression.Kind() == core::AstNodeKind::MemberCallExpression) {
         const auto& call =
             static_cast<const core::MemberCallExpression&>(expression);
@@ -1279,6 +1495,7 @@ SemanticType SemanticAnalyzer::AnalyzeUnary(
         SemanticType target = PlaceType(expression.Operand());
         if (target.IsError() ||
             !(target.IsNumeric() || target.IsErrorValue() ||
+              target.Kind() == SemanticTypeKind::Structure ||
               target.Kind() == SemanticTypeKind::Bool ||
               target.Kind() == SemanticTypeKind::Char ||
               target.Kind() == SemanticTypeKind::Pointer ||
@@ -1353,7 +1570,8 @@ SemanticType SemanticAnalyzer::AnalyzeBinary(
     if (right.IsInteger() && !expected.IsInteger() &&
         expression.Left().Kind() == core::AstNodeKind::LiteralExpression)
         left = AnalyzeExpression(expression.Left(), right);
-    if (left.IsBorrowed() || right.IsBorrowed() || left.IsSequence() ||
+    if (left.ContainsStructure() || right.ContainsStructure() ||
+        left.IsBorrowed() || right.IsBorrowed() || left.IsSequence() ||
         right.IsSequence() || left.Kind() == SemanticTypeKind::Tuple ||
         right.Kind() == SemanticTypeKind::Tuple) {
         Report(diagnostics::DiagnosticCode::InvalidOperand, expression.Range(),
@@ -1455,6 +1673,11 @@ SemanticType SemanticAnalyzer::AnalyzeAssignment(
     const core::AssignmentExpression& expression) {
     const SemanticType targetValue = AnalyzeExpression(expression.Target());
     const SemanticType target = PlaceType(expression.Target());
+    CheckCopy(expression.Value(), target);
+    if (target.ContainsStructure() && !target.IsCopyable())
+        Report(diagnostics::DiagnosticCode::NonCopyableValue,
+               expression.Range(),
+               "a non-copyable value cannot be replaced by assignment");
     const SemanticType value = AnalyzeExpression(expression.Value(), target);
     if (targetValue.IsError()) return SemanticType::Error();
     if (target.IsError()) {
@@ -1553,6 +1776,7 @@ SemanticType SemanticAnalyzer::AnalyzeCall(
                 : SemanticType::Error();
         argumentTypes.push_back(
             AnalyzeExpression(*expression.Arguments()[index], expected));
+        CheckCopy(*expression.Arguments()[index], expected);
     }
     if (calleeType.IsError()) return SemanticType::Error();
     if (function == nullptr) {
@@ -1560,7 +1784,8 @@ SemanticType SemanticAnalyzer::AnalyzeCall(
                expression.Callee().Range(), "expression is not callable");
         return SemanticType::Error();
     }
-    if (function->IsUnsafe()) RequireUnsafe(expression.Callee().Range());
+    if (function->IsUnsafe() || function->ReturnType().IsImmovable())
+        RequireUnsafe(expression.Callee().Range());
     if (function->BuiltIn() == BuiltInFunction::Stdout ||
         function->BuiltIn() == BuiltInFunction::StdoutLine) {
         if (argumentTypes.size() != 1) {
@@ -1616,7 +1841,17 @@ bool IsStringViewIndex(SemanticType type) {
 
 SemanticType SemanticAnalyzer::AnalyzeMemberCall(
     const core::MemberCallExpression& expression) {
+    if (expression.Access() == TokenType::Scope)
+        return AnalyzeStructureCall(expression, SemanticType::Error());
     const SemanticType receiver = AnalyzeExpression(expression.Receiver());
+    if (receiver.Kind() == SemanticTypeKind::Structure ||
+        ((receiver.Kind() == SemanticTypeKind::Pointer ||
+          receiver.Kind() == SemanticTypeKind::Reference) &&
+         receiver.Target()->Kind() == SemanticTypeKind::Structure))
+        return AnalyzeStructureCall(expression, receiver);
+    if (expression.Access() != TokenType::Dot)
+        Report(diagnostics::DiagnosticCode::InvalidMember, expression.Range(),
+               "this member requires '.'");
     std::vector<SemanticType> arguments;
     arguments.reserve(expression.Arguments().size());
     for (const std::unique_ptr<core::Expression>& argument :
@@ -1792,6 +2027,322 @@ SemanticType SemanticAnalyzer::AnalyzeIndex(
     }
     return receiver.IsError() ? SemanticType::Error()
                               : SemanticType(SemanticTypeKind::Char);
+}
+
+const StructureType* SemanticAnalyzer::CurrentOwner() const {
+    return _currentFunction ? _currentFunction->Owner() : nullptr;
+}
+
+void SemanticAnalyzer::RegisterStructures(const core::CompilationUnit& unit) {
+    for (const auto& declaration : unit.Declarations()) {
+        if (declaration->Kind() != core::AstNodeKind::StructureDeclaration)
+            continue;
+        const auto& syntax =
+            static_cast<const core::StructureDeclaration&>(*declaration);
+        auto structure = std::make_unique<StructureType>();
+        structure->name = syntax.Name();
+        structure->syntax = &syntax;
+        AddSymbol(std::make_unique<Symbol>(
+                      SymbolKind::StructureType, syntax.Name(),
+                      SemanticType(structure.get()), syntax.NameRange(), false),
+                  syntax);
+        _model._structures.push_back(std::move(structure));
+    }
+}
+
+void SemanticAnalyzer::ResolveStructureFields() {
+    for (const auto& structure : _model._structures) {
+        std::unordered_set<std::string> names;
+        for (const auto& field : structure->syntax->Fields()) {
+            if (!names.insert(field->Name()).second)
+                Report(diagnostics::DiagnosticCode::DuplicateDeclaration,
+                       field->NameRange(),
+                       "duplicate field '" + field->Name() + "'");
+            if (field->Name() == "init" || field->Name() == "tear")
+                Report(diagnostics::DiagnosticCode::InvalidLifecycle,
+                       field->NameRange(),
+                       "init and tear are reserved lifecycle names");
+            SemanticType type = ResolveTypeSyntax(field->Type());
+            structure->fields.push_back({field->Name(), type, field.get()});
+        }
+    }
+    std::unordered_set<const StructureType*> visiting;
+    std::function<bool(SemanticType)> validate = [&](SemanticType type) {
+        if (type.Kind() == SemanticTypeKind::Pointer) return true;
+        if (type.Kind() == SemanticTypeKind::Structure) {
+            auto* structure = const_cast<StructureType*>(type.Structure());
+            if (structure->validLayout) return true;
+            if (!visiting.insert(structure).second) return false;
+            bool valid = true;
+            for (const auto& field : structure->fields) {
+                if (!validate(field.type)) {
+                    Report(diagnostics::DiagnosticCode::InvalidStructure,
+                           field.syntax->Range(),
+                           "field has recursive or unsupported storage; use a "
+                           "pointer for recursive structures");
+                    valid = false;
+                }
+            }
+            visiting.erase(structure);
+            structure->validLayout = valid;
+            return valid;
+        }
+        if (type.Kind() == SemanticTypeKind::Array)
+            return IsArrayElement(*type.Target()) && validate(*type.Target());
+        if (type.Kind() == SemanticTypeKind::Tuple) {
+            for (const auto& element : type.Elements())
+                if (!validate(element)) return false;
+            return true;
+        }
+        return type.IsNumeric() || type.IsErrorValue() ||
+               type.Kind() == SemanticTypeKind::Bool ||
+               type.Kind() == SemanticTypeKind::Char ||
+               type.Kind() == SemanticTypeKind::String || type.IsError();
+    };
+    for (const auto& structure : _model._structures) {
+        if (validate(SemanticType(structure.get())) &&
+            !StorageSize(SemanticType(structure.get())))
+            Report(diagnostics::DiagnosticCode::InvalidStructure,
+                   structure->syntax->Range(),
+                   "structure layout exceeds supported size");
+    }
+    // Layouts must be complete before applying the ordinary compound-type
+    // checks, including unsupported types hidden behind a pointer field.
+    for (const auto& structure : _model._structures)
+        for (const auto& field : structure->fields)
+            (void)ResolveType(field.syntax->Type());
+}
+
+void SemanticAnalyzer::GenerateInitializers() {
+    std::function<bool(SemanticType)> unsafeDefault = [&](SemanticType type) {
+        if (type.Kind() == SemanticTypeKind::Structure) {
+            if (!type.Structure()->validLayout) return false;
+            if (type.IsImmovable()) return true;
+            if (type.Structure()->init)
+                return type.Structure()->init->IsUnsafe();
+            for (const auto& field : type.Structure()->fields)
+                if (!field.syntax->Initializer() && unsafeDefault(field.type))
+                    return true;
+        }
+        if (type.Kind() == SemanticTypeKind::Array)
+            return unsafeDefault(*type.Target());
+        if (type.Kind() == SemanticTypeKind::Tuple)
+            for (const auto& element : type.Elements())
+                if (unsafeDefault(element)) return true;
+        return false;
+    };
+    for (const auto& structure : _model._structures) {
+        if (structure->init) continue;
+        const auto range = structure->syntax->Range();
+        std::vector<std::unique_ptr<core::Statement>> statements;
+        auto body = std::make_unique<core::BlockStatement>(
+            range, std::vector<std::unique_ptr<core::Statement>>{});
+        auto build = std::make_unique<core::BuildExpression>(
+            range, std::make_unique<core::TypeNode>(range, structure->name),
+            std::move(body));
+        statements.push_back(
+            std::make_unique<core::ReturnStatement>(range, std::move(build)));
+        std::vector<core::FunctionModifier> modifiers;
+        if (unsafeDefault(SemanticType(structure.get())))
+            modifiers.push_back(core::FunctionModifier::Unsafe);
+        auto init = std::make_unique<core::FunctionDeclaration>(
+            range, std::move(modifiers),
+            std::make_unique<core::TypeNode>(range, structure->name), "init",
+            std::vector<std::unique_ptr<core::Parameter>>{},
+            std::make_unique<core::BlockStatement>(range,
+                                                   std::move(statements)),
+            range, structure->name);
+        RegisterFunction(*init, true);
+        _model._generatedFunctions.push_back(std::move(init));
+    }
+}
+
+void SemanticAnalyzer::CheckMethodAccess(const FunctionSymbol& function,
+                                         source::SourceRange range) {
+    if (function.Name().ends_with("::tear"))
+        Report(diagnostics::DiagnosticCode::InvalidLifecycle, range,
+               "tear is compiler-only and cannot be called directly");
+    if (function.IsPrivate() && CurrentOwner() != function.Owner())
+        Report(diagnostics::DiagnosticCode::PrivateAccess, range,
+               "method '" + function.Name() + "' is private");
+    if (function.IsUnsafe() || function.ReturnType().IsImmovable())
+        RequireUnsafe(range);
+}
+
+void SemanticAnalyzer::CheckCopy(const core::Expression& expression,
+                                 SemanticType type) {
+    if (!type.ContainsStructure() || type.IsCopyable()) return;
+    if (expression.Kind() == core::AstNodeKind::ParenthesizedExpression) {
+        CheckCopy(static_cast<const core::ParenthesizedExpression&>(expression)
+                      .Inner(),
+                  type);
+        return;
+    }
+    if (expression.Kind() == core::AstNodeKind::BuildExpression ||
+        expression.Kind() == core::AstNodeKind::CallExpression)
+        return;
+    if (expression.Kind() == core::AstNodeKind::MemberCallExpression &&
+        _model.MethodFor(
+            static_cast<const core::MemberCallExpression&>(expression)))
+        return;
+    if (expression.Kind() == core::AstNodeKind::TupleExpression &&
+        type.Kind() == SemanticTypeKind::Tuple) {
+        const auto& tuple =
+            static_cast<const core::TupleExpression&>(expression);
+        for (std::size_t i = 0;
+             i < tuple.Elements().size() && i < type.Elements().size(); ++i)
+            CheckCopy(*tuple.Elements()[i], type.Elements()[i]);
+        return;
+    }
+    if (expression.Kind() == core::AstNodeKind::ArrayExpression &&
+        type.Kind() == SemanticTypeKind::Array) {
+        const auto& array =
+            static_cast<const core::ArrayExpression&>(expression);
+        if (!array.IsRepeat() || array.Length() <= 1) {
+            for (const auto& element : array.Elements())
+                CheckCopy(*element, *type.Target());
+            return;
+        }
+    }
+    Report(diagnostics::DiagnosticCode::NonCopyableValue, expression.Range(),
+           "'" + type.Name() +
+               "' cannot be copied or implicitly moved; borrow it instead");
+}
+
+SemanticType SemanticAnalyzer::AnalyzeBuild(
+    const core::BuildExpression& expression) {
+    const SemanticType type = ResolveType(expression.Type());
+    if (type.Kind() != SemanticTypeKind::Structure) {
+        Report(diagnostics::DiagnosticCode::InvalidStructure,
+               expression.Type().Range(), "build requires a structure type");
+        return SemanticType::Error();
+    }
+    if (type.IsImmovable()) RequireUnsafe(expression.Range());
+    std::function<void(SemanticType)> checkDefault = [&](SemanticType field) {
+        if (field.Kind() == SemanticTypeKind::Structure &&
+            field.Structure()->init) {
+            CheckMethodAccess(*field.Structure()->init, expression.Range());
+            if (!field.Structure()->init->ParameterTypes().empty())
+                Report(diagnostics::DiagnosticCode::InvalidStructure,
+                       expression.Range(),
+                       "field of type '" + field.Name() +
+                           "' needs an explicit declaration initializer "
+                           "because its init requires arguments");
+        }
+        if (field.Kind() == SemanticTypeKind::Array)
+            checkDefault(*field.Target());
+        if (field.Kind() == SemanticTypeKind::Tuple)
+            for (const auto& element : field.Elements()) checkDefault(element);
+    };
+    for (const auto& field : type.Structure()->fields)
+        if (!field.syntax->Initializer()) checkDefault(field.type);
+    Scope* previousScope = _currentScope;
+    const Symbol* previousSelf = _buildSelf;
+    _currentScope = &AddScope(previousScope);
+    _buildSelf = AddSymbol(
+        std::make_unique<VariableSymbol>(SymbolKind::LocalVariable, "self",
+                                         type, expression.Range(), true),
+        expression);
+    const std::size_t previousLoopDepth = _loopDepth;
+    _loopDepth = 0;
+    ++_buildDepth;
+    AnalyzeBlock(expression.Body(), false);
+    --_buildDepth;
+    _loopDepth = previousLoopDepth;
+    _buildSelf = previousSelf;
+    _currentScope = previousScope;
+    return type;
+}
+
+SemanticType SemanticAnalyzer::AnalyzeStructureCall(
+    const core::MemberCallExpression& expression, SemanticType receiver) {
+    const bool isStatic = expression.Access() == TokenType::Scope;
+    const StructureType* owner = nullptr;
+    if (isStatic) {
+        if (expression.Receiver().Kind() == core::AstNodeKind::NameExpression) {
+            const Symbol* type = _currentScope->Lookup(
+                static_cast<const core::NameExpression&>(expression.Receiver())
+                    .Name());
+            if (type && type->Kind() == SymbolKind::StructureType)
+                owner = type->Type().Structure();
+        }
+    } else {
+        if (receiver.Kind() == SemanticTypeKind::Structure) {
+            if (expression.Access() != TokenType::Dot)
+                Report(diagnostics::DiagnosticCode::InvalidMember,
+                       expression.Range(), "structure values use '.'");
+            owner = receiver.Structure();
+        } else if (receiver.Kind() == SemanticTypeKind::Pointer ||
+                   receiver.Kind() == SemanticTypeKind::Reference) {
+            if (expression.Access() != TokenType::Arrow)
+                Report(diagnostics::DiagnosticCode::InvalidMember,
+                       expression.Range(),
+                       "pointer and reference receivers use '->'");
+            owner = receiver.Target()->Structure();
+            if (receiver.Kind() == SemanticTypeKind::Pointer)
+                RequireUnsafe(expression.Range());
+        }
+    }
+    if (!owner || !owner->methods.contains(expression.Member())) {
+        if (owner && expression.Member() == "tear") {
+            Report(diagnostics::DiagnosticCode::InvalidLifecycle,
+                   expression.MemberRange(),
+                   "tear is compiler-only and cannot be called directly");
+            return SemanticType::Error();
+        }
+        Report(diagnostics::DiagnosticCode::InvalidMember,
+               expression.MemberRange(),
+               "unknown structure method '" + expression.Member() + "'");
+        return SemanticType::Error();
+    }
+    const FunctionSymbol* function = owner->methods.at(expression.Member());
+    _model._methods[&expression] = function;
+    CheckMethodAccess(*function, expression.MemberRange());
+    if (isStatic == function->HasReceiver())
+        Report(diagnostics::DiagnosticCode::InvalidMember, expression.Range(),
+               "instance methods need an instance; static methods use "
+               "Type::method()");
+    const std::size_t offset = function->HasReceiver() ? 1 : 0;
+    if (offset && !isStatic) {
+        const SemanticType expected = function->ParameterTypes()[0];
+        SemanticType target = receiver.Kind() == SemanticTypeKind::Structure
+                                  ? PlaceType(expression.Receiver())
+                                  : *receiver.Target();
+        if (target.IsError())
+            Report(diagnostics::DiagnosticCode::InvalidReference,
+                   expression.Receiver().Range(),
+                   "method receiver requires addressable structure storage");
+        if (target.IsConst() && !expected.Target()->IsConst())
+            Report(diagnostics::DiagnosticCode::SymbolNotWritable,
+                   expression.Range(),
+                   "cannot mutably borrow a const receiver");
+        if (expected.Kind() == SemanticTypeKind::Pointer) {
+            RequireUnsafe(expression.Range());
+            if (receiver.Kind() == SemanticTypeKind::Reference)
+                Report(
+                    diagnostics::DiagnosticCode::ReferenceEscape,
+                    expression.Range(),
+                    "a checked reference cannot become a raw method receiver");
+        }
+    }
+    if (expression.Arguments().size() + offset !=
+        function->ParameterTypes().size())
+        Report(diagnostics::DiagnosticCode::WrongArgumentCount,
+               expression.Range(), "wrong number of method arguments");
+    for (std::size_t i = 0; i < expression.Arguments().size(); ++i) {
+        const SemanticType expected =
+            i + offset < function->ParameterTypes().size()
+                ? function->ParameterTypes()[i + offset]
+                : SemanticType::Error();
+        const SemanticType actual =
+            AnalyzeExpression(*expression.Arguments()[i], expected);
+        CheckCopy(*expression.Arguments()[i], expected);
+        if (!IsAssignable(expected, actual) && !CanReborrow(expected, actual))
+            Report(diagnostics::DiagnosticCode::IncompatibleArgument,
+                   expression.Arguments()[i]->Range(),
+                   TypeMismatch(expected, actual));
+    }
+    return function->ReturnType().WithoutConst();
 }
 
 }  // namespace flecha::semantic

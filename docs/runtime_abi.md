@@ -45,3 +45,24 @@ No C++ standard-library type or exception may cross this boundary. Allocation
 failure and invalid dynamic operations must use the runtime failure mechanism.
 Object-only compilation may leave owning-string runtime symbols unresolved in
 the same way it currently leaves output and bounds-check symbols unresolved.
+
+## Structure values (compiler-private ABI)
+
+Flecha structures use named, non-packed LLVM structures, preserving field order
+and native alignment. References/raw pointers to structures use opaque native
+pointers. This does not establish a portable C aggregate ABI or expose field
+layout inspection to Flecha source.
+
+A function whose result contains a structure (including an array or tuple of
+structures) returns LLVM `void` and receives an additional first pointer argument
+for its result storage. The caller provides final storage, and the callee
+constructs into it. This preserves the address of immovable objects from
+construction through tear, including nested factory calls. These results must
+not be called from a C harness as ordinary C aggregate returns. Tests expose
+scalar wrappers instead.
+
+Copyable structure parameters use LLVM aggregate values. The callee clones
+owned fields on entry and cleans up that copy on exit. Noncopyable parameters
+must use references or raw pointers. Compiler-generated calls invoke tear with
+an address, then recursively destroy fields in reverse order. Existing scalar,
+string runtime, and structure-free tuple conventions are unchanged.

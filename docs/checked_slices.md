@@ -30,8 +30,9 @@ borrow from writable storage:
 []const i32 shared = values[:];
 ```
 
-Supported elements match fixed-array value elements: scalars, raw pointers, and
-nested fixed arrays. Element-level const is allowed on slices. Slices require
+Supported elements match fixed-array value elements: scalars, error values, raw
+pointers, structures, and nested fixed arrays. Structure elements follow the
+copy and borrow restrictions in [structures.md](structures.md). Element-level const is allowed on slices. Slices require
 initializers; `none` and `null` are not valid slice values. Empty views are made
 with `values[i:i]`, including `i == values.len()`, or by slicing a zero-length
 array. Empty views still carry the source lifetime and borrow restrictions.

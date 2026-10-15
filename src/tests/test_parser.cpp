@@ -1151,3 +1151,53 @@ TEST(ParserErrorTests, KeepsQualifiedValuesAndRawAddressesAsExpressions) {
         EXPECT_EQ(function.Body().Statements()[i]->Kind(),
                   AstNodeKind::ExpressionStatement);
 }
+
+TEST(ParserStructureTests, ParsesPrivateFieldsMethodsReceiversAndConstruction) {
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource(
+        "structure Box { i32 x = 1; private { i32 y; bool flag; } }; "
+        "Box Box::init() override { return build Box { self.y = 2; }; } "
+        "private unsafe i32 Box::read(*const self) { return self->y; } "
+        "void Box::set(&self, i32 value) { self->y = value; } "
+        "void f() { Box box = Box::init(); box.set(42); r := &box; r->set(2); "
+        "}",
+        diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    ASSERT_EQ(unit->Declarations().size(), 5);
+    const auto& structure =
+        static_cast<const StructureDeclaration&>(*unit->Declarations()[0]);
+    ASSERT_EQ(structure.Fields().size(), 3);
+    EXPECT_FALSE(structure.Fields()[0]->IsPrivate());
+    EXPECT_TRUE(structure.Fields()[1]->IsPrivate());
+    EXPECT_NE(structure.Fields()[0]->Initializer(), nullptr);
+    const auto& init =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[1]);
+    EXPECT_EQ(init.Owner(), "Box");
+    EXPECT_TRUE(init.HasModifier(FunctionModifier::Override));
+    const auto& read =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[2]);
+    EXPECT_TRUE(read.IsUnsafe());
+    EXPECT_TRUE(read.HasModifier(FunctionModifier::Private));
+    EXPECT_EQ(read.Parameters()[0]->Type().TypeForm(), TypeKind::Pointer);
+    EXPECT_TRUE(read.Parameters()[0]->Type().Target()->IsConst());
+    EXPECT_EQ(read.Parameters()[0]->Type().Target()->Name(), "Box");
+    const auto& returned =
+        static_cast<const ReturnStatement&>(*read.Body().Statements()[0]);
+    const auto& access =
+        static_cast<const MemberAccessExpression&>(*returned.Value());
+    EXPECT_EQ(access.Access(), TokenType::Arrow);
+}
+
+TEST(ParserStructureTests, RejectsMalformedStructureSyntax) {
+    for (const std::string& source :
+         {"structure Box { i32 x; }", "structure { i32 x; };",
+          "structure Box { i32; };",
+          "structure Box { private { private { i32 x; } } };",
+          "unsafe structure Box {};",
+          "Box Box::init() override override { return build Box {}; }"}) {
+        SCOPED_TRACE(source);
+        DiagnosticBag diagnostics;
+        EXPECT_NE(ParseSource(source, diagnostics), nullptr);
+        EXPECT_TRUE(diagnostics.HasErrors());
+    }
+}

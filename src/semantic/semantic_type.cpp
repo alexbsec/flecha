@@ -3,6 +3,8 @@
 #include <cassert>
 #include <utility>
 
+#include "semantic/symbol.hpp"
+
 namespace flecha::semantic {
 
 SemanticType::SemanticType(SemanticTypeKind kind, SemanticType target,
@@ -26,7 +28,46 @@ SemanticType SemanticType::WithConst() const {
     return result;
 }
 
+bool SemanticType::ContainsStructure() const {
+    if (_kind == SemanticTypeKind::Structure) return true;
+    if (_kind == SemanticTypeKind::Array) return Target()->ContainsStructure();
+    if (_kind == SemanticTypeKind::Tuple)
+        for (const auto& element : Elements())
+            if (element.ContainsStructure()) return true;
+    return false;
+}
+
+bool SemanticType::IsCopyable() const {
+    if (_kind == SemanticTypeKind::Structure) {
+        if (!_structure->validLayout || _structure->tear) return false;
+        for (const auto& field : _structure->fields)
+            if (!field.type.IsCopyable()) return false;
+    }
+    if (_kind == SemanticTypeKind::Array) return Target()->IsCopyable();
+    if (_kind == SemanticTypeKind::Tuple)
+        for (const auto& element : Elements())
+            if (!element.IsCopyable()) return false;
+    return !IsBorrowed() || Target()->IsConst();
+}
+
+bool SemanticType::IsImmovable() const {
+    if (_kind == SemanticTypeKind::Structure) {
+        if (!_structure->validLayout) return false;
+        if (_structure->tear && _structure->tear->IsUnsafe()) return true;
+        for (const auto& field : _structure->fields)
+            if (field.type.IsImmovable()) return true;
+    }
+    if (_kind == SemanticTypeKind::Array) return Target()->IsImmovable();
+    if (_kind == SemanticTypeKind::Tuple)
+        for (const auto& element : Elements())
+            if (element.IsImmovable()) return true;
+    return false;
+}
+
 bool SemanticType::OwnsStorage() const {
+    // Every structure has a lifetime even when its default tear is empty.
+    if (_kind == SemanticTypeKind::Structure) return true;
+    if (_kind == SemanticTypeKind::Array) return Target()->OwnsStorage();
     if (_kind == SemanticTypeKind::String) return true;
     if (_kind == SemanticTypeKind::Tuple)
         for (const auto& element : Elements())
@@ -36,7 +77,8 @@ bool SemanticType::OwnsStorage() const {
 
 bool SemanticType::operator==(const SemanticType& other) const {
     return _kind == other._kind && _isConst == other._isConst &&
-           _family == other._family && _length == other._length &&
+           _family == other._family && _structure == other._structure &&
+           _length == other._length &&
            ((_elements == nullptr && other._elements == nullptr) ||
             (_elements != nullptr && other._elements != nullptr &&
              *_elements == *other._elements)) &&
@@ -73,6 +115,8 @@ SemanticType SemanticType::FromSyntax(const core::TypeNode& type) {
 std::string SemanticType::Name() const {
     if (_isConst) return "const " + WithoutConst().Name();
     switch (_kind) {
+        case SemanticTypeKind::Structure:
+            return _structure->name;
         case SemanticTypeKind::ErrorValue:
             return "error";
         case SemanticTypeKind::NamedError:
@@ -230,7 +274,8 @@ bool IsAssignable(SemanticType destination, SemanticType source) {
         source.Kind() == SemanticTypeKind::StringView) {
         return true;
     }
-    return source.Kind() == SemanticTypeKind::None &&
+    return !destination.ContainsStructure() &&
+           source.Kind() == SemanticTypeKind::None &&
            destination.Kind() != SemanticTypeKind::Void &&
            destination.Kind() != SemanticTypeKind::Function &&
            !destination.IsBorrowed();

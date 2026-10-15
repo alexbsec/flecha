@@ -1,0 +1,271 @@
+structure Box {
+    i32 x;
+    private { i32 y; bool isTrue; }
+};
+Box Box::init() override {
+    return build Box { self.x = 2; self.y = 40; self.isTrue = true; };
+}
+i32 Box::Y(&const self) { return self->y; }
+void Box::setY(&self, i32 value) { self->y = value; }
+private i32 Box::hidden(&const self) { return self->x; }
+i32 Box::sum(&const self) { return self->hidden() + self->Y(); }
+i32 structure_methods_test() {
+    Box box = Box::init();
+    if box.sum() != 42 { return 1; }
+    { ref := &box; ref->setY(41); }
+    unsafe { *Box ptr = &raw box; ptr->setY(40); }
+    return box.sum();
+}
+
+structure Resource {
+    *i32 count;
+    *Resource saved;
+    *i32 markerAddress;
+    i32 marker;
+};
+unsafe Resource Resource::init() override {
+    return build Resource { self.markerAddress = &raw self.marker; };
+}
+unsafe void Resource::tear(&self) override {
+    self->marker = 42;
+    if self->markerAddress != null {
+        if *self->markerAddress != 42 { *self->count = -200; return; }
+    }
+    if self->saved != null {
+        if self->saved->marker != 42 { *self->count = -100; return; }
+    }
+    *self->count = *self->count + 1;
+}
+Resource make_resource() { unsafe { return Resource::init(); } }
+structure Parent { Resource child; string text = "owned"; };
+structure Plain { string text = "hello"; i32 answer = 42; };
+i32 structure_lifecycle_test() {
+    i32 count = 0;
+    unsafe {
+        Resource value = make_resource();
+        value.count = &raw count;
+        value.saved = &raw value;
+    }
+    if count != 1 { return 1; }
+    unsafe {
+        Parent parent = Parent::init();
+        parent.child.count = &raw count;
+        parent.child.saved = &raw parent.child;
+    }
+    if count != 2 { return 2; }
+    Plain first = Plain::init();
+    Plain second = first;
+    first.text = "changed";
+    if second.text != "hello" { return 3; }
+    return second.answer;
+}
+
+structure Piece { *i32 log; i32 id; };
+void Piece::tear(&self) override {
+    unsafe { *self->log = *self->log * 10 + self->id; }
+}
+structure Assembly { Piece first; Piece last; *i32 log; };
+void Assembly::tear(&self) override {
+    unsafe { *self->log = *self->log * 10 + 1; }
+}
+structure Basket { [3]Piece items; };
+
+unsafe void update_log(*i32 log, i32 digit) { *log = *log * 10 + digit; }
+
+i32 structure_cleanup_test() {
+    i32 log = 0;
+    {
+        Assembly value = Assembly::init();
+        unsafe {
+            value.log = &raw log;
+            value.first.log = &raw log;
+            value.last.log = &raw log;
+        }
+        value.first.id = 2;
+        value.last.id = 3;
+    }
+    if log != 132 { return 1; }
+    log = 0;
+    {
+        Basket basket = Basket::init();
+        loop usize i = 0; i < 3; i++ {
+            unsafe { basket.items[i].log = &raw log; }
+            basket.items[i].id = i as i32 + 1;
+        }
+        unsafe { defer update_log(&raw log, 4); }
+    }
+    if log != 4321 { return 2; }
+    i32 count = 0;
+    unsafe {
+        loop i := 0; i < 100; i++ {
+            Resource item = Resource::init();
+            item.count = &raw count;
+            item.saved = &raw item;
+            if i < 99 { proceed; }
+            break;
+        }
+    }
+    if count != 100 { return 3; }
+    unsafe {
+        loop ;; {
+            {
+                Resource item = Resource::init();
+                item.count = &raw count;
+                jumpto outside;
+            }
+            #outside
+            break;
+        }
+    }
+    if count != 101 { return 4; }
+    return 42;
+}
+
+Plain copy_plain(Plain value) { return value; }
+[2]Plain copy_array([2]Plain values) { return values; }
+(Plain, i32) pair_plain() { return (Plain::init(), 42); }
+
+structure Strings { [2]Plain values; };
+i32 structure_owned_fields_test() {
+    Plain first = Plain::init();
+    Plain second = copy_plain(first);
+    first.text = "changed";
+    if second.text != "hello" { return 1; }
+    [2]Plain values = [second; 2];
+    [2]Plain copied = copy_array(values);
+    values[0].text = "modified";
+    if copied[0].text != "hello" or copied[1].text != "hello" { return 2; }
+    value, number := pair_plain();
+    if value.text != "hello" or number != 42 { return 3; }
+    Strings strings = Strings::init();
+    Strings clone = strings;
+    strings.values[1].text = "updated";
+    if clone.values[1].text != "hello" { return 4; }
+    loop i := 0; i < 100; i++ {
+        [2]Plain items = copy_array(values);
+        value = copy_plain(second);
+        if value.text != "hello" { return 5; }
+    }
+    return 42;
+}
+
+structure Leaf { i32 x = 4; };
+structure Defaults { Leaf leaf; [2]Leaf leaves; (Leaf, i32) pair; const i32 limit = 42; };
+i32 structure_defaults_test() {
+    Defaults value = Defaults::init();
+    if value.leaf.x != 4 or value.leaves[1].x != 4 or value.limit != 42 { return 1; }
+    Leaf leaf, i32 zero = value.pair;
+    if leaf.x != 4 or zero != 0 { return 2; }
+    Leaf built = build Leaf {
+        loop i := 0; i < 4; i++ { self.x = self.x + 1; }
+    };
+    if built.x != 8 { return 3; }
+    return 42;
+}
+
+void observe_snapshot(Plain value, *i32 count) {
+    unsafe { if value.text == "hello" { *count = *count + 1; } }
+}
+void observe_array([2]Plain values, *i32 count) {
+    unsafe { if values[0].text == "hello" and values[1].text == "hello" { *count = *count + 1; } }
+}
+unsafe Resource deferred_resource(*i32 count) {
+    return build Resource { self.count = count; };
+}
+i32 structure_defer_test() {
+    i32 count = 0;
+    {
+        Plain value = Plain::init();
+        [2]Plain values = [value; 2];
+        unsafe {
+            loop i := 0; i < 50; i++ {
+                defer observe_snapshot(value, &raw count);
+                defer observe_array(values, &raw count);
+                defer deferred_resource(&raw count);
+                defer pair_plain();
+            }
+        }
+        value.text = "changed";
+        values[0].text = "changed";
+    }
+    if count != 150 { return 1; }
+    // Repeated registrations in one live scope retain separate snapshots.
+    i32 index = 0;
+    unsafe {
+        loop ;; {
+            Plain value = Plain::init();
+            #again
+            defer observe_snapshot(value, &raw count);
+            index++;
+            if index < 20 { jumpto again; }
+            value.text = "changed";
+            break;
+        }
+    }
+    if count != 170 { return 2; }
+    return 42;
+}
+
+unsafe Resource counted_resource(*i32 count) {
+    return build Resource {
+        self.count = count;
+        self.markerAddress = &raw self.marker;
+    };
+}
+unsafe (Resource, i32) resource_pair(*i32 count) {
+    return (counted_resource(count), 42);
+}
+unsafe [2]Resource resource_array(*i32 count) {
+    return [counted_resource(count), counted_resource(count)];
+}
+unsafe i32 cleanup_return(*i32 count, bool skip) {
+    if skip { return 42; }
+    Resource resource = counted_resource(count);
+    return 42;
+}
+i32 structure_aggregate_lifetime_test() {
+    i32 count = 0;
+    unsafe {
+        pair := resource_pair(&raw count);
+        array := resource_array(&raw count);
+        [1]Resource single = [counted_resource(&raw count); 1];
+        cleanup_return(&raw count, true);
+        cleanup_return(&raw count, false);
+    }
+    if count != 5 { return 1; }
+    unsafe {
+        loop ;; {
+            i32 index = 0;
+            #again
+            Resource resource = counted_resource(&raw count);
+            index++;
+            if index < 10 { jumpto again; }
+            break;
+        }
+    }
+    if count != 15 { return 2; }
+    return 42;
+}
+
+structure Configured { i32 value; string label; };
+Configured Configured::init(i32 value, string label) override {
+    return build Configured { self.value = value; self.label = label; };
+}
+structure Configuration {
+    Configured item = Configured::init(42, "nested");
+    [2]Configured items = [Configured::init(1, "first"), Configured::init(2, "second")];
+    (Configured, i32) pair = (Configured::init(3, "tuple"), 4);
+    *Configured optional;
+};
+i32 constructor_argument(&i32 count) { *count = *count + 1; return 42; }
+i32 structure_constructor_arguments_test() {
+    i32 count = 0;
+    Configured value = Configured::init(constructor_argument(&count), "owned");
+    if count != 1 or value.value != 42 or value.label != "owned" { return 1; }
+    Configuration parent = Configuration::init();
+    if parent.item.value != 42 or parent.item.label != "nested" { return 2; }
+    if parent.items[1].label != "second" or parent.optional != null { return 3; }
+    Configured element, i32 number = parent.pair;
+    if element.label != "tuple" or number != 4 { return 4; }
+    return 42;
+}

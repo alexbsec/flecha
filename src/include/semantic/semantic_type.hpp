@@ -39,12 +39,15 @@ enum class SemanticTypeKind {
     Error,
     ErrorValue,
     NamedError,
+    Structure,
 };
 
 struct ErrorFamily final {
     std::string name;
     std::vector<std::string> variants;
 };
+
+struct StructureType;
 
 class SemanticType final {
    public:
@@ -74,6 +77,14 @@ class SemanticType final {
         return _kind == SemanticTypeKind::ErrorValue ||
                _kind == SemanticTypeKind::NamedError;
     }
+    explicit SemanticType(const StructureType* structure, bool isConst = false)
+        : _kind(SemanticTypeKind::Structure),
+          _isConst(isConst),
+          _structure(structure) {}
+    const StructureType* Structure() const { return _structure; }
+    bool ContainsStructure() const;
+    bool IsCopyable() const;
+    bool IsImmovable() const;
     [[nodiscard]] bool OwnsStorage() const;
     [[nodiscard]] SemanticTypeKind Kind() const { return _kind; }
     [[nodiscard]] std::string Name() const;
@@ -118,6 +129,7 @@ class SemanticType final {
     SemanticTypeKind _kind;
     bool _isConst;
     std::shared_ptr<const ErrorFamily> _family;
+    const StructureType* _structure = nullptr;
     std::uint64_t _length = 0;
     std::shared_ptr<const SemanticType> _target;
     std::shared_ptr<const std::vector<SemanticType>> _elements;

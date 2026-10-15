@@ -29,6 +29,18 @@ class SemanticModel final {
     [[nodiscard]] const Symbol* DestructureTarget(
         const core::DestructureBinding& binding) const;
     [[nodiscard]] SemanticType TypeOf(const core::Expression& expression) const;
+    const StructureField* FieldFor(
+        const core::MemberAccessExpression& expression) const {
+        const auto found = _fields.find(&expression);
+        return found == _fields.end() ? nullptr : found->second;
+    }
+    const FunctionSymbol* MethodFor(
+        const core::MemberCallExpression& expression) const {
+        const auto found = _methods.find(&expression);
+        return found == _methods.end() ? nullptr : found->second;
+    }
+    const auto& GeneratedFunctions() const { return _generatedFunctions; }
+    const auto& Structures() const { return _structures; }
     [[nodiscard]] const Scope& GlobalScope() const { return *_scopes.front(); }
     [[nodiscard]] const std::vector<std::unique_ptr<Symbol>>& Symbols() const {
         return _symbols;
@@ -39,6 +51,13 @@ class SemanticModel final {
 
    private:
     friend class SemanticAnalyzer;
+    std::vector<std::unique_ptr<StructureType>> _structures;
+    std::vector<std::unique_ptr<core::FunctionDeclaration>> _generatedFunctions;
+    std::unordered_map<const core::MemberAccessExpression*,
+                       const StructureField*>
+        _fields;
+    std::unordered_map<const core::MemberCallExpression*, const FunctionSymbol*>
+        _methods;
     std::vector<std::unique_ptr<Symbol>> _symbols;
     std::vector<std::unique_ptr<Scope>> _scopes;
     std::unordered_map<const core::NameExpression*, const Symbol*> _bindings;

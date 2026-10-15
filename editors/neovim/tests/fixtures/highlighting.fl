@@ -49,3 +49,7 @@ void BareTupleBindings() { i32 quotient, remainder = (3, 2); }
 
 error MathError { DivisionByZero, Overflow }
 error genericError = MathError.Overflow;
+
+structure Box { private i32 x; };
+Box Box::init() override { return build Box {}; }
+i32 Box::value(&self) { return self->x; }

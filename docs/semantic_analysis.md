@@ -152,3 +152,17 @@ The shared CFG evaluates the complete source before destination writes, with
 scope resets for declarations. Borrow checking treats each destination as a
 write to its owner. `FLECHA-S0039` and `FLECHA-S0040` diagnose unsupported tuple
 contents/layout and invalid destructuring. See [tuples.md](tuples.md).
+
+## Structures
+
+Nominal structure descriptors are registered before field types and methods,
+allowing forward references while rejecting recursive inline layouts. Field and
+method bindings preserve owner identity for privacy and receiver checking.
+Generated init functions share the regular semantic, CFG, lowering, and codegen
+pipeline. Build bodies participate in definite-assignment and borrow analysis;
+construction-field references cannot escape the build block.
+
+`FLECHA-S0043` diagnoses invalid structures/construction, `FLECHA-S0044` private
+access, `FLECHA-S0045` lifecycle misuse, and `FLECHA-S0046` prohibited copies or
+implicit moves. Existing unsafe, qualifier, and borrow diagnostics cover member
+access and calls. See [structures.md](structures.md) for the language contract.

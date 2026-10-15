@@ -58,11 +58,17 @@ enum class TokenType {
     RCurly,
     Comma,
     Dot,
+    Arrow,
+    Scope,
     Colon,
     SemiColon,
     Hash,
 
     // Keywords
+    Structure,
+    Private,
+    Override,
+    Build,
     Unsafe,
     Export,
     Extern,

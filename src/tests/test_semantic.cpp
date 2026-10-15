@@ -2403,3 +2403,306 @@ TEST(SemanticErrorTests, IntegratesDefiniteAssignmentQualifiersAndBorrowing) {
                                   "Fault x, error y = pair; }")
                      .diagnostics.HasErrors());
 }
+
+TEST(SemanticStructureTests,
+     ResolvesForwardTypesDefaultInitializationAndMethods) {
+    Analysis result = Analyze(
+        "Box factory() { return Box::init(); } "
+        "structure Box { i32 x; private { i32 y; } }; "
+        "i32 Box::value(&const self) { return self->x + self->y; } "
+        "void Box::set(&self, i32 value) { self->y = value; } "
+        "i32 main() { Box box = factory(); box.set(42); "
+        "{ r := &box; r->set(41); } unsafe { p := &raw box; p->set(42); } "
+        "return box.value(); }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_EQ(result.model.Structures().size(), 1);
+    EXPECT_NE(result.model.Structures()[0]->init, nullptr);
+    EXPECT_EQ(result.model.Structures()[0]->fields.size(), 2);
+    EXPECT_EQ(result.model.GeneratedFunctions().size(), 1);
+}
+
+TEST(SemanticStructureTests,
+     EnforcesMemberOperatorsPrivacyAndReceiverConstness) {
+    const std::string prefix =
+        "structure Box { i32 x; private { i32 y; } }; "
+        "private i32 Box::secret(&const self) { return self->y; } "
+        "private i32 Box::hidden() { return 42; } "
+        "i32 Box::read(&const self) { return self->secret() + Box::hidden(); } "
+        "void Box::set(&self) { self->y = 42; } ";
+    for (const std::string& body :
+         {"box.y = 2;", "box.secret();", "Box::hidden();"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(
+                      Analyze(prefix + "void f() { Box box = Box::init(); " +
+                              body + " }"),
+                      DiagnosticCode::PrivateAccess),
+                  nullptr);
+    }
+    for (const std::string& body :
+         {"box->read();", "r.read();", "r.x;", "box->x;", "Box::read();",
+          "box.hidden();"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(
+                      Analyze(prefix +
+                              "void f() { Box box = Box::init(); r := &box; " +
+                              body + " }"),
+                      DiagnosticCode::InvalidMember),
+                  nullptr);
+    }
+    for (const std::string& body : {"box.x = 2;", "box.set();", "r->set();"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(
+            FindDiagnostic(
+                Analyze(prefix +
+                        "void f() { const Box box = Box::init(); r := &box; " +
+                        body + " }"),
+                DiagnosticCode::SymbolNotWritable),
+            nullptr);
+    }
+    EXPECT_FALSE(
+        Analyze(prefix +
+                "i32 f() { Box box = Box::init(); return box.read(); }")
+            .diagnostics.HasErrors());
+}
+
+TEST(SemanticStructureTests, ChecksLifecycleOverridesAndForbidsManualTear) {
+    for (const std::string& method :
+         {"Box Box::init() { return build Box {}; }",
+          "void Box::tear(&self) {}", "void Box::init() override {}",
+          "Box Box::init(&self) override { return build Box {}; }",
+          "void Box::tear(*self) override {}",
+          "void Box::tear(&const self) override {}",
+          "void Box::f(&self) override {}"}) {
+        SCOPED_TRACE(method);
+        EXPECT_NE(FindDiagnostic(Analyze("structure Box {}; " + method),
+                                 DiagnosticCode::InvalidLifecycle),
+                  nullptr);
+    }
+    for (const std::string& call : {"box.tear();", "Box::tear();"}) {
+        SCOPED_TRACE(call);
+        EXPECT_NE(
+            FindDiagnostic(
+                Analyze("structure Box {}; void Box::tear(&self) override {} "
+                        "void f() { Box box = Box::init(); " +
+                        call + " }"),
+                DiagnosticCode::InvalidLifecycle),
+            nullptr);
+    }
+    EXPECT_NE(FindDiagnostic(Analyze("structure Box {}; void Box::tear(&self) "
+                                     "override { self->tear(); }"),
+                             DiagnosticCode::InvalidLifecycle),
+              nullptr);
+}
+
+TEST(SemanticStructureTests,
+     EnforcesUnsafeConstructionImmovabilityAndBorrowOnlyCalls) {
+    const std::string prefix =
+        "structure Box { i32 value; }; unsafe void Box::tear(&self) override "
+        "{} ";
+    EXPECT_NE(
+        FindDiagnostic(Analyze(prefix + "void f() { Box box = Box::init(); }"),
+                       DiagnosticCode::UnsafeOperation),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze(prefix + "void f() { Box box = build Box {}; }"),
+                       DiagnosticCode::UnsafeOperation),
+        nullptr);
+    for (const std::string& body : {"copy := box;", "box = Box::init();",
+                                    "pair := (box, 1);", "array := [box];"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(
+            FindDiagnostic(
+                Analyze(prefix + "unsafe void f() { Box box = Box::init(); " +
+                        body + " }"),
+                DiagnosticCode::NonCopyableValue),
+            nullptr);
+    }
+    EXPECT_NE(FindDiagnostic(Analyze(prefix + "void f(Box value) {}"),
+                             DiagnosticCode::NonCopyableValue),
+              nullptr);
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze(
+                prefix +
+                "unsafe Box f() { Box value = Box::init(); return value; }"),
+            DiagnosticCode::NonCopyableValue),
+        nullptr);
+    EXPECT_FALSE(Analyze(prefix +
+                         "unsafe Box f() { return Box::init(); } void "
+                         "use(&const Box box) {} "
+                         "unsafe void g() { Box box = f(); use(&box); }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(Analyze(prefix + "structure Parent { Box child; }; void "
+                                        "f() { Parent p = Parent::init(); }"),
+                       DiagnosticCode::UnsafeOperation),
+        nullptr);
+}
+
+TEST(SemanticStructureTests,
+     PreservesBorrowLoansAcrossFieldsAndMethodArguments) {
+    const std::string prefix =
+        "structure Box { i32 x; }; void Box::set(&self, &Box other) {} ";
+    EXPECT_NE(FindDiagnostic(
+                  Analyze(prefix +
+                          "void f() { Box box = Box::init(); box.set(&box); }"),
+                  DiagnosticCode::BorrowConflict),
+              nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze(prefix + "void f() { Box box = Box::init(); r "
+                                        ":= &box.x; box.x = 2; value := *r; }"),
+                       DiagnosticCode::BorrowConflict),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze(prefix + "void f() { Box box = Box::init(); r "
+                                        ":= &box; moved := r; r->x = 2; }"),
+                       DiagnosticCode::MovedReference),
+        nullptr);
+    EXPECT_FALSE(
+        Analyze(
+            prefix +
+            "void f() { Box a = Box::init(); Box b = Box::init(); a.set(&b); }")
+            .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(Analyze(prefix + "void f() { &i32 r = none; { Box box = "
+                                        "Box::init(); r = &box.x; } }"),
+                       DiagnosticCode::IncompatibleType),
+        nullptr);
+}
+
+TEST(SemanticStructureTests,
+     RejectsRecursiveLayoutsAndUnfinishedConstructionEscapes) {
+    for (const std::string& source :
+         {"structure Box { Box value; };",
+          "structure A { B b; }; structure B { A a; };",
+          "structure Box { void value; };",
+          "structure Box { &i32 reference; };",
+          "structure Box {}; Box Box::init() override { return build Box { "
+          "copy := self; }; }",
+          "structure Box {}; void Box::f(&self) {} Box Box::init() override { "
+          "return build Box { self.f(); }; }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_NE(
+            FindDiagnostic(Analyze(source), DiagnosticCode::InvalidStructure),
+            nullptr);
+    }
+    EXPECT_FALSE(Analyze("structure Node { *Node next; i32 value; }; void f() "
+                         "{ Node n = Node::init(); }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticStructureTests, ReportsPreciseAccessAndLifecycleRanges) {
+    const std::string prefix = "structure Box { private i32 secret; }; ";
+    const std::string source =
+        prefix + "void f() { Box box = Box::init(); box.secret; }";
+    Analysis result = Analyze(source);
+    const Diagnostic* diagnostic =
+        FindDiagnostic(result, DiagnosticCode::PrivateAccess);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(diagnostic->range.start.offset, source.rfind("secret"));
+    EXPECT_EQ(diagnostic->range.Length(), 6);
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze(prefix + "void f() { Box box = Box::init(); box.tear(); }"),
+            DiagnosticCode::InvalidLifecycle),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("structure Box { i32 x; }; Box copy(Box b) { return b; } "
+                    "Box f() { return build Box { x := copy(self).x; }; }"),
+            DiagnosticCode::InvalidStructure),
+        nullptr);
+}
+
+TEST(SemanticStructureTests, ConstructionFieldBorrowsCannotEscapeBuild) {
+    const std::string prefix = "structure Box { i32 x; }; ";
+    EXPECT_NE(FindDiagnostic(
+                  Analyze(prefix + "void f() { i32 n = 0; r := &n; Box b = "
+                                   "build Box { r = &self.x; }; *r = 42; }"),
+                  DiagnosticCode::ReferenceEscape),
+              nullptr);
+    EXPECT_FALSE(
+        Analyze(prefix +
+                "Box f() { return build Box { r := &self.x; *r = 42; }; }")
+            .diagnostics.HasErrors());
+}
+
+TEST(SemanticStructureTests, ValidatesCompoundFieldTypesAndBuildControlFlow) {
+    EXPECT_NE(
+        FindDiagnostic(Analyze("structure Box { *[1]string unsupported; };"),
+                       DiagnosticCode::InvalidArrayElement),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("structure Box { *&i32 unsupported; };"),
+                             DiagnosticCode::UnsupportedCompoundType),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("structure Box {}; Box f() { return build "
+                                     "Box { return Box::init(); }; }"),
+                             DiagnosticCode::InvalidStructure),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("structure Box {}; void f() { loop ;; { "
+                                     "Box b = build Box { break; }; } }"),
+                             DiagnosticCode::LoopControlOutsideLoop),
+              nullptr);
+}
+
+TEST(SemanticStructureTests, AllowsParameterizedInitOverridesAndChecksCalls) {
+    const std::string prefix =
+        "structure Box { i32 value; }; "
+        "Box Box::init(i32 value) override { return build Box { self.value = "
+        "value; }; } ";
+    EXPECT_FALSE(
+        Analyze(prefix + "i32 f() { Box b = Box::init(42); return b.value; }")
+            .diagnostics.HasErrors());
+    for (const std::string& arguments : {"", "1, 2"}) {
+        SCOPED_TRACE(arguments);
+        EXPECT_NE(
+            FindDiagnostic(Analyze(prefix + "void f() { Box b = Box::init(" +
+                                   arguments + "); }"),
+                           DiagnosticCode::WrongArgumentCount),
+            nullptr);
+    }
+    EXPECT_NE(FindDiagnostic(
+                  Analyze(prefix + "void f() { Box b = Box::init(true); }"),
+                  DiagnosticCode::IncompatibleArgument),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("structure Box {}; Box Box::init(i32 "
+                                     "value) { return build Box {}; }"),
+                             DiagnosticCode::InvalidLifecycle),
+              nullptr);
+    EXPECT_FALSE(
+        Analyze("structure Box { i32 value; }; Box Box::init(&const i32 value) "
+                "override { return build Box { self.value = *value; }; } "
+                "void f() { i32 n = 42; Box b = Box::init(&n); }")
+            .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(Analyze("structure Box {}; unsafe Box Box::init(i32 "
+                               "value) override { return build Box {}; } "
+                               "void f() { Box b = Box::init(42); }"),
+                       DiagnosticCode::UnsafeOperation),
+        nullptr);
+}
+
+TEST(SemanticStructureTests,
+     RequiresExplicitFieldDefaultsForParameterizedInitializers) {
+    const std::string prefix =
+        "structure Box { i32 value; }; Box Box::init(i32 value) override { "
+        "return build Box { self.value = value; }; } ";
+    for (const std::string& field :
+         {"Box box;", "[2]Box boxes;", "(Box, i32) pair;"}) {
+        SCOPED_TRACE(field);
+        EXPECT_NE(FindDiagnostic(
+                      Analyze(prefix + "structure Parent { " + field + " };"),
+                      DiagnosticCode::InvalidStructure),
+                  nullptr);
+    }
+    EXPECT_FALSE(Analyze(prefix +
+                         "structure Parent { Box box = Box::init(42); [2]Box "
+                         "boxes = [Box::init(1), Box::init(2)]; "
+                         "(Box, i32) pair = (Box::init(3), 4); *Box pointer; "
+                         "}; void f() { Parent p = Parent::init(); }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(FindDiagnostic(
+                  Analyze(prefix + "structure Parent { &Box reference; };"),
+                  DiagnosticCode::InvalidStructure),
+              nullptr);
+}
