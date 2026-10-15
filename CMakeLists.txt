@@ -32,6 +32,7 @@ endif()
 
 add_subdirectory(src/diagnostics)
 add_subdirectory(src/core)
+add_subdirectory(src/semantic)
 add_subdirectory(src/memory)
 add_subdirectory(src/runtime)
 add_subdirectory(src/utils)
@@ -43,6 +44,7 @@ target_link_libraries(flecha
         flecha_project_options
         diagnostics
         core
+        semantic
         memory
         runtime
         utils

@@ -3,6 +3,7 @@ add_executable(test_flecha
     test_diagnostics.cpp
     test_main.cpp
     test_parser.cpp
+    test_semantic.cpp
     test_tokenizer.cpp
 )
 
@@ -11,6 +12,7 @@ target_link_libraries(test_flecha
         flecha_project_options
         diagnostics
         core
+        semantic
         memory
         runtime
         utils

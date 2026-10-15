@@ -20,6 +20,19 @@ enum class DiagnosticCode {
     UnexpectedToken,
     ExpectedToken,
     InvalidAssignmentTarget,
+    DuplicateDeclaration,
+    UnknownName,
+    IncompatibleType,
+    SemanticInvalidAssignmentTarget,
+    SymbolNotWritable,
+    NotCallable,
+    WrongArgumentCount,
+    IncompatibleArgument,
+    InvalidOperand,
+    InvalidCondition,
+    InvalidReturnType,
+    CannotInferType,
+    InvalidVariableType,
 };
 
 [[nodiscard]] std::string_view DiagnosticCodeName(DiagnosticCode code);

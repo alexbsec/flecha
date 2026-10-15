@@ -31,8 +31,7 @@ Parser::Parser(std::vector<Token> tokens,
 const Token& Parser::Current() const { return Peek(0); }
 
 const Token& Parser::Peek(std::size_t offset) const {
-    const std::size_t index =
-        std::min(_position + offset, _tokens.size() - 1);
+    const std::size_t index = std::min(_position + offset, _tokens.size() - 1);
     return _tokens[index];
 }
 
@@ -77,8 +76,10 @@ bool Parser::IsTypeToken(TokenType type) const {
         case TokenType::F64:
         case TokenType::Bool:
         case TokenType::Char:
-        case TokenType::Void: return true;
-        default: return false;
+        case TokenType::Void:
+            return true;
+        default:
+            return false;
     }
 }
 
@@ -87,21 +88,19 @@ const Token* Parser::Consume(TokenType type, std::string_view expectation) {
         return &Advance();
     }
 
-    _diagnostics.Report(
-        diagnostics::DiagnosticCode::ExpectedToken, Current().range,
-        "expected " + std::string(expectation) + ", found '" +
-            Current().value + "'");
+    _diagnostics.Report(diagnostics::DiagnosticCode::ExpectedToken,
+                        Current().range,
+                        "expected " + std::string(expectation) + ", found '" +
+                            Current().value + "'");
     return nullptr;
 }
 
 void Parser::ReportUnexpectedToken(std::string_view context) {
-    const std::string tokenText = Current().value.empty()
-                                      ? "end of file"
-                                      : "'" + Current().value + "'";
+    const std::string tokenText =
+        Current().value.empty() ? "end of file" : "'" + Current().value + "'";
     _diagnostics.Report(diagnostics::DiagnosticCode::UnexpectedToken,
                         Current().range,
-                        "unexpected " + tokenText + " " +
-                            std::string(context));
+                        "unexpected " + tokenText + " " + std::string(context));
 }
 
 std::unique_ptr<TypeNode> Parser::ParseType() {
@@ -109,21 +108,51 @@ std::unique_ptr<TypeNode> Parser::ParseType() {
     PrimitiveType type;
 
     switch (token.type) {
-        case TokenType::I8: type = PrimitiveType::I8; break;
-        case TokenType::I16: type = PrimitiveType::I16; break;
-        case TokenType::I32: type = PrimitiveType::I32; break;
-        case TokenType::I64: type = PrimitiveType::I64; break;
-        case TokenType::ISize: type = PrimitiveType::ISize; break;
-        case TokenType::U8: type = PrimitiveType::U8; break;
-        case TokenType::U16: type = PrimitiveType::U16; break;
-        case TokenType::U32: type = PrimitiveType::U32; break;
-        case TokenType::U64: type = PrimitiveType::U64; break;
-        case TokenType::USize: type = PrimitiveType::USize; break;
-        case TokenType::F32: type = PrimitiveType::F32; break;
-        case TokenType::F64: type = PrimitiveType::F64; break;
-        case TokenType::Bool: type = PrimitiveType::Bool; break;
-        case TokenType::Char: type = PrimitiveType::Char; break;
-        case TokenType::Void: type = PrimitiveType::Void; break;
+        case TokenType::I8:
+            type = PrimitiveType::I8;
+            break;
+        case TokenType::I16:
+            type = PrimitiveType::I16;
+            break;
+        case TokenType::I32:
+            type = PrimitiveType::I32;
+            break;
+        case TokenType::I64:
+            type = PrimitiveType::I64;
+            break;
+        case TokenType::ISize:
+            type = PrimitiveType::ISize;
+            break;
+        case TokenType::U8:
+            type = PrimitiveType::U8;
+            break;
+        case TokenType::U16:
+            type = PrimitiveType::U16;
+            break;
+        case TokenType::U32:
+            type = PrimitiveType::U32;
+            break;
+        case TokenType::U64:
+            type = PrimitiveType::U64;
+            break;
+        case TokenType::USize:
+            type = PrimitiveType::USize;
+            break;
+        case TokenType::F32:
+            type = PrimitiveType::F32;
+            break;
+        case TokenType::F64:
+            type = PrimitiveType::F64;
+            break;
+        case TokenType::Bool:
+            type = PrimitiveType::Bool;
+            break;
+        case TokenType::Char:
+            type = PrimitiveType::Char;
+            break;
+        case TokenType::Void:
+            type = PrimitiveType::Void;
+            break;
         default:
             _diagnostics.Report(diagnostics::DiagnosticCode::ExpectedToken,
                                 token.range, "expected a type");
@@ -148,7 +177,7 @@ std::unique_ptr<Parameter> Parser::ParseParameter() {
 
     return std::make_unique<Parameter>(
         source::SourceRange{start, name->range.end}, std::move(type),
-        name->value);
+        name->value, name->range);
 }
 
 std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
@@ -196,7 +225,7 @@ std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
     return std::make_unique<FunctionDeclaration>(
         source::SourceRange{start, end}, std::vector<FunctionModifier>{},
         std::move(returnType), name->value, std::move(parameters),
-        std::move(body));
+        std::move(body), name->range);
 }
 
 std::unique_ptr<Declaration> Parser::ParseDeclaration() {
@@ -248,11 +277,10 @@ std::unique_ptr<Statement> Parser::ParseStatement() {
     if (expression == nullptr) {
         return nullptr;
     }
-    const Token* semicolon = Consume(TokenType::SemiColon,
-                                     "';' after expression");
-    const source::SourceLocation end = semicolon == nullptr
-                                           ? expression->Range().end
-                                           : semicolon->range.end;
+    const Token* semicolon =
+        Consume(TokenType::SemiColon, "';' after expression");
+    const source::SourceLocation end =
+        semicolon == nullptr ? expression->Range().end : semicolon->range.end;
     return std::make_unique<ExpressionStatement>(
         source::SourceRange{start, end}, std::move(expression));
 }
@@ -285,14 +313,13 @@ Parser::ParseVariableDeclarationStatement() {
         return nullptr;
     }
 
-    const Token* semicolon = Consume(TokenType::SemiColon,
-                                     "';' after variable declaration");
-    const source::SourceLocation end = semicolon == nullptr
-                                           ? initializer->Range().end
-                                           : semicolon->range.end;
+    const Token* semicolon =
+        Consume(TokenType::SemiColon, "';' after variable declaration");
+    const source::SourceLocation end =
+        semicolon == nullptr ? initializer->Range().end : semicolon->range.end;
     return std::make_unique<VariableDeclarationStatement>(
         source::SourceRange{start, end}, std::move(type), name->value,
-        std::move(initializer));
+        std::move(initializer), name->range);
 }
 
 std::unique_ptr<AlsoClause> Parser::ParseAlsoClause() {
@@ -340,9 +367,9 @@ std::unique_ptr<ConditionalBranch> Parser::ParseConditionalBranch(
     }
 
     while (Check(TokenType::Also)) {
-        _diagnostics.Report(
-            diagnostics::DiagnosticCode::UnexpectedToken, Current().range,
-            "a branch may have only one 'also' clause");
+        _diagnostics.Report(diagnostics::DiagnosticCode::UnexpectedToken,
+                            Current().range,
+                            "a branch may have only one 'also' clause");
         std::unique_ptr<AlsoClause> extraClause = ParseAlsoClause();
         if (extraClause != nullptr) {
             end = extraClause->Range().end;
@@ -387,9 +414,8 @@ std::unique_ptr<IfStatement> Parser::ParseIfStatement() {
     }
 
     return std::make_unique<IfStatement>(
-        source::SourceRange{ifToken.range.start, end},
-        std::move(primaryBranch), std::move(elseIfBranches),
-        std::move(elseBody));
+        source::SourceRange{ifToken.range.start, end}, std::move(primaryBranch),
+        std::move(elseIfBranches), std::move(elseBody));
 }
 
 std::unique_ptr<ReturnStatement> Parser::ParseReturnStatement() {
@@ -399,8 +425,8 @@ std::unique_ptr<ReturnStatement> Parser::ParseReturnStatement() {
         expression = ParseExpression();
     }
 
-    const Token* semicolon = Consume(TokenType::SemiColon,
-                                     "';' after return statement");
+    const Token* semicolon =
+        Consume(TokenType::SemiColon, "';' after return statement");
     const source::SourceLocation end =
         semicolon == nullptr ? Current().range.start : semicolon->range.end;
     return std::make_unique<ReturnStatement>(
@@ -421,8 +447,8 @@ std::unique_ptr<Expression> Parser::ParseAssignmentExpression() {
     const source::SourceRange targetRange = target->Range();
     if (target->Kind() != AstNodeKind::NameExpression) {
         _diagnostics.Report(
-            diagnostics::DiagnosticCode::InvalidAssignmentTarget,
-            targetRange, "expression is not a valid assignment target");
+            diagnostics::DiagnosticCode::InvalidAssignmentTarget, targetRange,
+            "expression is not a valid assignment target");
     }
 
     std::unique_ptr<Expression> value = ParseAssignmentExpression();
@@ -437,23 +463,31 @@ std::unique_ptr<Expression> Parser::ParseAssignmentExpression() {
 
 int Parser::BinaryPrecedence(TokenType type) const {
     switch (type) {
-        case TokenType::Or: return 1;
-        case TokenType::And: return 2;
-        case TokenType::Xor: return 3;
+        case TokenType::Or:
+            return 1;
+        case TokenType::And:
+            return 2;
+        case TokenType::Xor:
+            return 3;
         case TokenType::Equal:
         case TokenType::NotEqual:
         case TokenType::StrictEqual:
-        case TokenType::StrictNotEqual: return 4;
+        case TokenType::StrictNotEqual:
+            return 4;
         case TokenType::Less:
         case TokenType::LessEqual:
         case TokenType::Greater:
-        case TokenType::GreaterEqual: return 5;
+        case TokenType::GreaterEqual:
+            return 5;
         case TokenType::Add:
-        case TokenType::Sub: return 6;
+        case TokenType::Sub:
+            return 6;
         case TokenType::Mul:
         case TokenType::Div:
-        case TokenType::Mod: return 7;
-        default: return 0;
+        case TokenType::Mod:
+            return 7;
+        default:
+            return 0;
     }
 }
 
@@ -462,8 +496,10 @@ int Parser::UnaryPrecedence(TokenType type) const {
         case TokenType::Add:
         case TokenType::Sub:
         case TokenType::Bang:
-        case TokenType::Mul: return 8;
-        default: return 0;
+        case TokenType::Mul:
+            return 8;
+        default:
+            return 0;
     }
 }
 
@@ -538,16 +574,14 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
                 if (Check(TokenType::RParen)) {
                     _diagnostics.Report(
                         diagnostics::DiagnosticCode::ExpectedToken,
-                        Current().range,
-                        "expected an argument after ','");
+                        Current().range, "expected an argument after ','");
                 }
                 continue;
             }
             if (!Check(TokenType::RParen)) {
-                _diagnostics.Report(
-                    diagnostics::DiagnosticCode::ExpectedToken,
-                    Current().range,
-                    "expected ',' or ')' after argument");
+                _diagnostics.Report(diagnostics::DiagnosticCode::ExpectedToken,
+                                    Current().range,
+                                    "expected ',' or ')' after argument");
                 while (!IsAtEnd() && !Check(TokenType::RParen) &&
                        !Check(TokenType::SemiColon)) {
                     Advance();
@@ -585,8 +619,8 @@ std::unique_ptr<Expression> Parser::ParsePrimaryExpression() {
         case TokenType::None:
         case TokenType::Null:
             Advance();
-            return std::make_unique<LiteralExpression>(
-                token.range, token.type, token.value);
+            return std::make_unique<LiteralExpression>(token.range, token.type,
+                                                       token.value);
         case TokenType::Identifier:
             Advance();
             return std::make_unique<NameExpression>(token.range, token.value);
