@@ -1,0 +1,54 @@
+// Syntax examples only: this file intentionally fails semantic analysis.
+// Each compound type below reports FLECHA-S0024 before LLVM generation.
+// Pointer/reference operations and reference initialization arrive later.
+// Check: build/flecha --emit-llvm examples/diagnostics/compound_types.fl
+
+void pointer_types() {
+    *u8 writable;                    // Rebindable pointer, writable target.
+    *const u8 readOnly;               // Rebindable pointer, read-only target.
+
+    constptr u8 fixedAlias;           // Fixed pointer, writable target.
+    const *u8 fixedExpanded;          // Same type as constptr u8.
+
+    constptr const u8 fixedReadOnlyAlias;
+    const *const u8 fixedReadOnlyExpanded;
+    // Both above: fixed pointer, read-only target.
+}
+
+// Parameters illustrate reference types without inventing an initializer.
+void reference_types(
+    &u8 writable,                    // Rebindable reference, writable target.
+    &const u8 readOnly,               // Rebindable reference, read-only target.
+    constref u8 fixedAlias,           // Fixed reference, writable target.
+    const &u8 fixedExpanded,          // Same type as constref u8.
+    constref const u8 fixedReadOnlyAlias,
+    const &const u8 fixedReadOnlyExpanded
+) {
+    // The last two parameters have fixed bindings and read-only targets.
+}
+
+// Qualifiers belong to individual layers, including inside compound types.
+void nested_types(
+    &*u8 referenceToPointer,
+    &constptr u8 referenceToFixedPointerAlias,
+    &const *u8 referenceToFixedPointerExpanded,
+    *const *const u8 pointerToFixedReadOnlyPointer,
+    constref *const u8 fixedReferenceToReadOnlyPointer,
+    & &u8 referenceToReference        // Space distinguishes this from &&.
+) {}
+
+// Compound return types and casts are represented but also rejected.
+*u8 pointer_result() {
+    return none;
+}
+
+void compound_casts() {
+    0 as *u8;
+    0.cast<constref u8>;
+}
+
+// constptr and constref already include const on their own layer.
+// These would instead cause parser errors for a duplicate qualifier:
+// const constptr u8 duplicatePointer;
+// const constref u8 duplicateReference;
+// const const i32 duplicateValue = 42;

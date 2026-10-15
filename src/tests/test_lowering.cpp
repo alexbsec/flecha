@@ -255,3 +255,56 @@ TEST(LoweringTests, PreservesDelayedDeclarationsAcrossTerminatingBranches) {
             *function.Body().Statements()[0]);
     EXPECT_EQ(&assignment.Target(), &declaration.Variable());
 }
+
+TEST(LoweringTests, PreservesConstDeclarationsButReadsOrdinaryValues) {
+    LoweredSource result = Lower(
+        "const i32 f(const i32 input) { const i32 answer = input; "
+        "return answer; } i32 main() { return f(42); }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.program, nullptr);
+    const std::string dump = DumpBoundProgram(*result.program);
+    EXPECT_NE(dump.find("function f(const i32 input) -> const i32"),
+              std::string::npos);
+    EXPECT_NE(dump.find("local answer: const i32 = load input"),
+              std::string::npos);
+    const BoundVariableDeclarationStatement& declaration =
+        static_cast<const BoundVariableDeclarationStatement&>(
+            *result.program->Functions()[0]->Body().Statements()[0]);
+    EXPECT_TRUE(declaration.Variable().Type().IsConst());
+    EXPECT_FALSE(declaration.Variable().Writable());
+    EXPECT_FALSE(declaration.Initializer()->Type().IsConst());
+}
+
+TEST(LoweringTests, StopsUnsupportedCompoundTypesBeforeCodeGeneration) {
+    for (const std::string& source :
+         {"void f() { constptr u8 p = none; }", "void f(&const u8 r) {}",
+          "*u8 f() {}", "void f() { 42 as &u8; }"}) {
+        SCOPED_TRACE(source);
+        LoweredSource result = Lower(source);
+        EXPECT_TRUE(result.diagnostics.HasErrors());
+        EXPECT_EQ(result.program, nullptr);
+    }
+}
+
+TEST(LoweringTests, GivesNoneInitializersTheirDeclaredValueType) {
+    LoweredSource result = Lower(
+        "void f() { const i32 zero = (none); const stringv word = \"none\"; }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.program, nullptr);
+    const auto& statements =
+        result.program->Functions()[0]->Body().Statements();
+    const BoundLiteralExpression& zero =
+        static_cast<const BoundLiteralExpression&>(
+            *static_cast<const BoundVariableDeclarationStatement&>(
+                 *statements[0])
+                 .Initializer());
+    EXPECT_TRUE(zero.IsZeroValue());
+    EXPECT_EQ(zero.Type(), SemanticType(SemanticTypeKind::I32));
+    const BoundLiteralExpression& word =
+        static_cast<const BoundLiteralExpression&>(
+            *static_cast<const BoundVariableDeclarationStatement&>(
+                 *statements[1])
+                 .Initializer());
+    EXPECT_FALSE(word.IsZeroValue());
+    EXPECT_EQ(word.Value(), "none");
+}

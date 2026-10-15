@@ -334,3 +334,21 @@ TEST(TokenizerTests, DiagnosticRangesIdentifyInvalidSource) {
     EXPECT_EQ(tokens[1].type, TokenType::Invalid);
     EXPECT_EQ(tokens[2].type, TokenType::Identifier);
 }
+
+TEST(TokenizerTests, RecognizesConstAliasesAndReferenceMarker) {
+    DiagnosticBag diagnostics;
+    const std::string source = "const constptr constref constval & && and";
+    const std::vector<Token> tokens = Tokenize(source, &diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    ASSERT_EQ(tokens.size(), 8);
+    const std::vector<TokenType> expected{
+        TokenType::Const,      TokenType::ConstPtr,  TokenType::ConstRef,
+        TokenType::Identifier, TokenType::Ampersand, TokenType::And,
+        TokenType::And,        TokenType::EOF_TOKEN};
+    for (std::size_t index = 0; index < tokens.size(); ++index) {
+        EXPECT_EQ(tokens[index].type, expected[index]);
+        EXPECT_EQ(source.substr(tokens[index].range.start.offset,
+                                tokens[index].range.Length()),
+                  tokens[index].value);
+    }
+}

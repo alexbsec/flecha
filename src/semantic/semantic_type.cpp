@@ -1,8 +1,45 @@
 #include "semantic/semantic_type.hpp"
 
+#include <cassert>
+#include <utility>
+
 namespace flecha::semantic {
 
-std::string_view SemanticType::Name() const {
+SemanticType::SemanticType(SemanticTypeKind kind, SemanticType target,
+                           bool isConst)
+    : _kind(kind),
+      _isConst(isConst),
+      _target(std::make_shared<const SemanticType>(std::move(target))) {
+    assert(IsCompound());
+}
+
+SemanticType SemanticType::WithoutConst() const {
+    SemanticType result = *this;
+    result._isConst = false;
+    return result;
+}
+
+bool SemanticType::operator==(const SemanticType& other) const {
+    return _kind == other._kind && _isConst == other._isConst &&
+           ((_target == nullptr && other._target == nullptr) ||
+            (_target != nullptr && other._target != nullptr &&
+             *_target == *other._target));
+}
+
+SemanticType SemanticType::FromSyntax(const core::TypeNode& type) {
+    if (type.TypeForm() != core::TypeKind::Primitive) {
+        return SemanticType(type.TypeForm() == core::TypeKind::Pointer
+                                ? SemanticTypeKind::Pointer
+                                : SemanticTypeKind::Reference,
+                            FromSyntax(*type.Target()), type.IsConst());
+    }
+    SemanticType result = FromSyntax(type.Type());
+    result._isConst = type.IsConst();
+    return result;
+}
+
+std::string SemanticType::Name() const {
+    if (_isConst) return "const " + WithoutConst().Name();
     switch (_kind) {
         case SemanticTypeKind::I8:
             return "i8";
@@ -38,6 +75,13 @@ std::string_view SemanticType::Name() const {
             return "string";
         case SemanticTypeKind::StringView:
             return "stringv";
+        case SemanticTypeKind::Pointer:
+            return "*" + _target->Name();
+        case SemanticTypeKind::Reference: {
+            const std::string targetName = _target->Name();
+            // Keep nested references distinct from the logical && token.
+            return (targetName.starts_with('&') ? "& " : "&") + targetName;
+        }
         case SemanticTypeKind::Null:
             return "null";
         case SemanticTypeKind::None:
@@ -109,19 +153,21 @@ SemanticType SemanticType::FromSyntax(core::PrimitiveType type) {
 
 bool IsAssignable(SemanticType destination, SemanticType source) {
     if (destination.IsError() || source.IsError()) return true;
-    if (destination == source) return true;
+    if (destination.WithoutConst() == source.WithoutConst()) return true;
     if (destination.Kind() == SemanticTypeKind::String &&
         source.Kind() == SemanticTypeKind::StringView) {
         return true;
     }
     return source.Kind() == SemanticTypeKind::None &&
            destination.Kind() != SemanticTypeKind::Void &&
-           destination.Kind() != SemanticTypeKind::Function;
+           destination.Kind() != SemanticTypeKind::Function &&
+           destination.Kind() != SemanticTypeKind::Reference;
 }
 
 bool CanExplicitlyCast(SemanticType source, SemanticType destination) {
     if (source.IsError() || destination.IsError()) return true;
-    if (source == destination) return true;
+    if (source.IsCompound() || destination.IsCompound()) return false;
+    if (source.WithoutConst() == destination.WithoutConst()) return true;
     if ((source.Kind() == SemanticTypeKind::StringView &&
          destination.Kind() == SemanticTypeKind::String) ||
         (source.Kind() == SemanticTypeKind::String &&

@@ -85,6 +85,21 @@ bool Parser::IsTypeToken(TokenType type) const {
     }
 }
 
+bool Parser::StartsType() const {
+    if (Check(TokenType::Const) || Check(TokenType::ConstPtr) ||
+        Check(TokenType::ConstRef))
+        return true;
+    std::size_t offset = 0;
+    while (Peek(offset).type == TokenType::Mul ||
+           Peek(offset).type == TokenType::Ampersand ||
+           Peek(offset).type == TokenType::Const ||
+           Peek(offset).type == TokenType::ConstPtr ||
+           Peek(offset).type == TokenType::ConstRef) {
+        ++offset;
+    }
+    return IsTypeToken(Peek(offset).type);
+}
+
 const Token* Parser::Consume(TokenType type, std::string_view expectation) {
     if (Check(type)) {
         return &Advance();
@@ -106,7 +121,32 @@ void Parser::ReportUnexpectedToken(std::string_view context) {
 }
 
 std::unique_ptr<TypeNode> Parser::ParseType() {
+    const source::SourceLocation start = Current().range.start;
+    source::SourceRange qualifierRange;
+    const bool explicitConst = Check(TokenType::Const);
+    if (explicitConst) qualifierRange = Advance().range;
     const Token& token = Current();
+    const bool alias =
+        token.type == TokenType::ConstPtr || token.type == TokenType::ConstRef;
+    if (explicitConst && alias) {
+        _diagnostics.Report(diagnostics::DiagnosticCode::UnexpectedToken,
+                            token.range, "duplicate const qualifier");
+        return nullptr;
+    }
+    if (token.type == TokenType::Mul || token.type == TokenType::Ampersand ||
+        alias) {
+        Advance();
+        std::unique_ptr<TypeNode> target = ParseType();
+        if (target == nullptr) return nullptr;
+        const source::SourceRange range{start, target->Range().end};
+        const TypeKind kind =
+            token.type == TokenType::Mul || token.type == TokenType::ConstPtr
+                ? TypeKind::Pointer
+                : TypeKind::Reference;
+        return std::make_unique<TypeNode>(range, kind, std::move(target),
+                                          explicitConst || alias,
+                                          alias ? token.range : qualifierRange);
+    }
     PrimitiveType type;
 
     switch (token.type) {
@@ -168,7 +208,9 @@ std::unique_ptr<TypeNode> Parser::ParseType() {
     }
 
     Advance();
-    return std::make_unique<TypeNode>(token.range, type);
+    return std::make_unique<TypeNode>(
+        source::SourceRange{start, token.range.end}, type, explicitConst,
+        qualifierRange);
 }
 
 std::unique_ptr<Parameter> Parser::ParseParameter() {
@@ -237,7 +279,7 @@ std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
 }
 
 std::unique_ptr<Declaration> Parser::ParseDeclaration() {
-    if (IsTypeToken(Current().type)) {
+    if (StartsType()) {
         return ParseFunctionDeclaration();
     }
 
@@ -283,7 +325,7 @@ std::unique_ptr<Statement> Parser::ParseStatement() {
     if (Check(TokenType::Break)) return ParseBreakStatement();
     if (Check(TokenType::JumpTo)) return ParseJumpToStatement();
     if (Check(TokenType::Hash)) return ParsePositionStatement();
-    if (IsTypeToken(Current().type) || IsInferredVariableDeclaration()) {
+    if (StartsType() || IsInferredVariableDeclaration()) {
         return ParseVariableDeclarationStatement();
     }
 
@@ -587,6 +629,7 @@ int Parser::UnaryPrecedence(TokenType type) const {
         case TokenType::Sub:
         case TokenType::Bang:
         case TokenType::Mul:
+        case TokenType::Ampersand:
             return 8;
         default:
             return 0;
@@ -802,7 +845,7 @@ std::unique_ptr<Expression> Parser::ParsePrimaryExpression() {
 
 void Parser::SynchronizeTopLevel() {
     if (!IsAtEnd()) Advance();
-    while (!IsAtEnd() && !IsTypeToken(Current().type)) {
+    while (!IsAtEnd() && !StartsType()) {
         Advance();
     }
 }

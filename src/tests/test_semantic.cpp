@@ -901,3 +901,158 @@ TEST(SemanticControlFlowAssignmentTests, ReportsExactReachableReadRangeOnce) {
     EXPECT_EQ(diagnostic.range.end.column, 29);
     EXPECT_EQ(diagnostic.range.Length(), 5);
 }
+
+TEST(SemanticTypeTests, NormalizesAliasesAndRetainsEachQualifierLayer) {
+    const std::vector<std::pair<std::string, std::string>> aliases{
+        {"constptr u8", "const *u8"},
+        {"constref u8", "const &u8"},
+        {"constref &u8", "const & &u8"},
+        {"&constptr *constref const u8", "&const **const &const u8"}};
+    for (const auto& [alias, expanded] : aliases) {
+        SCOPED_TRACE(alias);
+        Analysis analysis =
+            Analyze("void f(" + alias + " a, " + expanded + " b) {}");
+        const FunctionDeclaration& function = FunctionAt(analysis, 0);
+        const SemanticType first =
+            SemanticType::FromSyntax(function.Parameters()[0]->Type());
+        const SemanticType second =
+            SemanticType::FromSyntax(function.Parameters()[1]->Type());
+        EXPECT_EQ(first, second);
+        EXPECT_EQ(first.Name(), expanded);
+        const FunctionSymbol& symbol = static_cast<const FunctionSymbol&>(
+            *analysis.model.DeclaredSymbol(function));
+        EXPECT_EQ(symbol.ParameterTypes()[0], first);
+        EXPECT_EQ(symbol.ParameterTypes()[1], second);
+    }
+    const SemanticType byte(SemanticTypeKind::U8);
+    const SemanticType readOnlyByte(SemanticTypeKind::U8, true);
+    const SemanticType fixedPointer(SemanticTypeKind::Pointer, byte, true);
+    const SemanticType readOnlyPointer(SemanticTypeKind::Pointer, readOnlyByte);
+    EXPECT_NE(fixedPointer, readOnlyPointer);
+    EXPECT_FALSE(IsAssignable(fixedPointer, readOnlyPointer));
+    EXPECT_FALSE(IsAssignable(readOnlyPointer, fixedPointer));
+    EXPECT_EQ(fixedPointer.WithoutConst().Target()->Name(), "u8");
+    EXPECT_EQ(readOnlyPointer.WithoutConst().Target()->Name(), "const u8");
+    const SemanticType reference(SemanticTypeKind::Reference, byte);
+    EXPECT_FALSE(IsAssignable(reference, SemanticType(SemanticTypeKind::None)));
+    EXPECT_FALSE(CanExplicitlyCast(reference, reference));
+    EXPECT_FALSE(CanExplicitlyCast(fixedPointer, readOnlyPointer));
+    EXPECT_TRUE(IsAssignable(readOnlyByte, byte));
+}
+
+TEST(SemanticConstTests, AllowsRuntimeInitializationAndMutableValueCopies) {
+    Analysis analysis = Analyze(
+        "const i32 get(const i32 value) { return value; } "
+        "i32 main() { const i32 answer = get(42); copy := answer; "
+        "copy = copy + 1; const i32 zero = none; "
+        "const bool yes = answer == 42; const i64 wide = answer as const i64; "
+        "const string text = \"hi\"; const stringv view = text.view(); "
+        "return copy - 1; }");
+    ASSERT_FALSE(analysis.diagnostics.HasErrors());
+    const FunctionDeclaration& function = FunctionAt(analysis, 1);
+    const Symbol* answer =
+        analysis.model.DeclaredSymbol(VariableAt(function, 0));
+    const Symbol* copy = analysis.model.DeclaredSymbol(VariableAt(function, 1));
+    ASSERT_NE(answer, nullptr);
+    ASSERT_NE(copy, nullptr);
+    EXPECT_FALSE(answer->Writable());
+    EXPECT_TRUE(answer->Type().IsConst());
+    EXPECT_TRUE(copy->Writable());
+    EXPECT_FALSE(copy->Type().IsConst());
+    EXPECT_FALSE(analysis.model.TypeOf(*VariableAt(function, 1).Initializer())
+                     .IsConst());
+}
+
+TEST(SemanticConstTests, RejectsWritesToLocalsAndParametersAtExactNameRange) {
+    const std::vector<std::string> sources{
+        "void f() {\n    const i32 value = 1;\n    value = 2;\n}",
+        "void f(const i32 value) {\n    value = 2;\n}"};
+    for (const std::string& source : sources) {
+        SCOPED_TRACE(source);
+        Analysis analysis = Analyze(source);
+        ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
+        const Diagnostic& diagnostic = analysis.diagnostics.Diagnostics()[0];
+        EXPECT_EQ(DiagnosticCodeName(diagnostic.code), "FLECHA-S0005");
+        EXPECT_EQ(diagnostic.range.start.offset, source.rfind("value"));
+        EXPECT_EQ(diagnostic.range.Length(), 5);
+        EXPECT_EQ(diagnostic.range.start.column, 5);
+        EXPECT_EQ(diagnostic.range.end.column, 10);
+    }
+}
+
+TEST(SemanticConstTests, RequiresInitializerAndPreservesBorrowRestrictions) {
+    Analysis analysis = Analyze("void f() { const i32 value; }");
+    ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
+    const Diagnostic& diagnostic = analysis.diagnostics.Diagnostics()[0];
+    EXPECT_EQ(DiagnosticCodeName(diagnostic.code), "FLECHA-S0023");
+    EXPECT_EQ(diagnostic.range.start.offset, 21);
+    EXPECT_EQ(diagnostic.range.Length(), 5);
+    Analysis borrowed = Analyze("void f() { const stringv value; }");
+    EXPECT_NE(
+        FindDiagnostic(borrowed, DiagnosticCode::BorrowRequiresInitializer),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(borrowed, DiagnosticCode::ConstRequiresInitializer),
+        nullptr);
+    Analysis escaped = Analyze(
+        "stringv f() { const string value = \"hi\"; return value.view(); }");
+    EXPECT_NE(FindDiagnostic(escaped, DiagnosticCode::BorrowEscapesOwner),
+              nullptr);
+    Analysis invalid = Analyze("void f() { const void value = none; }");
+    EXPECT_NE(FindDiagnostic(invalid, DiagnosticCode::InvalidVariableType),
+              nullptr);
+}
+
+TEST(SemanticConstTests,
+     UsesResolvedSymbolsForShadowingAndConstvalIsAnIdentifier) {
+    Analysis analysis = Analyze(
+        "i32 f() { const i32 value = 42; if true { i32 value = 0; "
+        "value = 1; } constval := value; constval = constval + 1; "
+        "return constval - 1; }");
+    EXPECT_FALSE(analysis.diagnostics.HasErrors());
+    Analysis invalid = Analyze(
+        "i32 f() { i32 value = 42; if true { const i32 value = 0; "
+        "value = 1; } value = 43; return value - 1; }");
+    ASSERT_EQ(invalid.diagnostics.Diagnostics().size(), 1);
+    EXPECT_EQ(invalid.diagnostics.Diagnostics()[0].code,
+              DiagnosticCode::SymbolNotWritable);
+}
+
+TEST(SemanticConstTests, CannotBypassInitializationWithJump) {
+    Analysis analysis = Analyze(
+        "i32 f() { while true { jumpto end; const i32 value = 42; #end return "
+        "value; } return 0; }");
+    ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
+    EXPECT_EQ(analysis.diagnostics.Diagnostics()[0].code,
+              DiagnosticCode::UninitializedVariable);
+}
+
+TEST(SemanticCompoundTypeTests, ReportsUnsupportedTypesAtTheirFullRange) {
+    const std::vector<std::string> types{"*const u8", "constptr u8",
+                                         "constref u8", "&const *const u8"};
+    for (const std::string& type : types) {
+        for (const std::string& source :
+             {"void f() { " + type + " value; }",
+              "void f(" + type + " value) {}", type + " f() {}",
+              "void f() { 1 as " + type + "; }",
+              "void f() { 1.cast<" + type + ">; }"}) {
+            SCOPED_TRACE(source);
+            Analysis analysis = Analyze(source);
+            ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
+            const Diagnostic& diagnostic =
+                analysis.diagnostics.Diagnostics()[0];
+            EXPECT_EQ(DiagnosticCodeName(diagnostic.code), "FLECHA-S0024");
+            EXPECT_EQ(diagnostic.range.start.offset, source.find(type));
+            EXPECT_EQ(diagnostic.range.Length(), type.size());
+        }
+    }
+}
+
+TEST(SemanticCompoundTypeTests, UnsupportedOperationsAreDiagnosed) {
+    for (const std::string& operation : {"&value", "*value"}) {
+        Analysis analysis =
+            Analyze("i32 f() { i32 value = 42; return " + operation + "; }");
+        EXPECT_NE(FindDiagnostic(analysis, DiagnosticCode::InvalidOperand),
+                  nullptr);
+    }
+}

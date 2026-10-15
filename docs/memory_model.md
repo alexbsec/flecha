@@ -16,7 +16,7 @@ slices, and general resource ownership. Syntax already present in `SPEC.md`
 is retained where possible. New syntax, allocator APIs, and changes to string
 copying remain proposals until accepted. The current compiler behavior is
 recorded in [definite assignment](definite_assignment.md) and
-[strings](string.md).
+[strings](string.md), and [const declarations and types](const_types.md).
 
 ## 1. Storage, ownership, and access are separate
 
@@ -568,24 +568,21 @@ Next proposals to settle:
 5. Any migration of existing string copies to moves. No such migration is
    agreed or implemented by this document.
 
-Suggested implementation order:
+The detailed dependency order and acceptance criteria are maintained in
+[memory_implementation_plan.md](memory_implementation_plan.md). The first
+implementation milestone, const declarations and compound type representation,
+is documented in [const declarations and types](const_types.md). The next stages
+are unsafe pointer operations, checked references, defer, tuple/error support,
+system allocation, and cross-function resource effects.
 
-1. Implement const declarations and compound type representation.
-2. Add raw pointer types, explicit unsafe contexts, allocation/error support,
-   and defer with precise control-flow cleanup.
-3. Add checked stack references with conservative borrow rules; reject
-   unsupported escapes until return-lifetime contracts are available.
-4. Extend the same rules to inline arrays and checked slices.
-5. Add safe heap-owner interfaces and further allocator/resource features.
+Concurrency, atomics, shared ownership, partial moves, and arbitrary pointer
+arithmetic remain outside the first safe-reference feature.
 
-Tuple/error support and function ownership contracts may require prerequisite
-milestones. Concurrency, atomics, shared ownership, partial moves, and arbitrary
-pointer arithmetic remain outside the first safe-reference feature.
+## Specification alignment
 
-## Existing specification conflicts
+`SPEC.md` section 8.1 now matches implemented definite assignment, and section
+8.2 records the const declaration rules. Remaining conflicts include:
 
-- `SPEC.md` section 8.1 describes implicit zero initialization; implemented
-  declarations without initializers instead use definite assignment.
 - `SPEC.md` discourages hidden allocation, but existing string assignment,
   owning parameter passing, and some conversions allocate implicitly.
 - `SPEC.md` leaves ownership and cleanup open, while owning strings already

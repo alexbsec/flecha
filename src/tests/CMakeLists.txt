@@ -84,3 +84,17 @@ add_test(
         -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_control_flow_assignment.cmake
 )
+
+# This fixture shares the control-flow fixture's output/exit contract and
+# instrumented-runtime linking, so it can use the same native verifier.
+add_test(
+    NAME NativeSemanticTests.ConstDeclarations
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/const_declarations.fl
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/const_declarations_test
+        -DFLECHA_RUNTIME=$<TARGET_FILE:runtime>
+        -DFLECHA_LINKER=${CMAKE_CXX_COMPILER}
+        -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_control_flow_assignment.cmake
+)

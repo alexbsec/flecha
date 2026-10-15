@@ -8,7 +8,7 @@ syntax keyword flechaType i8 i16 i32 i64 isize
 syntax keyword flechaType u8 u16 u32 u64 usize
 syntax keyword flechaType f32 f64 bool char void string stringv
 
-syntax keyword flechaModifier unsafe export extern inline comptime const volatile
+syntax keyword flechaModifier unsafe export extern inline comptime const constptr constref volatile
 syntax keyword flechaConditional if else also
 syntax keyword flechaRepeat while
 syntax keyword flechaStatement return yield proceed break
@@ -19,7 +19,7 @@ syntax keyword flechaBoolean true false
 syntax keyword flechaConstant none null
 syntax keyword flechaWordOperator and or
 
-syntax match flechaOperator /:=\|===\|!==\|==\|!=\|<=\|>=\|&&\|||\|[=+*\/%^!<>-]/
+syntax match flechaOperator /:=\|===\|!==\|==\|!=\|<=\|>=\|&&\|||\|[&=+*\/%^!<>-]/
 syntax match flechaFunction /\<[A-Za-z_][A-Za-z0-9_]*\>\ze\s*(/
 syntax match flechaCastMethod /\.cast\>\ze\s*</
 syntax match flechaLabel /#\s*[A-Za-z_][A-Za-z0-9_]*/

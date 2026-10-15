@@ -436,3 +436,32 @@ TEST(LlvmCodeGeneratorTests, CleansLaterStringSlotsAtEarlierBackwardJumpExits) {
     }
     EXPECT_TRUE(foundReturn);
 }
+
+TEST(LlvmCodeGeneratorTests, EmitsRuntimeInitializedConstValuesAndParameters) {
+    GeneratedSource result = Generate(
+        "const i32 add(const i32 input) { return input + 2; } "
+        "i32 main() { const i32 value = add(40); copy := value; "
+        "copy = copy + 1; const i64 wide = value.cast<const i64>; "
+        "const bool same = value == 42; const i32 zero = none; "
+        "const string text = \"hi\"; const stringv view = text.view(); "
+        "stdoutln(view); return copy - 1 + zero; }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("define i32 @add(i32 %input)"), std::string::npos);
+    EXPECT_NE(ir.find("call i32 @add(i32 40)"), std::string::npos);
+}
+
+TEST(LlvmCodeGeneratorTests, EmitsTypedZeroValuesForConstInitializers) {
+    GeneratedSource result = Generate(
+        "const i32 zero() { return none; } "
+        "i32 identity(const i32 value) { return value; } "
+        "i32 main() { const bool b = none; const char c = none; "
+        "const f64 f = none; const string s = none; const stringv v = none; "
+        "i32 mutableZero = 1; mutableZero = none; "
+        "const i32 result = identity((none)) + zero(); return result; }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+}

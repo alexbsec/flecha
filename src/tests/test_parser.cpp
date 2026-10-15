@@ -655,3 +655,89 @@ TEST(ParserStringTests, ParsesOwningStringTypesAndLiteralConversions) {
     EXPECT_EQ(variable.ExplicitType()->Type(), PrimitiveType::String);
     EXPECT_EQ(variable.Initializer()->Kind(), AstNodeKind::MemberCallExpression);
 }
+
+TEST(ParserTests, PreservesRecursiveTypeQualifiersAndRanges) {
+    const std::string source =
+        "const *&const u8 f(constref *const i32 arg) { constptr u8 p; }";
+    DiagnosticBag diagnostics;
+    std::unique_ptr<CompilationUnit> unit = ParseSource(source, diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    ASSERT_EQ(unit->Declarations().size(), 1);
+    const FunctionDeclaration& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    const TypeNode& type = function.ReturnType();
+    EXPECT_EQ(type.TypeForm(), TypeKind::Pointer);
+    EXPECT_TRUE(type.IsConst());
+    EXPECT_EQ(type.Range().start.offset, 0);
+    EXPECT_EQ(type.Range().end.offset, source.find(" f("));
+    EXPECT_EQ(type.QualifierRange().Length(), 5);
+    ASSERT_NE(type.Target(), nullptr);
+    EXPECT_EQ(type.Target()->TypeForm(), TypeKind::Reference);
+    EXPECT_FALSE(type.Target()->IsConst());
+    ASSERT_NE(type.Target()->Target(), nullptr);
+    const TypeNode& leaf = *type.Target()->Target();
+    EXPECT_EQ(leaf.Type(), PrimitiveType::U8);
+    EXPECT_TRUE(leaf.IsConst());
+    EXPECT_EQ(leaf.Range().start.offset, source.find("const u8"));
+    EXPECT_EQ(leaf.QualifierRange().start.offset, source.find("const u8"));
+    EXPECT_EQ(leaf.QualifierRange().Length(), 5);
+    const TypeNode& parameter = function.Parameters()[0]->Type();
+    EXPECT_EQ(parameter.TypeForm(), TypeKind::Reference);
+    EXPECT_TRUE(parameter.IsConst());
+    EXPECT_EQ(parameter.QualifierRange().Length(), 8);
+    ASSERT_NE(parameter.Target(), nullptr);
+    EXPECT_EQ(parameter.Target()->TypeForm(), TypeKind::Pointer);
+    EXPECT_FALSE(parameter.Target()->IsConst());
+    EXPECT_TRUE(parameter.Target()->Target()->IsConst());
+    const VariableDeclarationStatement& variable =
+        static_cast<const VariableDeclarationStatement&>(
+            *function.Body().Statements()[0]);
+    ASSERT_NE(variable.ExplicitType(), nullptr);
+    EXPECT_EQ(variable.ExplicitType()->TypeForm(), TypeKind::Pointer);
+    EXPECT_TRUE(variable.ExplicitType()->IsConst());
+    EXPECT_EQ(variable.ExplicitType()->Range().start.offset,
+              source.find("constptr"));
+    EXPECT_EQ(variable.ExplicitType()->Range().Length(), 11);
+}
+
+TEST(ParserTests, DistinguishesCompoundDeclarationsFromUnaryExpressions) {
+    DiagnosticBag diagnostics;
+    std::unique_ptr<CompilationUnit> unit =
+        ParseSource("void f() { *u8 p; &u8 r; *p; &r; 2 * 3; true && false; }",
+                    diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const FunctionDeclaration& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    ASSERT_EQ(function.Body().Statements().size(), 6);
+    for (std::size_t index = 0; index < 2; ++index) {
+        EXPECT_EQ(function.Body().Statements()[index]->Kind(),
+                  AstNodeKind::VariableDeclarationStatement);
+    }
+    for (std::size_t index = 2; index < 6; ++index) {
+        EXPECT_EQ(function.Body().Statements()[index]->Kind(),
+                  AstNodeKind::ExpressionStatement);
+    }
+}
+
+TEST(ParserTests, RejectsMalformedOrDuplicateQualifiersAndRecovers) {
+    const std::vector<std::string> declarations{"const const i32 x = 1;",
+                                                "const constptr u8 x;",
+                                                "const constref u8 x;",
+                                                "const * x;",
+                                                "const &;",
+                                                "constptr;",
+                                                "constref;"};
+    for (const std::string& declaration : declarations) {
+        SCOPED_TRACE(declaration);
+        DiagnosticBag diagnostics;
+        std::unique_ptr<CompilationUnit> unit = ParseSource(
+            "void f() { " + declaration + " } i32 g() { return 42; }",
+            diagnostics);
+        EXPECT_TRUE(diagnostics.HasErrors());
+        ASSERT_EQ(unit->Declarations().size(), 2);
+        EXPECT_EQ(
+            static_cast<const FunctionDeclaration&>(*unit->Declarations()[1])
+                .Name(),
+            "g");
+    }
+}

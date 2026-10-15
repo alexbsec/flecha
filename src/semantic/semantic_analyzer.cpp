@@ -42,6 +42,18 @@ const Symbol* SemanticAnalyzer::AddSymbol(std::unique_ptr<Symbol> symbol,
     return result;
 }
 
+SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type) {
+    const SemanticType result = SemanticType::FromSyntax(type);
+    if (result.IsCompound()) {
+        Report(diagnostics::DiagnosticCode::UnsupportedCompoundType,
+               type.Range(),
+               "pointer and reference types are not yet supported "
+               "in executable code: '" +
+                   result.Name() + "'");
+    }
+    return result;
+}
+
 void SemanticAnalyzer::RegisterBuiltIns() {
     const auto registerOutput = [this](std::string name,
                                        BuiltInFunction builtIn) {
@@ -71,12 +83,10 @@ void SemanticAnalyzer::RegisterFunctions(const core::CompilationUnit& unit) {
         parameterTypes.reserve(function.Parameters().size());
         for (const std::unique_ptr<core::Parameter>& parameter :
              function.Parameters()) {
-            parameterTypes.push_back(
-                SemanticType::FromSyntax(parameter->Type().Type()));
+            parameterTypes.push_back(ResolveType(parameter->Type()));
         }
         AddSymbol(std::make_unique<FunctionSymbol>(
-                      function.Name(),
-                      SemanticType::FromSyntax(function.ReturnType().Type()),
+                      function.Name(), ResolveType(function.ReturnType()),
                       std::move(parameterTypes), function.NameRange()),
                   function);
     }
@@ -120,8 +130,8 @@ void SemanticAnalyzer::AnalyzeFunction(
          function.Parameters()) {
         AddSymbol(std::make_unique<VariableSymbol>(
                       SymbolKind::Parameter, parameter->Name(),
-                      SemanticType::FromSyntax(parameter->Type().Type()),
-                      parameter->NameRange(), true),
+                      SemanticType::FromSyntax(parameter->Type()),
+                      parameter->NameRange(), !parameter->Type().IsConst()),
                   *parameter);
     }
     AnalyzeBlock(function.Body(), false);
@@ -221,15 +231,15 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             if (variable.Initializer() != nullptr) {
                 initializerType = AnalyzeExpression(*variable.Initializer());
             }
-            SemanticType variableType = initializerType;
+            SemanticType variableType = initializerType.WithoutConst();
             if (variable.HasExplicitType()) {
-                variableType =
-                    SemanticType::FromSyntax(variable.ExplicitType()->Type());
+                variableType = ResolveType(*variable.ExplicitType());
                 if (variableType.Kind() == SemanticTypeKind::Void) {
                     Report(diagnostics::DiagnosticCode::InvalidVariableType,
                            variable.ExplicitType()->Range(),
                            "a variable cannot have type 'void'");
                 } else if (variable.Initializer() != nullptr &&
+                           !variableType.IsCompound() &&
                            !IsAssignable(variableType, initializerType)) {
                     Report(diagnostics::DiagnosticCode::IncompatibleType,
                            variable.Initializer()->Range(),
@@ -244,11 +254,17 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                            "'");
                 variableType = SemanticType::Error();
             }
-            const Symbol* symbol = AddSymbol(std::make_unique<VariableSymbol>(
-                                                 SymbolKind::LocalVariable,
-                                                 variable.Name(), variableType,
-                                                 variable.NameRange(), true),
-                                             variable);
+            if (variableType.IsConst() && variable.Initializer() == nullptr &&
+                !variableType.IsCompound()) {
+                Report(diagnostics::DiagnosticCode::ConstRequiresInitializer,
+                       variable.NameRange(),
+                       "a const declaration requires an initializer");
+            }
+            const Symbol* symbol = AddSymbol(
+                std::make_unique<VariableSymbol>(
+                    SymbolKind::LocalVariable, variable.Name(), variableType,
+                    variable.NameRange(), !variableType.IsConst()),
+                variable);
             if (symbol != nullptr && variable.Initializer() != nullptr &&
                 variableType.Kind() == SemanticTypeKind::StringView &&
                 BorrowsLocalString(*variable.Initializer())) {
@@ -443,16 +459,17 @@ SemanticType SemanticAnalyzer::AnalyzeLiteral(
 SemanticType SemanticAnalyzer::AnalyzeCast(
     const core::CastExpression& expression) {
     const SemanticType source = AnalyzeExpression(expression.Value());
-    const SemanticType target =
-        SemanticType::FromSyntax(expression.TargetType().Type());
-    if (source.IsError() || target.IsError()) return SemanticType::Error();
+    const SemanticType target = ResolveType(expression.TargetType());
+    if (source.IsError() || target.IsError() || target.IsCompound()) {
+        return SemanticType::Error();
+    }
     if (!CanExplicitlyCast(source, target)) {
         Report(diagnostics::DiagnosticCode::InvalidCast, expression.Range(),
                "cannot cast '" + std::string(source.Name()) + "' to '" +
                    std::string(target.Name()) + "'");
         return SemanticType::Error();
     }
-    return target;
+    return target.WithoutConst();
 }
 
 SemanticType SemanticAnalyzer::AnalyzeName(
@@ -464,7 +481,7 @@ SemanticType SemanticAnalyzer::AnalyzeName(
         return SemanticType::Error();
     }
     _model._bindings.emplace(&expression, symbol);
-    return symbol->Type();
+    return symbol->Type().WithoutConst();
 }
 
 SemanticType SemanticAnalyzer::AnalyzeUnary(
@@ -590,7 +607,7 @@ bool SemanticAnalyzer::BorrowsLocalString(
         case core::AstNodeKind::CastExpression: {
             const core::CastExpression& cast =
                 static_cast<const core::CastExpression&>(expression);
-            return SemanticType::FromSyntax(cast.TargetType().Type()).Kind() ==
+            return SemanticType::FromSyntax(cast.TargetType()).Kind() ==
                        SemanticTypeKind::StringView &&
                    (_model.TypeOf(cast.Value()).Kind() ==
                         SemanticTypeKind::String ||
@@ -651,7 +668,7 @@ SemanticType SemanticAnalyzer::AnalyzeCall(
                        "' requires a printable value, found '" +
                        std::string(argumentTypes.front().Name()) + "'");
         }
-        return function->ReturnType();
+        return function->ReturnType().WithoutConst();
     }
     if (argumentTypes.size() != function->ParameterTypes().size()) {
         Report(
@@ -674,7 +691,7 @@ SemanticType SemanticAnalyzer::AnalyzeCall(
                                     argumentTypes[index]));
         }
     }
-    return function->ReturnType();
+    return function->ReturnType().WithoutConst();
 }
 
 namespace {

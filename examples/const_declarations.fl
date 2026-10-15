@@ -1,0 +1,83 @@
+// Build: build/flecha build examples/const_declarations.fl -o build/const_example
+// Run:   build/const_example
+// Prints the values described below and exits with 42.
+
+const i32 add(const i32 input) {
+    // Parameters arrive initialized; const prevents reassignment here.
+    const i32 increment = 2;
+    return input + increment;
+}
+
+const string echo(const string text) {
+    // Owning strings keep their existing copy semantics.
+    return text;
+}
+
+const i32 zero() {
+    // none takes the return type's zero value.
+    return none;
+}
+
+i32 main() {
+    // Const initialization can call a function at runtime.
+    const i32 answer = add(40);
+    stdoutln(answer);                         // 42
+
+    // Reading a const value does not make its copy const.
+    copy := answer;
+    copy = copy + 1;
+    stdoutln(copy);                           // 43
+
+    // A const return type does not make an inferred binding const either.
+    returned := add(40);
+    returned = returned + 2;
+    stdoutln(returned);                       // 44
+
+    // Both cast spellings accept const-qualified types.
+    const i64 wide = answer as const i64;
+    const u8 byte = answer.cast<const u8>;
+    const f64 fraction = 1.5;
+    const bool same = wide == (byte as i64);
+    const char letter = 'F';
+    stdoutln(wide);                           // 42
+    stdoutln(byte);                           // 42
+    stdoutln(fraction);                       // 1.5
+    stdoutln(same);                           // true
+    stdoutln(letter);                         // F
+
+    // A nested mutable binding can shadow a const binding.
+    if same {
+        i32 answer = 0;
+        answer = answer + 1;
+        stdoutln(answer);                     // 1
+    }
+    stdoutln(answer);                         // 42: the outer binding
+
+    // Explicit zero initialization also works with const declarations.
+    const i32 empty = none;
+    const bool disabled = none;
+    const string emptyText = none;
+    stdoutln(empty);                          // 0
+    stdoutln(disabled);                       // false
+    stdoutln(emptyText.len());                // 0
+
+    // none also works in assignment, function arguments, and returns.
+    i32 reset = 1;
+    reset = none;
+    stdoutln(reset + add(none) + zero());      // 2
+
+    // Copying a const owning string produces an independent mutable owner.
+    const string original = echo("Flecha");
+    mutableCopy := original;
+    mutableCopy = "Changed";
+    const stringv view = original.view();
+    stdoutln(view);                           // Flecha
+    stdoutln(mutableCopy);                    // Changed
+
+    // constval is an ordinary identifier, not a qualifier or keyword.
+    constval := answer;
+    constval = constval + 1;
+    stdoutln(constval);                       // 43
+
+    return answer;
+}

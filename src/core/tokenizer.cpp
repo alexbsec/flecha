@@ -43,6 +43,8 @@ const KeywordMap KEYWORDS = {
     {"jumpto", TokenType::JumpTo},
     {"error", TokenType::Error},
     {"const", TokenType::Const},
+    {"constptr", TokenType::ConstPtr},
+    {"constref", TokenType::ConstRef},
     {"volatile", TokenType::Volatile},
     {"as", TokenType::As},
     {"none", TokenType::None},
@@ -213,7 +215,7 @@ Token Tokenizer::NextToken() {
                                         : TokenType::Greater);
         case '&':
             if (Match('&')) return makeToken(TokenType::And);
-            break;
+            return makeToken(TokenType::Ampersand);
         case '|':
             if (Match('|')) return makeToken(TokenType::Or);
             break;

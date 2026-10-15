@@ -201,20 +201,42 @@ For primitives, `none` means the zero value rather than a separately representab
 
 ### 8.1 Initialization
 
-The intended safe default is for ordinary declarations to receive their type's zero value:
+Ordinary typed declarations may omit an initializer, but the variable must be
+assigned on every reachable path before it is read:
 
 ```flecha
-i32 count;       // initialized to i32(0)
-bool ready;      // initialized to false
+i32 count;          // not initialized
+count = 42;         // now readable
+bool ready = none;  // explicitly initialized to false
 ```
 
-Explicitly uninitialized storage, if supported, must require an unsafe operation:
+The compiler checks definite assignment through branches, loops, and jumps.
+Owning `string` supports delayed initialization; borrowed `stringv` requires
+an initializer. See [definite assignment](docs/definite_assignment.md).
+
+### 8.2 Const declarations
+
+`const T name = value;` initializes a fixed binding. Its initializer may be a
+runtime expression; `const` does not imply compile-time evaluation. Assignment
+to the binding is an error, even if the assigned value is unchanged. A const
+local must have an initializer; delayed const initialization is not supported.
 
 ```flecha
-unsafe i32 scratch = uninit;
+i32 add(const i32 input) {
+    const i32 increment = 2;
+    return input + increment;
+}
 ```
 
-The exact syntax and permitted uses of `uninit` remain open.
+Const parameters are initialized by the caller and cannot be reassigned in the
+callee. Copying a const value does not make the destination const. A top-level
+const qualifier on a return or cast type likewise does not qualify the receiving
+binding. Nested target qualifiers remain part of type identity. Existing owning
+string copies and borrowed-view lifetime checks remain in force.
+
+The implemented declaration form uses an explicit type; `name := value` still
+creates a mutable binding. `constval` is an ordinary identifier, not a keyword.
+See [const declarations and compound types](docs/const_types.md).
 
 ## 9. Equality
 
@@ -381,6 +403,26 @@ The intended pointer syntax keeps qualifiers inside the type rather than attachi
 *volatile const u32
 ```
 
+The parser and type model represent recursive pointers and references with
+const qualifiers at each layer:
+
+| Form | Binding | Target |
+| --- | --- | --- |
+| `*u8` / `&u8` | Rebindable | Writable |
+| `*const u8` / `&const u8` | Rebindable | Read-only |
+| `const *u8` / `const &u8` | Fixed | Writable |
+| `const *const u8` / `const &const u8` | Fixed | Read-only |
+
+`constptr T` is an alias for `const *T`; `constref T` is an alias for
+`const &T`. They normalize to the same types, including when nested. For example,
+`&constptr u8` is `&const *u8`. Duplicate const qualifiers on one layer are rejected.
+Consecutive reference markers need whitespace (`& &u8`) because `&&` is a logical
+operator.
+
+Compound declarations, parameters, returns, and casts currently produce
+`FLECHA-S0024` before lowering. They are represented for future implementation;
+pointer/reference operations, `volatile`, arrays, and slices are not yet enabled.
+
 Slices contain a pointer and a length:
 
 ```flecha
@@ -535,7 +577,7 @@ i32 main() {
 The following decisions are intentionally not finalized:
 
 - module, import, and visibility syntax;
-- declaration syntax and the exact roles of `var` and `const`;
+- additional declaration forms, including whether to introduce `var`;
 - string literal representation and encoding;
 - array syntax and array-to-slice conversion;
 - struct, union, enum, and generic syntax;

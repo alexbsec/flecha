@@ -1,7 +1,9 @@
 #ifndef FLECHA_SEMANTIC_SEMANTIC_TYPE_HPP
 #define FLECHA_SEMANTIC_SEMANTIC_TYPE_HPP
 
-#include <string_view>
+#include <cassert>
+#include <memory>
+#include <string>
 
 #include "core/ast.hpp"
 
@@ -25,6 +27,8 @@ enum class SemanticTypeKind {
     Void,
     String,
     StringView,
+    Pointer,
+    Reference,
     Null,
     None,
     Function,
@@ -33,10 +37,15 @@ enum class SemanticTypeKind {
 
 class SemanticType final {
    public:
-    constexpr explicit SemanticType(SemanticTypeKind kind) : _kind(kind) {}
+    explicit SemanticType(SemanticTypeKind kind, bool isConst = false)
+        : _kind(kind), _isConst(isConst) {
+        assert(!IsCompound());
+    }
+    SemanticType(SemanticTypeKind kind, SemanticType target,
+                 bool isConst = false);
 
-    [[nodiscard]] constexpr SemanticTypeKind Kind() const { return _kind; }
-    [[nodiscard]] std::string_view Name() const;
+    [[nodiscard]] SemanticTypeKind Kind() const { return _kind; }
+    [[nodiscard]] std::string Name() const;
     [[nodiscard]] bool IsInteger() const;
     [[nodiscard]] bool IsFloating() const;
     [[nodiscard]] bool IsNumeric() const;
@@ -45,15 +54,26 @@ class SemanticType final {
         return _kind == SemanticTypeKind::Error;
     }
 
-    bool operator==(const SemanticType&) const = default;
+    [[nodiscard]] bool IsConst() const { return _isConst; }
+    [[nodiscard]] bool IsCompound() const {
+        return _kind == SemanticTypeKind::Pointer ||
+               _kind == SemanticTypeKind::Reference;
+    }
+    [[nodiscard]] const SemanticType* Target() const { return _target.get(); }
+    [[nodiscard]] SemanticType WithoutConst() const;
+    bool operator==(const SemanticType& other) const;
+
+    [[nodiscard]] static SemanticType FromSyntax(const core::TypeNode& type);
 
     [[nodiscard]] static SemanticType FromSyntax(core::PrimitiveType type);
-    [[nodiscard]] static constexpr SemanticType Error() {
+    [[nodiscard]] static SemanticType Error() {
         return SemanticType(SemanticTypeKind::Error);
     }
 
    private:
     SemanticTypeKind _kind;
+    bool _isConst;
+    std::shared_ptr<const SemanticType> _target;
 };
 
 [[nodiscard]] bool IsAssignable(SemanticType destination, SemanticType source);
