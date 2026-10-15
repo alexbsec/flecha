@@ -2024,3 +2024,98 @@ TEST(SemanticSliceTests,
                         "= range s {} }")
                     .diagnostics.HasErrors());
 }
+
+TEST(SemanticDeferTests, CapturesAtRegistrationAndChecksCallsNormally) {
+    Analysis result = Analyze(R"(
+        void use(i32 x) {}
+        i32 result() { return 1; }
+        unsafe void raw(*i32 p) {}
+        void f() {
+            i32 x;
+            defer use(x = 1);
+            x++;
+            defer result();
+            defer (use(x));
+            unsafe { defer raw(&raw x); }
+            string word = "first";
+            defer stdoutln(word.view());
+            word = "second";
+        }
+    )");
+    EXPECT_FALSE(result.diagnostics.HasErrors());
+    for (const std::string& source :
+         {"void f() { defer 42; }", "void f() { defer f; }",
+          "void f() { a := [1]; defer a.len(); }",
+          "void f() { defer missing(); }",
+          "void g(i32 x) {} void f() { defer g(); }",
+          "void g(i32 x) {} void f() { defer g(true); }",
+          "void g(i32 x) {} void f() { i32 x; defer g(x); x = 1; }",
+          "unsafe void g() {} void f() { defer g(); }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+    const Analysis invalid = Analyze("void f() { defer 42; }");
+    const auto* diagnostic =
+        FindDiagnostic(invalid, DiagnosticCode::InvalidDefer);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(diagnostic->range.start.offset, 17);
+    EXPECT_EQ(diagnostic->range.end.offset, 19);
+}
+
+TEST(SemanticDeferTests, HoldsBorrowedArgumentsUntilTheirScopeEnds) {
+    for (const std::string& source :
+         {"void g(&i32 r) {} void f() { x := 1; defer g(&x); x++; }",
+          "void g(&i32 r) {} i32 f() { x := 1; defer g(&x); return x; }",
+          "void g(&const i32 r) {} void f() { x := 1; defer g(&x); x++; }",
+          "void g(&i32 r) {} void f() { x := 1; r := &x; defer g(r); moved := "
+          "r; }",
+          "void g(&i32 r) {} void f() { x := 1; y := 2; r := &x; defer g(r); r "
+          "= &y; }",
+          "void g([]i32 s) {} void f() { a := [1, 2]; defer g(a[:]); a[0]++; }",
+          "void g([]const i32 s) {} void f() { a := [1]; s := a[:]; defer "
+          "g(s); s[0]++; }",
+          "void g(&i32 r) {} void f() { x := 1; defer g(&x); defer g(&x); }",
+          "void g(&i32 r, i32 x) {} void f() { x := 1; defer g(&x, x++); }",
+          "void g(&i32 r) {} void f(bool skip) { x := 1; while true { #again "
+          "defer g(&x); if skip { jumpto again; } break; } }",
+          "void g(&const i32 r) {} void f() { while true { #again x := 1; "
+          "defer g(&x); jumpto again; } }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+    EXPECT_FALSE(Analyze("void g(&i32 r) {} void f() { x := 1; r := &x; { "
+                         "defer g(r); } *r = 2; x++; }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("void g(&const i32 r) {} i32 f() { x := 1; defer "
+                         "g(&x); defer g(&x); return x; }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("void g([]i32 s) {} void f() { a := [1]; s := a[:]; { "
+                         "defer g(s); } s[0]++; }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticDeferTests, TracksRegistrationAndLoanReleaseThroughJumps) {
+    EXPECT_FALSE(Analyze(R"(
+        void g(&i32 r) {}
+        void f() {
+            x := 1;
+            while true {
+                { defer g(&x); jumpto done; }
+                #done
+                x++;
+                break;
+            }
+        }
+    )")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("void g(&i32 r) {} void f() { x := 1; loop i := 0; i "
+                         "< 2; i++ { defer g(&x); proceed; } x++; }")
+                     .diagnostics.HasErrors());
+    EXPECT_TRUE(
+        Analyze("void g(&i32 r) {} void f(bool b) { x := 1; while true { if b "
+                "{ jumpto done; } defer g(&x); #done x++; break; } }")
+            .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("void g(&i32 r) {} void f() { x := 1; while true { "
+                         "jumpto done; defer g(&x); #done x++; break; } }")
+                     .diagnostics.HasErrors());
+}

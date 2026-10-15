@@ -101,6 +101,20 @@ class GraphBuilder final {
                 _graph.nodes[action].declaration = &declaration;
                 return action;
             }
+            case core::AstNodeKind::DeferStatement: {
+                const auto& deferred =
+                    static_cast<const core::DeferStatement&>(statement);
+                for (const Symbol* capture :
+                     _model.DeferredCaptures(deferred)) {
+                    if (capture == nullptr) continue;
+                    _graph.symbolScopes.emplace(capture, _scopes.back());
+                    _graph.deferredCaptures.insert(capture);
+                }
+                const NodeId body = BuildExpression(deferred.Call(), next);
+                const NodeId action = AddNode({body});
+                _graph.nodes[action].deferRegistration = &deferred;
+                return action;
+            }
             case core::AstNodeKind::ExpressionStatement:
                 return BuildEvaluation(
                     static_cast<const core::ExpressionStatement&>(statement)

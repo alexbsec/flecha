@@ -362,6 +362,17 @@ std::unique_ptr<BlockStatement> Parser::ParseBlockStatement(bool isUnsafe) {
 std::unique_ptr<Statement> Parser::ParseStatement() {
     if (Check(TokenType::LCurly)) return ParseBlockStatement();
     if (Check(TokenType::Unsafe)) return ParseBlockStatement(true);
+    if (Check(TokenType::Defer)) {
+        const Token& keyword = Advance();
+        auto call = ParseExpression();
+        if (call == nullptr) return nullptr;
+        const Token* end =
+            Consume(TokenType::SemiColon, "';' after deferred call");
+        const source::SourceRange range{
+            keyword.range.start,
+            end == nullptr ? call->Range().end : end->range.end};
+        return std::make_unique<DeferStatement>(range, std::move(call));
+    }
     if (Check(TokenType::Return)) {
         return ParseReturnStatement();
     }

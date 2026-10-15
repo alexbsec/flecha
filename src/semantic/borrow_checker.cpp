@@ -219,6 +219,8 @@ class BorrowChecker final {
                 if (node.declaration->Initializer() != nullptr)
                     CollectUses(*node.declaration->Initializer(), _uses[id]);
             }
+            if (node.deferRegistration != nullptr)
+                CollectUses(node.deferRegistration->Call(), _uses[id]);
             if (node.evaluation != nullptr) {
                 CollectUses(*node.evaluation, _uses[id]);
                 const core::Expression& expression = Unwrap(*node.evaluation);
@@ -260,6 +262,11 @@ class BorrowChecker final {
     void Transfer(NodeId id, State& state) {
         _state = &state;
         _active = _live[id];
+        // Registered captures remain live until the lexical scope is exited,
+        // even if the original handle has no later source-level uses.
+        for (const auto& [symbol, handle] : state)
+            if (_graph.deferredCaptures.contains(symbol))
+                _active.insert(symbol);
         _temporaries.clear();
         _pinned.clear();
         _nextTemporary = 1;
@@ -280,6 +287,25 @@ class BorrowChecker final {
                     value = Borrow(std::move(value), false,
                                    node.declaration->Range());
                 Store(symbol, value, node.declaration->Initializer()->Range());
+            }
+        }
+        if (node.deferRegistration != nullptr) {
+            const auto& call = static_cast<const core::CallExpression&>(
+                Unwrap(node.deferRegistration->Call()));
+            const auto& captures =
+                _model.DeferredCaptures(*node.deferRegistration);
+            for (std::size_t index = 0; index < call.Arguments().size();
+                 ++index) {
+                Value value = Evaluate(*call.Arguments()[index]);
+                const Symbol* capture = captures[index];
+                if (capture == nullptr) continue;
+                value = Borrow(std::move(value),
+                               !capture->Type().Target()->IsConst(),
+                               call.Arguments()[index]->Range());
+                const Origins previous = state[capture].origins;
+                Store(capture, std::move(value),
+                      call.Arguments()[index]->Range());
+                state[capture].origins.insert(previous.begin(), previous.end());
             }
         }
         if (node.evaluation != nullptr) (void)Evaluate(*node.evaluation);

@@ -69,6 +69,7 @@ enum class TokenType {
     Inline,
     Comptime,
     Return,
+    Defer,
     Yield,
     If,
     Else,

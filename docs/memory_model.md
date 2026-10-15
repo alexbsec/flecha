@@ -474,6 +474,10 @@ The special pointer-operation syntax and naming remain to be finalized.
 
 ### 8.1 Deferred cleanup
 
+The direct-call implementation is documented in [defer.md](defer.md). The
+allocator member-call example and allocation-effect rules below remain design
+contracts for future milestones.
+
 A deferred call registers when execution reaches it and executes when its
 current enclosing scope exits. It is not hoisted to scope entry. Register
 cleanup before work that can exit early:
@@ -490,7 +494,7 @@ handle allocation failure before any use that requires a non-null pointer. It
 consumes the allocation on return; tracked caller aliases then refer to freed
 storage. The signature/annotation syntax for that contract is still open.
 
-Recommended precise defer rules:
+Deferred-call rules and planned allocator integration:
 
 - Capture the receiver and argument values when registering a deferred call.
   Rebinding the original pointer later does not change the captured allocation.
@@ -505,9 +509,10 @@ Recommended precise defer rules:
 - Type-check unsafe permission where the deferred operation is registered.
   Deferred calls must not return from their enclosing function or redirect its
   control flow.
-- Immediate process termination need not execute defers. Interaction between
-  general owned-value destruction and user defers needs a defined ordering before
-  both can operate on the same resources.
+- Traps and immediate process termination do not execute defers. Registered
+  calls run before lexical owning-string destruction; string and view captures
+  are independent snapshots destroyed after invocation. General owner
+  destructors still need their own contract.
 
 Defer helps ensure cleanup. It does not prove pointer validity, prevent all
 raw-pointer aliasing, or turn an unsafe function into a safe function.
@@ -568,7 +573,7 @@ Next proposals to settle:
 2. Reference borrowing of strings/views and nested reference storage.
 3. Lifetime contracts for returned borrowed values; local slice lifetime and
    alias checking is implemented in [checked_slices.md](checked_slices.md).
-4. Deferred capture/order rules and ownership-effect contracts on functions.
+4. Ownership-effect contracts on functions and deferred allocator member calls.
 5. Any migration of existing string copies to moves. No such migration is
    agreed or implemented by this document.
 
@@ -577,7 +582,7 @@ The detailed dependency order and acceptance criteria are maintained in
 implementation milestone, const declarations and compound type representation,
 is documented in [const declarations and types](const_types.md). Unsafe pointer operations are documented in [unsafe pointers](unsafe_pointers.md).
 Checked scalar and pointer-slot references are documented in
-[checked references](checked_references.md). The next stages are defer,
+[checked references](checked_references.md). Deferred calls are also implemented; the next stages are
 tuple/error support, system allocation, and cross-function resource effects.
 
 Concurrency, atomics, shared ownership, partial moves, and arbitrary pointer

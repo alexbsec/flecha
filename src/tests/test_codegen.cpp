@@ -571,3 +571,27 @@ TEST(CodeGeneratorTests, EmitsSliceDescriptorsChecksAndReborrowedCalls) {
     EXPECT_NE(ir.find("icmp ult i64"), std::string::npos);
     EXPECT_NE(ir.find("call void @llvm.trap()"), std::string::npos);
 }
+
+TEST(CodeGeneratorTests, EmitsDynamicDeferredRecordsAndScopeStackRestoration) {
+    GeneratedSource result = Generate(
+        "void f() { i := 0; while i < 3 { #again defer stdoutln(i); i++; "
+        "if i < 3 { jumpto again; } } }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("defer.record = alloca"), std::string::npos);
+    EXPECT_NE(ir.find("@llvm.stacksave"), std::string::npos);
+    EXPECT_NE(ir.find("@llvm.stackrestore"), std::string::npos);
+    EXPECT_NE(ir.find("switch i32"), std::string::npos);
+    EXPECT_EQ(ir.find("@malloc"), std::string::npos);
+}
+
+TEST(CodeGeneratorTests, VerifiesDeferAcrossEarlyReturnsAndScopeEntryJumps) {
+    GeneratedSource result = Generate(
+        "void f(bool b) { while true { jumpto inside; { defer stdoutln(1); "
+        "#inside defer stdoutln(2); if b { return; } break; } } }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+}

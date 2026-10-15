@@ -528,7 +528,15 @@ The language should avoid hidden allocation in:
 - generic specialization;
 - ordinary function calls.
 
-Destruction should be deterministic. The ownership and resource-cleanup model remains open; the first implementation may begin with explicit operations and add scoped cleanup once its semantics are clear.
+Owning strings have deterministic lexical destruction. `defer function(args);`
+captures arguments at registration and runs the call when its current lexical
+scope exits, before that scope destroys its strings. Calls run in reverse
+registration order on fallthrough, return, break, proceed, and outward jumps.
+Return expressions evaluate before cleanup; traps do not unwind. String/view
+captures are independent snapshots, and reference/slice captures retain their
+loans until scope exit. Only direct function calls are currently supported. See
+[deferred calls](docs/defer.md) for the full contract and examples. General
+ownership and allocator cleanup remain future work.
 
 Flecha should support freestanding programs that do not link a language runtime.
 

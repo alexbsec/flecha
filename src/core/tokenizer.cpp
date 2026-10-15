@@ -33,6 +33,7 @@ const KeywordMap KEYWORDS = {
     {"inline", TokenType::Inline},
     {"comptime", TokenType::Comptime},
     {"return", TokenType::Return},
+    {"defer", TokenType::Defer},
     {"yield", TokenType::Yield},
     {"if", TokenType::If},
     {"else", TokenType::Else},

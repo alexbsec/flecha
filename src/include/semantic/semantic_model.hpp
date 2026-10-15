@@ -24,6 +24,8 @@ class SemanticModel final {
         const core::NameExpression& expression) const;
     [[nodiscard]] const Symbol* DeclaredSymbol(
         const core::AstNode& declaration) const;
+    [[nodiscard]] const std::vector<const Symbol*>& DeferredCaptures(
+        const core::DeferStatement& statement) const;
     [[nodiscard]] SemanticType TypeOf(const core::Expression& expression) const;
     [[nodiscard]] const Scope& GlobalScope() const { return *_scopes.front(); }
     [[nodiscard]] const std::vector<std::unique_ptr<Symbol>>& Symbols() const {
@@ -40,6 +42,8 @@ class SemanticModel final {
     std::unordered_map<const core::NameExpression*, const Symbol*> _bindings;
     std::unordered_map<const core::AstNode*, const Symbol*> _declarations;
     std::unordered_map<const core::Expression*, SemanticType> _types;
+    std::unordered_map<const core::DeferStatement*, std::vector<const Symbol*>>
+        _deferredCaptures;
 };
 
 }  // namespace flecha::semantic

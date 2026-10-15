@@ -110,6 +110,12 @@ class Dumper final {
                 _stream << "\n";
                 break;
             }
+            case BoundNodeKind::DeferStatement:
+                _stream << "defer ";
+                WriteExpression(
+                    static_cast<const BoundDeferStatement&>(statement).Call());
+                _stream << "\n";
+                break;
             case BoundNodeKind::ExpressionStatement:
                 WriteExpression(
                     static_cast<const BoundExpressionStatement&>(statement)
