@@ -75,11 +75,22 @@ llvm::Type* LlvmCodeGenerator::MapType(semantic::SemanticType type) {
             return llvm::Type::getInt1Ty(_context);
         case semantic::SemanticTypeKind::Void:
             return llvm::Type::getVoidTy(_context);
+        case semantic::SemanticTypeKind::StringView:
+            return StringViewType();
         default:
             Fail("LLVM type is not implemented for '" +
                  std::string(type.Name()) + "'");
             return nullptr;
     }
+}
+
+llvm::StructType* LlvmCodeGenerator::StringViewType() {
+    const unsigned width = _dataLayout.has_value()
+                               ? _dataLayout->getPointerSizeInBits()
+                               : 64;
+    return llvm::StructType::get(
+        _context, {llvm::PointerType::getUnqual(_context),
+                   llvm::IntegerType::get(_context, width)});
 }
 
 llvm::FunctionType* LlvmCodeGenerator::MapFunctionType(
@@ -353,6 +364,20 @@ llvm::Value* LlvmCodeGenerator::EmitLiteral(
                 : static_cast<unsigned char>(expression.Value().front());
         return llvm::ConstantInt::get(type, value);
     }
+    if (expression.Type().Kind() == semantic::SemanticTypeKind::StringView) {
+        llvm::GlobalVariable* global =
+            _builder.CreateGlobalString(expression.Value());
+        llvm::Value* zero =
+            llvm::ConstantInt::get(llvm::Type::getInt32Ty(_context), 0);
+        llvm::Value* data = _builder.CreateInBoundsGEP(
+            global->getValueType(), global, {zero, zero}, "stringv.data");
+        llvm::StructType* type = StringViewType();
+        llvm::Value* value = llvm::UndefValue::get(type);
+        value = _builder.CreateInsertValue(value, data, 0, "stringv.data");
+        llvm::Value* length = llvm::ConstantInt::get(
+            type->getElementType(1), expression.Value().size());
+        return _builder.CreateInsertValue(value, length, 1, "stringv");
+    }
     if (expression.Type().IsInteger()) {
         return llvm::ConstantInt::get(
             type,
@@ -456,6 +481,19 @@ llvm::Value* LlvmCodeGenerator::EmitBinary(
     llvm::Value* left = EmitExpression(expression.Left());
     llvm::Value* right = EmitExpression(expression.Right());
     if (left == nullptr || right == nullptr) return nullptr;
+    if (expression.Left().Type().Kind() ==
+            semantic::SemanticTypeKind::StringView &&
+        expression.Right().Type().Kind() ==
+            semantic::SemanticTypeKind::StringView &&
+        (expression.OperatorType() == TokenType::Equal ||
+         expression.OperatorType() == TokenType::NotEqual ||
+         expression.OperatorType() == TokenType::StrictEqual ||
+         expression.OperatorType() == TokenType::StrictNotEqual)) {
+        const bool negate = expression.OperatorType() == TokenType::NotEqual ||
+                            expression.OperatorType() ==
+                                TokenType::StrictNotEqual;
+        return EmitStringViewEquality(left, right, negate);
+    }
     const bool floating = expression.Left().Type().IsFloating();
     const bool unsignedValue = IsUnsigned(expression.Left().Type());
     switch (expression.OperatorType()) {
@@ -509,6 +547,51 @@ llvm::Value* LlvmCodeGenerator::EmitBinary(
             Fail("unsupported LLVM binary operator");
             return nullptr;
     }
+}
+
+llvm::Value* LlvmCodeGenerator::EmitStringViewEquality(
+    llvm::Value* left, llvm::Value* right, bool negate) {
+    llvm::Value* leftData = _builder.CreateExtractValue(left, 0, "left.data");
+    llvm::Value* leftLength =
+        _builder.CreateExtractValue(left, 1, "left.length");
+    llvm::Value* rightData =
+        _builder.CreateExtractValue(right, 0, "right.data");
+    llvm::Value* rightLength =
+        _builder.CreateExtractValue(right, 1, "right.length");
+    llvm::Value* sameLength =
+        _builder.CreateICmpEQ(leftLength, rightLength, "same.length");
+
+    llvm::BasicBlock* lengthBlock = _builder.GetInsertBlock();
+    llvm::BasicBlock* contentBlock =
+        llvm::BasicBlock::Create(_context, "stringv.content", _currentFunction);
+    llvm::BasicBlock* mergeBlock =
+        llvm::BasicBlock::Create(_context, "stringv.end", _currentFunction);
+    _builder.CreateCondBr(sameLength, contentBlock, mergeBlock);
+
+    _builder.SetInsertPoint(contentBlock);
+    llvm::Type* lengthType = leftLength->getType();
+    llvm::FunctionType* compareType = llvm::FunctionType::get(
+        llvm::Type::getInt32Ty(_context),
+        {llvm::PointerType::getUnqual(_context),
+         llvm::PointerType::getUnqual(_context), lengthType},
+        false);
+    llvm::FunctionCallee compare =
+        _module->getOrInsertFunction("memcmp", compareType);
+    llvm::Value* comparison =
+        _builder.CreateCall(compare, {leftData, rightData, leftLength},
+                            "stringv.compare");
+    llvm::Value* sameContent = _builder.CreateICmpEQ(
+        comparison, llvm::ConstantInt::get(llvm::Type::getInt32Ty(_context), 0),
+        "same.content");
+    _builder.CreateBr(mergeBlock);
+    llvm::BasicBlock* completedContentBlock = _builder.GetInsertBlock();
+
+    _builder.SetInsertPoint(mergeBlock);
+    llvm::PHINode* equal =
+        _builder.CreatePHI(llvm::Type::getInt1Ty(_context), 2, "stringv.equal");
+    equal->addIncoming(llvm::ConstantInt::getFalse(_context), lengthBlock);
+    equal->addIncoming(sameContent, completedContentBlock);
+    return negate ? _builder.CreateNot(equal, "stringv.not_equal") : equal;
 }
 
 llvm::Value* LlvmCodeGenerator::EmitExpression(

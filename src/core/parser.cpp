@@ -77,6 +77,7 @@ bool Parser::IsTypeToken(TokenType type) const {
         case TokenType::Bool:
         case TokenType::Char:
         case TokenType::Void:
+        case TokenType::StringView:
             return true;
         default:
             return false;
@@ -152,6 +153,9 @@ std::unique_ptr<TypeNode> Parser::ParseType() {
             break;
         case TokenType::Void:
             type = PrimitiveType::Void;
+            break;
+        case TokenType::StringView:
+            type = PrimitiveType::StringView;
             break;
         default:
             _diagnostics.Report(diagnostics::DiagnosticCode::ExpectedToken,

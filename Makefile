@@ -7,13 +7,15 @@ TEST_BUILD_DIR ?= build-tests
 
 .PHONY: help configure build configure-tests build-tests test \
 	test-semantic llvm-poc native-poc native-if-also native-functions \
-	native-while native-loop-control native-casts clean
+	native-while native-loop-control native-casts native-string-view \
+	test-neovim clean
 
 help:
 	@echo "Flecha build targets:"
 	@echo "  make build          Configure and build Flecha"
 	@echo "  make test           Configure, build, and run all tests"
 	@echo "  make test-semantic  Run only semantic and scope tests"
+	@echo "  make test-neovim    Test Neovim filetype and syntax support"
 	@echo "  make llvm-poc       Emit and execute the LLVM proof of concept"
 	@echo "  make native-poc     Build and execute a native Flecha program"
 	@echo "  make native-if-also Build and test the if/also native example"
@@ -21,6 +23,7 @@ help:
 	@echo "  make native-while   Build and test while/also loops"
 	@echo "  make native-loop-control Build and test loop control"
 	@echo "  make native-casts   Build and test numeric casts"
+	@echo "  make native-string-view Build and test borrowed strings"
 	@echo "  make clean          Clean generated build artifacts"
 	@echo ""
 	@echo "Overrides: CMAKE, CMAKE_GENERATOR, BUILD_DIR, TEST_BUILD_DIR"
@@ -47,6 +50,11 @@ test: build-tests
 test-semantic: build-tests
 	$(TEST_BUILD_DIR)/src/tests/test_flecha \
 		--gtest_filter='Semantic*:*ScopeTests*'
+
+test-neovim:
+	NVIM_LOG_FILE=/dev/null nvim --headless -u NONE -i NONE -n \
+		--cmd 'set runtimepath^=$(CURDIR)/editors/neovim' \
+		-S editors/neovim/tests/syntax_test.vim
 
 llvm-poc: build
 	$(BUILD_DIR)/flecha --emit-llvm examples/llvm_poc.fl \
@@ -96,6 +104,13 @@ native-casts: build
 	@test -f $(BUILD_DIR)/numeric_casts.o
 	@$(BUILD_DIR)/numeric_casts; result=$$?; test $$result -eq 42
 	@echo "Native numeric-cast example returned 42"
+
+native-string-view: build
+	$(BUILD_DIR)/flecha build examples/string_view.fl \
+		-o $(BUILD_DIR)/string_view
+	@test -f $(BUILD_DIR)/string_view.o
+	@$(BUILD_DIR)/string_view; result=$$?; test $$result -eq 42
+	@echo "Native string-view example returned 42"
 
 clean:
 	@if test -f $(BUILD_DIR)/CMakeCache.txt; then \

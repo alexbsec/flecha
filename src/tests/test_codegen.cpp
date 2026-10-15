@@ -163,13 +163,21 @@ TEST(LlvmCodeGeneratorTests, EmitsShortCircuitBooleanLogic) {
     EXPECT_NE(ir.find("phi i1"), std::string::npos);
 }
 
-TEST(LlvmCodeGeneratorTests, RejectsDeferredLiteralRepresentations) {
-    GeneratedSource result =
-        Generate("i32 main() { text := \"hello\"; return 0; }");
+TEST(LlvmCodeGeneratorTests, EmitsStringViewsAndContentEquality) {
+    GeneratedSource result = Generate(
+        "stringv Identity(stringv value) { return value; } "
+        "bool Equal(stringv left, stringv right) { return left == right; } "
+        "i32 main() { value := Identity(\"Flecha\"); "
+        "if Equal(value, \"Flecha\") and value != \"Arrow\" { return 42; } "
+        "return 0; }");
 
-    ASSERT_NE(result.generator, nullptr);
-    EXPECT_EQ(result.module, nullptr);
-    EXPECT_NE(result.generator->Error().find("string"), std::string::npos);
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("@memcmp"), std::string::npos);
+    EXPECT_NE(ir.find("stringv.content"), std::string::npos);
+    EXPECT_NE(ir.find("{ ptr, i64 }"), std::string::npos);
 }
 
 TEST(LlvmCodeGeneratorTests, UsesTargetPointerWidthForSizeTypes) {

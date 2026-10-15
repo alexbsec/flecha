@@ -34,8 +34,8 @@ std::string_view SemanticType::Name() const {
             return "char";
         case SemanticTypeKind::Void:
             return "void";
-        case SemanticTypeKind::String:
-            return "string";
+        case SemanticTypeKind::StringView:
+            return "stringv";
         case SemanticTypeKind::Null:
             return "null";
         case SemanticTypeKind::None:
@@ -90,6 +90,8 @@ SemanticType SemanticType::FromSyntax(core::PrimitiveType type) {
             return SemanticType(SemanticTypeKind::Char);
         case core::PrimitiveType::Void:
             return SemanticType(SemanticTypeKind::Void);
+        case core::PrimitiveType::StringView:
+            return SemanticType(SemanticTypeKind::StringView);
     }
     return Error();
 }

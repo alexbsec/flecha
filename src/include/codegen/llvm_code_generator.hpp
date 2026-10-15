@@ -5,6 +5,7 @@
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/IR/Module.h>
+#include <llvm/IR/DerivedTypes.h>
 
 #include <memory>
 #include <optional>
@@ -28,6 +29,7 @@ class LlvmCodeGenerator final {
 
    private:
     [[nodiscard]] llvm::Type* MapType(semantic::SemanticType type);
+    [[nodiscard]] llvm::StructType* StringViewType();
     [[nodiscard]] llvm::FunctionType* MapFunctionType(
         const semantic::FunctionSymbol& function);
     bool DeclareFunctions(const lowering::BoundProgram& program);
@@ -50,6 +52,8 @@ class LlvmCodeGenerator final {
         const lowering::BoundBinaryExpression& expression);
     [[nodiscard]] llvm::Value* EmitBooleanLogical(
         const lowering::BoundBinaryExpression& expression);
+    [[nodiscard]] llvm::Value* EmitStringViewEquality(
+        llvm::Value* left, llvm::Value* right, bool negate);
     [[nodiscard]] llvm::AllocaInst* CreateEntryAlloca(
         const semantic::VariableSymbol& variable);
     bool Fail(std::string message);

@@ -1,0 +1,17 @@
+stringv Identity(stringv value) {
+    return value;
+}
+
+bool Equal(stringv left, stringv right) {
+    return left == right;
+}
+
+i32 main() {
+    message := Identity("Flecha");
+
+    if Equal(message, "Flecha") and message != "Arrow" and "" == "" {
+        return 42;
+    }
+
+    return 0;
+}
