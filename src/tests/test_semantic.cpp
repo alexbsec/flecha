@@ -347,6 +347,51 @@ TEST(SemanticDeclarationTests, SupportsExplicitInferenceAndLaterAssignments) {
         SemanticTypeKind::I32);
 }
 
+TEST(SemanticDeclarationTests, SupportsDefiniteAssignmentForValueTypes) {
+    Analysis valid = Analyze(
+        "i32 Main(bool choose) { i32 value; string text; "
+        "if choose { value = 40; text = \"left\"; } "
+        "else { value = 42; text = \"right\"; } "
+        "stdoutln(text); return value; }");
+    EXPECT_FALSE(valid.diagnostics.HasErrors());
+
+    Analysis directRead = Analyze("i32 Main() { i32 value; return value; }");
+    EXPECT_NE(FindDiagnostic(directRead,
+                             DiagnosticCode::UninitializedVariable),
+              nullptr);
+
+    Analysis incompleteBranch = Analyze(
+        "i32 Main(bool choose) { i32 value; if choose { value = 42; } "
+        "return value; }");
+    EXPECT_NE(FindDiagnostic(incompleteBranch,
+                             DiagnosticCode::UninitializedVariable),
+              nullptr);
+
+    Analysis loopOnly = Analyze(
+        "i32 Main(bool run) { i32 value; while run { value = 42; break; } "
+        "return value; }");
+    EXPECT_NE(FindDiagnostic(loopOnly,
+                             DiagnosticCode::UninitializedVariable),
+              nullptr);
+
+    Analysis everyType = Analyze(
+        "void Main() { i8 a; i16 b; i32 c; i64 d; isize e; "
+        "u8 f; u16 g; u32 h; u64 i; usize j; f32 k; f64 l; "
+        "bool m; char n; string o; "
+        "a = 1 as i8; b = 1 as i16; c = 1; d = 1 as i64; "
+        "e = 1 as isize; f = 1 as u8; g = 1 as u16; h = 1 as u32; "
+        "i = 1 as u64; j = 1 as usize; k = 1.0 as f32; l = 1.0; "
+        "m = true; n = 'x'; o = \"ready\"; stdoutln(o); }");
+    EXPECT_FALSE(everyType.diagnostics.HasErrors());
+}
+
+TEST(SemanticDeclarationTests, BorrowedViewsRequireImmediateInitialization) {
+    Analysis analysis = Analyze("void Main() { stringv view; }");
+    EXPECT_NE(FindDiagnostic(analysis,
+                             DiagnosticCode::BorrowRequiresInitializer),
+              nullptr);
+}
+
 TEST(SemanticInferenceTests, InfersEverySupportedLiteralCategory) {
     Analysis analysis = Analyze(
         "i32 main() { integer := 1; floating := 1.5; boolean := true; "

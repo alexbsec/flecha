@@ -11,7 +11,7 @@ GTEST_SOURCE_DIR ?=
 	test-semantic llvm-poc native-poc native-if-also native-functions \
 	native-while native-loop-control native-casts native-string-view \
 	native-string-view-operations native-owning-string native-stdout \
-	test-neovim test-sanitizers clean
+	native-definite-assignment test-neovim test-sanitizers clean
 
 help:
 	@echo "Flecha build targets:"
@@ -31,6 +31,7 @@ help:
 	@echo "  make native-string-view-operations Build and test stringv operations"
 	@echo "  make native-owning-string Build and test owning strings"
 	@echo "  make native-stdout  Build and test standard output"
+	@echo "  make native-definite-assignment Build and test delayed initialization"
 	@echo "  make clean          Clean generated build artifacts"
 	@echo ""
 	@echo "Overrides: CMAKE, CMAKE_GENERATOR, BUILD_DIR, TEST_BUILD_DIR"
@@ -162,6 +163,13 @@ native-stdout: build
 		"RmxlY2hhCjgKMTYKMzIKNjQKNzIKOAoxNgozMgo2NAo3MgoxLjI1CjEuNQp0cnVlCmZhbHNlCiEK"; \
 		test $$result -eq 42
 	@echo "Native stdout example printed the expected text and returned 42"
+
+native-definite-assignment: build
+	$(BUILD_DIR)/flecha build src/tests/fixtures/definite_assignment.fl \
+		-o $(BUILD_DIR)/definite_assignment
+	@output=`$(BUILD_DIR)/definite_assignment`; result=$$?; \
+		test $$result -eq 42; test "$$output" = "initialized"
+	@echo "Native definite-assignment example returned 42"
 
 clean:
 	@if test -f $(BUILD_DIR)/CMakeCache.txt; then \

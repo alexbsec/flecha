@@ -317,15 +317,22 @@ TEST(ParserVariableDeclarationTests, ParsesTypedInitializedVariables) {
         TokenType::False);
 }
 
-TEST(ParserVariableDeclarationTests, RequiresInitializer) {
+TEST(ParserVariableDeclarationTests, ParsesTypedDeclarationWithoutInitializer) {
     DiagnosticBag diagnostics;
     std::unique_ptr<CompilationUnit> unit =
         ParseSource("void test() { i32 value; }", diagnostics);
 
     ASSERT_NE(unit, nullptr);
-    ASSERT_EQ(diagnostics.Diagnostics().size(), 1);
-    EXPECT_EQ(diagnostics.Diagnostics()[0].message,
-              "expected '=' after variable name, found ';'");
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const FunctionDeclaration& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    const VariableDeclarationStatement& variable =
+        static_cast<const VariableDeclarationStatement&>(
+            *function.Body().Statements()[0]);
+    ASSERT_NE(variable.ExplicitType(), nullptr);
+    EXPECT_EQ(variable.ExplicitType()->Type(), PrimitiveType::I32);
+    EXPECT_EQ(variable.Name(), "value");
+    EXPECT_EQ(variable.Initializer(), nullptr);
 }
 
 TEST(ParserVariableDeclarationTests, ParsesInferredVariables) {

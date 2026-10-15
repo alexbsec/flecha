@@ -40,6 +40,8 @@ enum class DiagnosticCode {
     InvalidMember,
     NotIndexable,
     BorrowEscapesOwner,
+    UninitializedVariable,
+    BorrowRequiresInitializer,
     NativeTargetUnavailable,
     ObjectEmissionFailed,
     RuntimeUnavailable,
