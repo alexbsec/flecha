@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(Flecha LANGUAGES CXX)
+project(Flecha LANGUAGES C CXX)
 
 include(CTest)
 
@@ -34,6 +34,7 @@ add_subdirectory(src/diagnostics)
 add_subdirectory(src/core)
 add_subdirectory(src/semantic)
 add_subdirectory(src/lowering)
+add_subdirectory(src/codegen)
 add_subdirectory(src/memory)
 add_subdirectory(src/runtime)
 add_subdirectory(src/utils)
@@ -47,6 +48,7 @@ target_link_libraries(flecha
         core
         semantic
         lowering
+        llvm_codegen
         memory
         runtime
         utils

@@ -1,5 +1,6 @@
 add_executable(test_flecha
     test_ast.cpp
+    test_codegen.cpp
     test_diagnostics.cpp
     test_lowering.cpp
     test_main.cpp
@@ -15,6 +16,7 @@ target_link_libraries(test_flecha
         core
         semantic
         lowering
+        llvm_codegen
         memory
         runtime
         utils
