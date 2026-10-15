@@ -17,6 +17,7 @@ class SemanticAnalyzer final {
     [[nodiscard]] SemanticModel Analyze(const core::CompilationUnit& unit);
 
    private:
+    void RegisterBuiltIns();
     void RegisterFunctions(const core::CompilationUnit& unit);
     void AnalyzeFunction(const core::FunctionDeclaration& function);
     void AnalyzeBlock(const core::BlockStatement& block, bool createScope);

@@ -1,0 +1,10 @@
+i32 main() {
+    stdoutln("Flecha");
+    stdoutln(42);
+    stdoutln(-7);
+    stdoutln(true);
+    stdoutln(false);
+    stdoutln('!');
+    stdoutln(1.5);
+    return 42;
+}

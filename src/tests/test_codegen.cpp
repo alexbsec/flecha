@@ -180,6 +180,28 @@ TEST(LlvmCodeGeneratorTests, EmitsStringViewsAndContentEquality) {
     EXPECT_NE(ir.find("{ ptr, i64 }"), std::string::npos);
 }
 
+TEST(LlvmCodeGeneratorTests, EmitsLengthAwareStandardOutput) {
+    GeneratedSource result =
+        Generate("i32 main() { stdout(\"Flecha\"); "
+                 "stdoutln(\"Language\"); stdout(-42); stdout(1 as i8); "
+                 "stdout(2 as i16); stdout(3 as i64); stdout(4 as isize); "
+                 "stdout(5 as u8); stdout(6 as u16); stdout(7 as u32); "
+                 "stdout(8 as u64); stdout(9 as usize); stdout(1 as f32); "
+                 "stdout(1.5); stdout(true); stdout('x'); return 42; }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("@flecha.stdout"), std::string::npos);
+    EXPECT_NE(ir.find("@write"), std::string::npos);
+    EXPECT_NE(ir.find("i32 1"), std::string::npos);
+    EXPECT_NE(ir.find("stdout.newline"), std::string::npos);
+    EXPECT_NE(ir.find("@snprintf"), std::string::npos);
+    EXPECT_NE(ir.find("stdout.true"), std::string::npos);
+    EXPECT_NE(ir.find("stdout.char"), std::string::npos);
+}
+
 TEST(LlvmCodeGeneratorTests, UsesTargetPointerWidthForSizeTypes) {
     GeneratedSource result =
         Generate("isize identity(isize value) { return value; }");

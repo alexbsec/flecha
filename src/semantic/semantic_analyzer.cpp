@@ -41,6 +41,23 @@ const Symbol* SemanticAnalyzer::AddSymbol(std::unique_ptr<Symbol> symbol,
     return result;
 }
 
+void SemanticAnalyzer::RegisterBuiltIns() {
+    const auto registerOutput = [this](std::string name,
+                                       BuiltInFunction builtIn) {
+        std::unique_ptr<FunctionSymbol> function =
+            std::make_unique<FunctionSymbol>(
+                std::move(name), SemanticType(SemanticTypeKind::Void),
+                std::vector<SemanticType>{
+                    SemanticType(SemanticTypeKind::StringView)},
+                source::SourceRange{}, builtIn);
+        const FunctionSymbol* symbol = function.get();
+        _model._symbols.push_back(std::move(function));
+        (void)_currentScope->Declare(*symbol);
+    };
+    registerOutput("stdout", BuiltInFunction::Stdout);
+    registerOutput("stdoutln", BuiltInFunction::StdoutLine);
+}
+
 void SemanticAnalyzer::RegisterFunctions(const core::CompilationUnit& unit) {
     for (const std::unique_ptr<core::Declaration>& declaration :
          unit.Declarations()) {
@@ -67,6 +84,7 @@ void SemanticAnalyzer::RegisterFunctions(const core::CompilationUnit& unit) {
 SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
     _model = SemanticModel{};
     _currentScope = &AddScope(nullptr);
+    RegisterBuiltIns();
     RegisterFunctions(unit);
     for (const std::unique_ptr<core::Declaration>& declaration :
          unit.Declarations()) {
@@ -534,6 +552,24 @@ SemanticType SemanticAnalyzer::AnalyzeCall(
         Report(diagnostics::DiagnosticCode::NotCallable,
                expression.Callee().Range(), "expression is not callable");
         return SemanticType::Error();
+    }
+    if (function->BuiltIn() == BuiltInFunction::Stdout ||
+        function->BuiltIn() == BuiltInFunction::StdoutLine) {
+        if (argumentTypes.size() != 1) {
+            Report(diagnostics::DiagnosticCode::WrongArgumentCount,
+                   expression.Range(),
+                   "function '" + function->Name() +
+                       "' expects 1 argument, found " +
+                       std::to_string(argumentTypes.size()));
+        } else if (!argumentTypes.front().IsError() &&
+                   !argumentTypes.front().IsPrintable()) {
+            Report(diagnostics::DiagnosticCode::IncompatibleArgument,
+                   expression.Arguments().front()->Range(),
+                   "function '" + function->Name() +
+                       "' requires a printable value, found '" +
+                       std::string(argumentTypes.front().Name()) + "'");
+        }
+        return function->ReturnType();
     }
     if (argumentTypes.size() != function->ParameterTypes().size()) {
         Report(

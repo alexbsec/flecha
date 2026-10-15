@@ -12,6 +12,8 @@ namespace flecha::semantic {
 
 enum class SymbolKind { Function, Parameter, LocalVariable };
 
+enum class BuiltInFunction { None, Stdout, StdoutLine };
+
 class Symbol {
    public:
     Symbol(SymbolKind kind, std::string name, SemanticType type,
@@ -55,21 +57,25 @@ class FunctionSymbol final : public Symbol {
    public:
     FunctionSymbol(std::string name, SemanticType returnType,
                    std::vector<SemanticType> parameterTypes,
-                   source::SourceRange declarationRange)
+                   source::SourceRange declarationRange,
+                   BuiltInFunction builtIn = BuiltInFunction::None)
         : Symbol(SymbolKind::Function, std::move(name),
                  SemanticType(SemanticTypeKind::Function), declarationRange,
                  false),
           _returnType(returnType),
-          _parameterTypes(std::move(parameterTypes)) {}
+          _parameterTypes(std::move(parameterTypes)),
+          _builtIn(builtIn) {}
 
     [[nodiscard]] SemanticType ReturnType() const { return _returnType; }
     [[nodiscard]] const std::vector<SemanticType>& ParameterTypes() const {
         return _parameterTypes;
     }
+    [[nodiscard]] BuiltInFunction BuiltIn() const { return _builtIn; }
 
    private:
     SemanticType _returnType;
     std::vector<SemanticType> _parameterTypes;
+    BuiltInFunction _builtIn;
 };
 
 }  // namespace flecha::semantic

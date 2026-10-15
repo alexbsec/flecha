@@ -39,6 +39,7 @@ class SemanticType final {
     [[nodiscard]] bool IsInteger() const;
     [[nodiscard]] bool IsFloating() const;
     [[nodiscard]] bool IsNumeric() const;
+    [[nodiscard]] bool IsPrintable() const;
     [[nodiscard]] bool IsError() const {
         return _kind == SemanticTypeKind::Error;
     }
