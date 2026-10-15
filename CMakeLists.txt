@@ -30,6 +30,7 @@ if(FLECHA_ENABLE_SANITIZERS)
     endif()
 endif()
 
+add_subdirectory(src/diagnostics)
 add_subdirectory(src/core)
 add_subdirectory(src/memory)
 add_subdirectory(src/runtime)
@@ -40,6 +41,7 @@ add_executable(flecha src/main.cpp)
 target_link_libraries(flecha
     PRIVATE
         flecha_project_options
+        diagnostics
         core
         memory
         runtime

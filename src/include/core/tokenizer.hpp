@@ -3,6 +3,8 @@
 
 #include <string>
 #include <vector>
+
+#include "diagnostics/diagnostic_bag.hpp"
 #include "token.hpp"
 
 using string = std::string;
@@ -14,18 +16,21 @@ namespace core {
     private:
         string _source;
         size_t _index;
-        int _line;
-        int _column;
+        std::uint32_t _line;
+        std::uint32_t _column;
+        diagnostics::DiagnosticBag& _diagnostics;
 
-        char _Peek(size_t offset = 0) const;
-        char _Advance();
-        bool _Match(char expected);
-        bool _IsAtEnd() const;
-        void _SkipTrivia();
-        Token _NextToken();        
+        source::SourceLocation Location() const;
+        source::SourceRange RangeFrom(source::SourceLocation start) const;
+        char Peek(size_t offset = 0) const;
+        char Advance();
+        bool Match(char expected);
+        bool IsAtEnd() const;
+        void SkipTrivia();
+        Token NextToken();
 
     public:
-        Tokenizer(const string& src);
+        Tokenizer(const string& src, diagnostics::DiagnosticBag& diagnostics);
         vector<Token> Tokenize();
     };
 }

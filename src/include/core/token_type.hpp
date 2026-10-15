@@ -66,6 +66,7 @@ enum class TokenType {
     Yield,
     If,
     Else,
+    Also,
     Error,
     Const,
     Volatile,
@@ -88,7 +89,10 @@ enum class TokenType {
     EOF_TOKEN,
 
     // No Token
-    NoToken
+    NoToken,
+
+    // Invalid source retained for error recovery
+    Invalid
 };
 
 #endif  // FLECHA_TOKENTYPE_HPP

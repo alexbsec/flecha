@@ -1,7 +1,6 @@
 #include "core/tokenizer.hpp"
 
 #include <cctype>
-#include <stdexcept>
 #include <string_view>
 #include <unordered_map>
 
@@ -23,32 +22,43 @@ const KeywordMap KEYWORDS = {
     {"inline", TokenType::Inline},   {"comptime", TokenType::Comptime},
     {"return", TokenType::Return},   {"yield", TokenType::Yield},
     {"if", TokenType::If},           {"else", TokenType::Else},
+    {"also", TokenType::Also},
     {"error", TokenType::Error},     {"const", TokenType::Const},
     {"volatile", TokenType::Volatile}, {"as", TokenType::As},
     {"none", TokenType::None},       {"null", TokenType::Null},
     {"true", TokenType::True},       {"false", TokenType::False},
+    {"and", TokenType::And},         {"or", TokenType::Or},
 };
 
 bool IsIdentifierStart(char character) {
-    const auto value = static_cast<unsigned char>(character);
+    const unsigned char value = static_cast<unsigned char>(character);
     return std::isalpha(value) != 0 || character == '_';
 }
 
 bool IsIdentifierContinue(char character) {
-    const auto value = static_cast<unsigned char>(character);
+    const unsigned char value = static_cast<unsigned char>(character);
     return std::isalnum(value) != 0 || character == '_';
 }
 
 }  // namespace
 
-char Tokenizer::_Peek(size_t offset) const {
+source::SourceLocation Tokenizer::Location() const {
+    return {_index, _line, _column};
+}
+
+source::SourceRange Tokenizer::RangeFrom(
+    source::SourceLocation start) const {
+    return {start, Location()};
+}
+
+char Tokenizer::Peek(size_t offset) const {
     const size_t position = _index + offset;
     return position < _source.size() ? _source[position] : '\0';
 }
 
-char Tokenizer::_Advance() {
-    const char character = _Peek();
-    if (_IsAtEnd()) {
+char Tokenizer::Advance() {
+    const char character = Peek();
+    if (IsAtEnd()) {
         return '\0';
     }
 
@@ -62,45 +72,46 @@ char Tokenizer::_Advance() {
     return character;
 }
 
-bool Tokenizer::_Match(char expected) {
-    if (_Peek() != expected) {
+bool Tokenizer::Match(char expected) {
+    if (Peek() != expected) {
         return false;
     }
-    _Advance();
+    Advance();
     return true;
 }
 
-bool Tokenizer::_IsAtEnd() const { return _index >= _source.size(); }
+bool Tokenizer::IsAtEnd() const { return _index >= _source.size(); }
 
-void Tokenizer::_SkipTrivia() {
-    while (!_IsAtEnd()) {
-        const auto current = static_cast<unsigned char>(_Peek());
+void Tokenizer::SkipTrivia() {
+    while (!IsAtEnd()) {
+        const unsigned char current = static_cast<unsigned char>(Peek());
         if (std::isspace(current) != 0) {
-            _Advance();
+            Advance();
             continue;
         }
 
-        if (_Peek() == '/' && _Peek(1) == '/') {
-            while (!_IsAtEnd() && _Peek() != '\n') {
-                _Advance();
+        if (Peek() == '/' && Peek(1) == '/') {
+            while (!IsAtEnd() && Peek() != '\n') {
+                Advance();
             }
             continue;
         }
 
-        if (_Peek() == '/' && _Peek(1) == '*') {
-            const int start_line = _line;
-            _Advance();
-            _Advance();
-            while (!_IsAtEnd() && !(_Peek() == '*' && _Peek(1) == '/')) {
-                _Advance();
+        if (Peek() == '/' && Peek(1) == '*') {
+            const source::SourceLocation start = Location();
+            Advance();
+            Advance();
+            while (!IsAtEnd() && !(Peek() == '*' && Peek(1) == '/')) {
+                Advance();
             }
-            if (_IsAtEnd()) {
-                throw std::runtime_error(
-                    "Unterminated block comment at line " +
-                    std::to_string(start_line));
+            if (IsAtEnd()) {
+                _diagnostics.Report(
+                    diagnostics::DiagnosticCode::UnterminatedBlockComment,
+                    RangeFrom(start), "unterminated block comment");
+                return;
             }
-            _Advance();
-            _Advance();
+            Advance();
+            Advance();
             continue;
         }
 
@@ -108,115 +119,133 @@ void Tokenizer::_SkipTrivia() {
     }
 }
 
-Token Tokenizer::_NextToken() {
-    _SkipTrivia();
-    if (_IsAtEnd()) {
-        return Token(TokenType::EOF_TOKEN, "", _line, _column);
+Token Tokenizer::NextToken() {
+    SkipTrivia();
+    if (IsAtEnd()) {
+        const source::SourceLocation location = Location();
+        return Token(TokenType::EOF_TOKEN, "", {location, location});
     }
 
-    const int start_line = _line;
-    const int start_column = _column;
-    const size_t start_index = _index;
-    const char character = _Advance();
+    const source::SourceLocation start = Location();
+    const size_t startIndex = start.offset;
+    const char character = Advance();
 
-    const auto make_token = [&](TokenType type) {
-        return Token(type, _source.substr(start_index, _index - start_index),
-                     start_line, start_column);
+    const auto makeToken = [&](TokenType type) {
+        return Token(type, _source.substr(startIndex, _index - startIndex),
+                     RangeFrom(start));
     };
 
     switch (character) {
-        case ';': return make_token(TokenType::SemiColon);
-        case ',': return make_token(TokenType::Comma);
-        case '.': return make_token(TokenType::Dot);
-        case '(': return make_token(TokenType::LParen);
-        case ')': return make_token(TokenType::RParen);
-        case '[': return make_token(TokenType::LBracket);
-        case ']': return make_token(TokenType::RBracket);
-        case '{': return make_token(TokenType::LCurly);
-        case '}': return make_token(TokenType::RCurly);
-        case '+': return make_token(TokenType::Add);
-        case '-': return make_token(TokenType::Sub);
-        case '*': return make_token(TokenType::Mul);
-        case '/': return make_token(TokenType::Div);
-        case '%': return make_token(TokenType::Mod);
-        case '^': return make_token(TokenType::Xor);
+        case ';': return makeToken(TokenType::SemiColon);
+        case ',': return makeToken(TokenType::Comma);
+        case '.': return makeToken(TokenType::Dot);
+        case '(': return makeToken(TokenType::LParen);
+        case ')': return makeToken(TokenType::RParen);
+        case '[': return makeToken(TokenType::LBracket);
+        case ']': return makeToken(TokenType::RBracket);
+        case '{': return makeToken(TokenType::LCurly);
+        case '}': return makeToken(TokenType::RCurly);
+        case '+': return makeToken(TokenType::Add);
+        case '-': return makeToken(TokenType::Sub);
+        case '*': return makeToken(TokenType::Mul);
+        case '/': return makeToken(TokenType::Div);
+        case '%': return makeToken(TokenType::Mod);
+        case '^': return makeToken(TokenType::Xor);
         case ':':
-            return make_token(_Match('=') ? TokenType::DeclareAssign
+            return makeToken(Match('=') ? TokenType::DeclareAssign
                                           : TokenType::Colon);
         case '=':
-            if (_Match('=')) {
-                return make_token(_Match('=') ? TokenType::StrictEqual
+            if (Match('=')) {
+                return makeToken(Match('=') ? TokenType::StrictEqual
                                               : TokenType::Equal);
             }
-            return make_token(TokenType::Assign);
+            return makeToken(TokenType::Assign);
         case '!':
-            if (_Match('=')) {
-                return make_token(_Match('=') ? TokenType::StrictNotEqual
+            if (Match('=')) {
+                return makeToken(Match('=') ? TokenType::StrictNotEqual
                                               : TokenType::NotEqual);
             }
-            return make_token(TokenType::Bang);
+            return makeToken(TokenType::Bang);
         case '<':
-            return make_token(_Match('=') ? TokenType::LessEqual
+            return makeToken(Match('=') ? TokenType::LessEqual
                                           : TokenType::Less);
         case '>':
-            return make_token(_Match('=') ? TokenType::GreaterEqual
+            return makeToken(Match('=') ? TokenType::GreaterEqual
                                           : TokenType::Greater);
         case '&':
-            if (_Match('&')) return make_token(TokenType::And);
+            if (Match('&')) return makeToken(TokenType::And);
             break;
         case '|':
-            if (_Match('|')) return make_token(TokenType::Or);
+            if (Match('|')) return makeToken(TokenType::Or);
             break;
         case '"': {
             string value;
-            while (!_IsAtEnd() && _Peek() != '"') {
-                if (_Peek() == '\n') {
-                    throw std::runtime_error(
-                        "Unterminated string literal at line " +
-                        std::to_string(start_line));
+            bool valid = true;
+            while (!IsAtEnd() && Peek() != '"') {
+                if (Peek() == '\n') {
+                    _diagnostics.Report(
+                        diagnostics::DiagnosticCode::UnterminatedStringLiteral,
+                        RangeFrom(start), "unterminated string literal");
+                    return Token(TokenType::Invalid,
+                                 _source.substr(startIndex,
+                                                _index - startIndex),
+                                 RangeFrom(start));
                 }
-                if (_Peek() != '\\') {
-                    value += _Advance();
+                if (Peek() != '\\') {
+                    value += Advance();
                     continue;
                 }
 
-                _Advance();
-                if (_IsAtEnd()) break;
-                switch (_Advance()) {
+                const source::SourceLocation escapeStart = Location();
+                Advance();
+                if (IsAtEnd()) break;
+                switch (Advance()) {
                     case 'n': value += '\n'; break;
                     case 't': value += '\t'; break;
                     case 'r': value += '\r'; break;
                     case '\\': value += '\\'; break;
                     case '"': value += '"'; break;
                     default:
-                        throw std::runtime_error(
-                            "Invalid escape sequence in string literal at line " +
-                            std::to_string(start_line));
+                        valid = false;
+                        _diagnostics.Report(
+                            diagnostics::DiagnosticCode::InvalidStringEscape,
+                            RangeFrom(escapeStart),
+                            "invalid escape sequence in string literal");
+                        break;
                 }
             }
-            if (!_Match('"')) {
-                throw std::runtime_error(
-                    "Unterminated string literal at line " +
-                    std::to_string(start_line));
+            if (!Match('"')) {
+                _diagnostics.Report(
+                    diagnostics::DiagnosticCode::UnterminatedStringLiteral,
+                    RangeFrom(start), "unterminated string literal");
+                valid = false;
             }
-            return Token(TokenType::StringLiteral, value, start_line,
-                         start_column);
+            return Token(valid ? TokenType::StringLiteral : TokenType::Invalid,
+                         value, RangeFrom(start));
         }
         case '\'': {
-            if (_IsAtEnd() || _Peek() == '\'' || _Peek() == '\n') {
-                throw std::runtime_error(
-                    "Invalid character literal at line " +
-                    std::to_string(start_line));
+            if (IsAtEnd() || Peek() == '\'' || Peek() == '\n') {
+                if (Peek() == '\'') Advance();
+                _diagnostics.Report(
+                    diagnostics::DiagnosticCode::InvalidCharacterLiteral,
+                    RangeFrom(start),
+                    "character literal must contain exactly one character");
+                return Token(TokenType::Invalid,
+                             _source.substr(startIndex, _index - startIndex),
+                             RangeFrom(start));
             }
 
-            char value = _Advance();
+            char value = Advance();
             if (value == '\\') {
-                if (_IsAtEnd()) {
-                    throw std::runtime_error(
-                        "Unterminated character literal at line " +
-                        std::to_string(start_line));
+                if (IsAtEnd()) {
+                    _diagnostics.Report(
+                        diagnostics::DiagnosticCode::InvalidCharacterLiteral,
+                        RangeFrom(start), "unterminated character literal");
+                    return Token(TokenType::Invalid, "", RangeFrom(start));
                 }
-                switch (_Advance()) {
+                const source::SourceLocation escapeStart{
+                    _index - 1, _line, _column - 1};
+                switch (Advance()) {
                     case 'n': value = '\n'; break;
                     case 't': value = '\t'; break;
                     case 'r': value = '\r'; break;
@@ -224,63 +253,83 @@ Token Tokenizer::_NextToken() {
                     case '\\': value = '\\'; break;
                     case '\'': value = '\''; break;
                     default:
-                        throw std::runtime_error(
-                            "Invalid escape sequence in character literal at line " +
-                            std::to_string(start_line));
+                        _diagnostics.Report(
+                            diagnostics::DiagnosticCode::InvalidCharacterEscape,
+                            RangeFrom(escapeStart),
+                            "invalid escape sequence in character literal");
+                        while (!IsAtEnd() && Peek() != '\'' &&
+                               Peek() != '\n') {
+                            Advance();
+                        }
+                        Match('\'');
+                        return Token(TokenType::Invalid, "", RangeFrom(start));
                 }
             }
-            if (!_Match('\'')) {
-                throw std::runtime_error(
-                    "Character literal must contain exactly one character at line " +
-                    std::to_string(start_line));
+            if (!Match('\'')) {
+                while (!IsAtEnd() && Peek() != '\'' && Peek() != '\n') {
+                    Advance();
+                }
+                Match('\'');
+                _diagnostics.Report(
+                    diagnostics::DiagnosticCode::InvalidCharacterLiteral,
+                    RangeFrom(start),
+                    "character literal must contain exactly one character");
+                return Token(TokenType::Invalid, "", RangeFrom(start));
             }
-            return Token(TokenType::CharLiteral, string(1, value), start_line,
-                         start_column);
+            return Token(TokenType::CharLiteral, string(1, value),
+                         RangeFrom(start));
         }
         default: break;
     }
 
-    const auto unsigned_character = static_cast<unsigned char>(character);
-    if (std::isdigit(unsigned_character) != 0) {
-        while (std::isdigit(static_cast<unsigned char>(_Peek())) != 0) {
-            _Advance();
+    const unsigned char unsignedCharacter =
+        static_cast<unsigned char>(character);
+    if (std::isdigit(unsignedCharacter) != 0) {
+        while (std::isdigit(static_cast<unsigned char>(Peek())) != 0) {
+            Advance();
         }
 
         TokenType type = TokenType::NumberLiteral;
-        if (_Peek() == '.' &&
-            std::isdigit(static_cast<unsigned char>(_Peek(1))) != 0) {
+        if (Peek() == '.' &&
+            std::isdigit(static_cast<unsigned char>(Peek(1))) != 0) {
             type = TokenType::FloatLiteral;
-            _Advance();
-            while (std::isdigit(static_cast<unsigned char>(_Peek())) != 0) {
-                _Advance();
+            Advance();
+            while (std::isdigit(static_cast<unsigned char>(Peek())) != 0) {
+                Advance();
             }
         }
-        return make_token(type);
+        return makeToken(type);
     }
 
     if (IsIdentifierStart(character)) {
-        while (IsIdentifierContinue(_Peek())) {
-            _Advance();
+        while (IsIdentifierContinue(Peek())) {
+            Advance();
         }
-        const string word = _source.substr(start_index, _index - start_index);
-        const auto keyword = KEYWORDS.find(word);
+        const string word = _source.substr(startIndex, _index - startIndex);
+        const KeywordMap::const_iterator keyword = KEYWORDS.find(word);
         return Token(keyword == KEYWORDS.end() ? TokenType::Identifier
                                                : keyword->second,
-                     word, start_line, start_column);
+                     word, RangeFrom(start));
     }
 
-    throw std::runtime_error("Unexpected character '" + string(1, character) +
-                             "' at line " + std::to_string(start_line) +
-                             ", column " + std::to_string(start_column));
+    _diagnostics.Report(diagnostics::DiagnosticCode::UnexpectedCharacter,
+                        RangeFrom(start),
+                        "unexpected character '" + string(1, character) + "'");
+    return makeToken(TokenType::Invalid);
 }
 
-Tokenizer::Tokenizer(const string& source)
-    : _source(source), _index(0), _line(1), _column(1) {}
+Tokenizer::Tokenizer(const string& source,
+                     diagnostics::DiagnosticBag& diagnostics)
+    : _source(source),
+      _index(0),
+      _line(1),
+      _column(1),
+      _diagnostics(diagnostics) {}
 
 vector<Token> Tokenizer::Tokenize() {
     vector<Token> tokens;
     while (tokens.empty() || tokens.back().type != TokenType::EOF_TOKEN) {
-        tokens.push_back(_NextToken());
+        tokens.push_back(NextToken());
     }
     return tokens;
 }

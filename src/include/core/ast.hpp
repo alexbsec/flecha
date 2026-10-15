@@ -1,564 +1,464 @@
-#ifndef FLECHA_AST_HPP
-#define FLECHA_AST_HPP
+#ifndef FLECHA_CORE_AST_HPP
+#define FLECHA_CORE_AST_HPP
 
+#include <cstdint>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
-// Aliases
-template <typename... Args>
-using vector = std::vector<Args...>;
-using string = std::string;
+#include "source/source_range.hpp"
+#include "token_type.hpp"
 
-namespace flecha {
-namespace core {
+namespace flecha::core {
 
-/**
- * @brief Visitor class to help traverse AST
- */
-class Visitor {
+enum class AstNodeKind {
+    CompilationUnit,
+    FunctionDeclaration,
+    Parameter,
+    Type,
+    BlockStatement,
+    ReturnStatement,
+    IfStatement,
+    ConditionalBranch,
+    AlsoClause,
+    VariableDeclarationStatement,
+    ExpressionStatement,
+    LiteralExpression,
+    NameExpression,
+    ParenthesizedExpression,
+    UnaryExpression,
+    BinaryExpression,
+    AssignmentExpression,
+    CallExpression,
+};
+
+class AstNode {
    public:
-    // Variables
-    virtual void Visit(class VariableNode& node) = 0;
-    virtual void Visit(class ValueNode& node) = 0;
+    explicit AstNode(source::SourceRange range) : _range(range) {}
+    virtual ~AstNode() = default;
 
-    // Location
-    virtual void Visit(class StartNode& node) = 0;
-    virtual void Visit(class EndNode& node) = 0;
-    virtual void Visit(class LocationNode& node) = 0;
-    virtual void Visit(class RangeNode& node) = 0;
+    AstNode(const AstNode&) = delete;
+    AstNode& operator=(const AstNode&) = delete;
+    AstNode(AstNode&&) = default;
+    AstNode& operator=(AstNode&&) = default;
 
-    // Program
-    virtual void Visit(class ProgramNode& node) = 0;
-    virtual void Visit(class ProgramInitializationNode& node) = 0;
-    virtual void Visit(class BodyNode& node) = 0;
+    [[nodiscard]] virtual AstNodeKind Kind() const = 0;
+    [[nodiscard]] const source::SourceRange& Range() const { return _range; }
 
-    // Expressions
-    virtual void Visit(class VariableDeclarationNode& node) = 0;
-
-    // Initializations
-    virtual void Visit(class InitializationStatementNode& node) = 0;
-
-    // Memory
-    virtual void Visit(class PointerNode& node) = 0;
-    virtual void Visit(class MemoryNode& node) = 0;
-
-    // Types
-    virtual void Visit(class PrimitiveTypeNode& node) = 0;
-    virtual void Visit(class UserDefinedTypeNode& node) = 0;
-
-    /**
-     * @brief Default destructor
-     */
-    virtual ~Visitor() = default;
+   private:
+    source::SourceRange _range;
 };
 
-/**
- * @brief Main AST node
- */
-struct ASTNode {
-    /**
-     * @brief Default destructor
-     */
-    virtual ~ASTNode() = default;
-    /**
-     * @brief Default accept method
-     */
-    virtual void Accept(class Visitor& visitor) = 0;
+class Declaration : public AstNode {
+   public:
+    using AstNode::AstNode;
 };
 
-/* Location Nodes */
-
-struct StartNode : ASTNode {
-    int line;
-    int column;
-
-    /**
-     * @brief The StartNode constructor
-     *
-     * @param l - The line
-     * @param c - The column
-     */
-    StartNode(int l, int c) : line(l), column(c) {}
-
-    /**
-     * @brief The Accept visitor for traversal
-     *
-     * @param visitor - The visitor class object
-     */
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
+class Statement : public AstNode {
+   public:
+    using AstNode::AstNode;
 };
 
-struct EndNode : ASTNode {
-    int line;
-    int column;
-
-    /**
-     * @brief The EndNode constructor
-     *
-     * @param l - The line
-     * @param c - The column
-     */
-    EndNode(int l, int c) : line(l), column(c) {}
-
-    /**
-     * @brief The Accept visitor for traversal
-     *
-     * @param visitor - The visitor class object
-     */
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
+class Expression : public AstNode {
+   public:
+    using AstNode::AstNode;
 };
 
-struct LocationNode : ASTNode {
-    ASTNode* start;
-    ASTNode* end;
+enum class PrimitiveType {
+    I8,
+    I16,
+    I32,
+    I64,
+    ISize,
+    U8,
+    U16,
+    U32,
+    U64,
+    USize,
+    F32,
+    F64,
+    Bool,
+    Char,
+    Void,
+};
 
-    /**
-     * @brief The LocationNode constructor
-     *
-     * @param st - The start node
-     * @param end - The end node
-     */
-    LocationNode(ASTNode* st, ASTNode* end) : start(st), end(end) {}
+class TypeNode final : public AstNode {
+   public:
+    TypeNode(source::SourceRange range, PrimitiveType type)
+        : AstNode(range), _type(type) {}
 
-    /**
-     * @brief Destructs and frees memory
-     */
-    ~LocationNode() {
-        if (start) {
-            delete start;
-            start = nullptr;
-        }
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::Type;
+    }
+    [[nodiscard]] PrimitiveType Type() const { return _type; }
 
-        if (end) {
-            delete end;
-            end = nullptr;
-        }
+   private:
+    PrimitiveType _type;
+};
+
+class Parameter final : public AstNode {
+   public:
+    Parameter(source::SourceRange range, std::unique_ptr<TypeNode> type,
+              std::string name)
+        : AstNode(range), _type(std::move(type)), _name(std::move(name)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::Parameter;
+    }
+    [[nodiscard]] const TypeNode& Type() const { return *_type; }
+    [[nodiscard]] const std::string& Name() const { return _name; }
+
+   private:
+    std::unique_ptr<TypeNode> _type;
+    std::string _name;
+};
+
+enum class FunctionModifier : std::uint8_t {
+    Unsafe,
+    Export,
+    Extern,
+    Inline,
+    Comptime,
+};
+
+class BlockStatement final : public Statement {
+   public:
+    BlockStatement(source::SourceRange range,
+                   std::vector<std::unique_ptr<Statement>> statements)
+        : Statement(range), _statements(std::move(statements)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::BlockStatement;
+    }
+    [[nodiscard]] const std::vector<std::unique_ptr<Statement>>& Statements()
+        const {
+        return _statements;
     }
 
-    /**
-     * @brief The Accept visitor for traversal
-     *
-     * @param visitor - The visitor class object
-     */
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
+   private:
+    std::vector<std::unique_ptr<Statement>> _statements;
 };
 
-struct RangeNode : ASTNode {
-    std::pair<unsigned int, unsigned int> range;
+class FunctionDeclaration final : public Declaration {
+   public:
+    FunctionDeclaration(
+        source::SourceRange range, std::vector<FunctionModifier> modifiers,
+        std::unique_ptr<TypeNode> returnType, std::string name,
+        std::vector<std::unique_ptr<Parameter>> parameters,
+        std::unique_ptr<BlockStatement> body)
+        : Declaration(range),
+          _modifiers(std::move(modifiers)),
+          _returnType(std::move(returnType)),
+          _name(std::move(name)),
+          _parameters(std::move(parameters)),
+          _body(std::move(body)) {}
 
-    /**
-     * @brief The RangeNode constructor
-     *
-     * @param start - the start of file
-     * @param end - the end of file
-     */
-    RangeNode(int start, int end) { range = std::make_pair(start, end); }
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::FunctionDeclaration;
+    }
+    [[nodiscard]] const std::vector<FunctionModifier>& Modifiers() const {
+        return _modifiers;
+    }
+    [[nodiscard]] const TypeNode& ReturnType() const { return *_returnType; }
+    [[nodiscard]] const std::string& Name() const { return _name; }
+    [[nodiscard]] const std::vector<std::unique_ptr<Parameter>>& Parameters()
+        const {
+        return _parameters;
+    }
+    [[nodiscard]] const BlockStatement& Body() const { return *_body; }
 
-    /**
-     * @brief The Accept visitor for traversal
-     *
-     * @param visitor - The visitor class object
-     */
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
+   private:
+    std::vector<FunctionModifier> _modifiers;
+    std::unique_ptr<TypeNode> _returnType;
+    std::string _name;
+    std::vector<std::unique_ptr<Parameter>> _parameters;
+    std::unique_ptr<BlockStatement> _body;
 };
 
-/* Body Node */
+class CompilationUnit final : public AstNode {
+   public:
+    CompilationUnit(source::SourceRange range,
+                    std::vector<std::unique_ptr<Declaration>> declarations)
+        : AstNode(range), _declarations(std::move(declarations)) {}
 
-struct BodyNode : ASTNode {
-    ASTNode* program_init;
-    vector<ASTNode*> expressions;
-
-    /**
-     * @brief The BodyNode constructor
-     *
-     * @param p_init - The ProgramInitializationNode
-     * @param exps - A vector contaning all ExpressionNodes
-     */
-    BodyNode(ASTNode* p_init, const vector<ASTNode*>& exps)
-        : program_init(p_init), expressions(exps) {}
-
-    ~BodyNode() {
-        if (program_init) {
-            delete program_init;
-            program_init = nullptr;
-        }
-
-        for (auto& node : expressions) {
-            if (node) {
-                delete node;
-                node = nullptr;
-            }
-        }
-
-        expressions.clear();
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::CompilationUnit;
+    }
+    [[nodiscard]] const std::vector<std::unique_ptr<Declaration>>&
+    Declarations() const {
+        return _declarations;
     }
 
-    /**
-     * @brief The Accept visitor for traversal
-     *
-     * @param visitor - The visitor class object
-     */
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
+   private:
+    std::vector<std::unique_ptr<Declaration>> _declarations;
 };
 
-/* Program Node */
+class ReturnStatement final : public Statement {
+   public:
+    ReturnStatement(source::SourceRange range,
+                    std::unique_ptr<Expression> expression)
+        : Statement(range), _expression(std::move(expression)) {}
 
-struct ProgramInitializationNode : ASTNode {
-    string package_name;
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::ReturnStatement;
+    }
+    [[nodiscard]] const Expression* Value() const { return _expression.get(); }
 
-    ProgramInitializationNode(const string& name) : package_name(name) {}
-
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
+   private:
+    std::unique_ptr<Expression> _expression;
 };
 
-struct ProgramNode : ASTNode {
-    ASTNode* body;
-    ASTNode* location;
-    ASTNode* range;
+class AlsoClause final : public AstNode {
+   public:
+    AlsoClause(source::SourceRange range,
+               std::unique_ptr<Expression> condition,
+               std::unique_ptr<BlockStatement> body)
+        : AstNode(range),
+          _condition(std::move(condition)),
+          _body(std::move(body)) {}
 
-    /**
-     * @brief The ProgramNode constructor
-     *
-     * @param body - The body node
-     * @param loc - The location node
-     * @param range - The range node
-     */
-    ProgramNode(ASTNode* body, ASTNode* loc, ASTNode* range)
-        : body(body), location(loc), range(range) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::AlsoClause;
+    }
+    [[nodiscard]] const Expression& Condition() const { return *_condition; }
+    [[nodiscard]] const BlockStatement& Body() const { return *_body; }
 
-    /**
-     * @brief Destructs ProgramNode and free memory
-     */
-    ~ProgramNode() {
-        if (body) {
-            delete body;
-            body = nullptr;
-        }
+   private:
+    std::unique_ptr<Expression> _condition;
+    std::unique_ptr<BlockStatement> _body;
+};
 
-        if (location) {
-            delete location;
-            location = nullptr;
-        }
+class ConditionalBranch final : public AstNode {
+   public:
+    ConditionalBranch(source::SourceRange range,
+                      std::unique_ptr<Expression> condition,
+                      std::unique_ptr<BlockStatement> body,
+                      std::unique_ptr<AlsoClause> alsoClause)
+        : AstNode(range),
+          _condition(std::move(condition)),
+          _body(std::move(body)),
+          _alsoClause(std::move(alsoClause)) {}
 
-        if (range) {
-            delete range;
-            range = nullptr;
-        }
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::ConditionalBranch;
+    }
+    [[nodiscard]] const Expression& Condition() const { return *_condition; }
+    [[nodiscard]] const BlockStatement& Body() const { return *_body; }
+    [[nodiscard]] const AlsoClause* Also() const { return _alsoClause.get(); }
+
+   private:
+    std::unique_ptr<Expression> _condition;
+    std::unique_ptr<BlockStatement> _body;
+    std::unique_ptr<AlsoClause> _alsoClause;
+};
+
+class IfStatement final : public Statement {
+   public:
+    IfStatement(source::SourceRange range,
+                std::unique_ptr<ConditionalBranch> primaryBranch,
+                std::vector<std::unique_ptr<ConditionalBranch>> elseIfBranches,
+                std::unique_ptr<BlockStatement> elseBody)
+        : Statement(range),
+          _primaryBranch(std::move(primaryBranch)),
+          _elseIfBranches(std::move(elseIfBranches)),
+          _elseBody(std::move(elseBody)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::IfStatement;
+    }
+    [[nodiscard]] const ConditionalBranch& PrimaryBranch() const {
+        return *_primaryBranch;
+    }
+    [[nodiscard]] const std::vector<std::unique_ptr<ConditionalBranch>>&
+    ElseIfBranches() const {
+        return _elseIfBranches;
+    }
+    [[nodiscard]] const BlockStatement* ElseBody() const {
+        return _elseBody.get();
     }
 
-    /**
-     * @brief The Accept visitor for traversal
-     *
-     * @param visitor - The visitor class object
-     */
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
+   private:
+    std::unique_ptr<ConditionalBranch> _primaryBranch;
+    std::vector<std::unique_ptr<ConditionalBranch>> _elseIfBranches;
+    std::unique_ptr<BlockStatement> _elseBody;
 };
 
-/* Expression Nodes */
+class VariableDeclarationStatement final : public Statement {
+   public:
+    VariableDeclarationStatement(source::SourceRange range,
+                                 std::unique_ptr<TypeNode> type,
+                                 std::string name,
+                                 std::unique_ptr<Expression> initializer)
+        : Statement(range),
+          _type(std::move(type)),
+          _name(std::move(name)),
+          _initializer(std::move(initializer)) {}
 
-/**
- * @brief Expression Node Interface
- */
-struct ExpressionNode : ASTNode {
-    virtual ~ExpressionNode() = default;
-};
-
-struct VariableDeclarationNode : ExpressionNode {
-    ASTNode* location;
-    ASTNode* assignment;
-
-    /**
-     * @brief The VariableDeclarationNode constructor
-     *
-     * @param loc - The location node
-     * @param assg - The assignment node
-     */
-    VariableDeclarationNode(ASTNode* loc, ASTNode* assg)
-        : location(loc), assignment(assg) {}
-
-    /**
-     * @brief Destructs and free memory
-     */
-    ~VariableDeclarationNode() {
-        if (location) {
-            delete location;
-            location = nullptr;
-        }
-
-        if (assignment) {
-            delete assignment;
-            assignment = nullptr;
-        }
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::VariableDeclarationStatement;
+    }
+    [[nodiscard]] const TypeNode* ExplicitType() const { return _type.get(); }
+    [[nodiscard]] bool HasExplicitType() const { return _type != nullptr; }
+    [[nodiscard]] const std::string& Name() const { return _name; }
+    [[nodiscard]] const Expression* Initializer() const {
+        return _initializer.get();
     }
 
-    /**
-     * @brief The Accept visitor for traversal
-     *
-     * @param visitor - The visitor class object
-     */
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
+   private:
+    std::unique_ptr<TypeNode> _type;
+    std::string _name;
+    std::unique_ptr<Expression> _initializer;
 };
 
-/* General Nodes */
+class ExpressionStatement final : public Statement {
+   public:
+    ExpressionStatement(source::SourceRange range,
+                        std::unique_ptr<Expression> expression)
+        : Statement(range), _expression(std::move(expression)) {}
 
-struct InitializationNode : ASTNode {
-    virtual ~InitializationNode() = default;
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::ExpressionStatement;
+    }
+    [[nodiscard]] const Expression& Value() const { return *_expression; }
+
+   private:
+    std::unique_ptr<Expression> _expression;
 };
 
-struct InitializationStatementNode : InitializationNode {
-    ASTNode* location;
-    ASTNode* pointer_node;
+class LiteralExpression final : public Expression {
+   public:
+    LiteralExpression(source::SourceRange range, TokenType literalType,
+                      std::string value)
+        : Expression(range),
+          _literalType(literalType),
+          _value(std::move(value)) {}
 
-    /**
-     * @brief The InitializationStatementNode constructor
-     *
-     * @param loc - The location node
-     * @param ptr - The pointer node
-     */
-    InitializationStatementNode(ASTNode* loc, ASTNode* ptr)
-        : location(loc), pointer_node(ptr) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::LiteralExpression;
+    }
+    [[nodiscard]] TokenType LiteralType() const { return _literalType; }
+    [[nodiscard]] const std::string& Value() const { return _value; }
 
-    /**
-     * @brief Destructs and free memory
-     */
-    ~InitializationStatementNode() {
-        if (location) {
-            delete location;
-            location = nullptr;
-        }
+   private:
+    TokenType _literalType;
+    std::string _value;
+};
 
-        if (pointer_node) {
-            delete pointer_node;
-            pointer_node = nullptr;
-        }
+class NameExpression final : public Expression {
+   public:
+    NameExpression(source::SourceRange range, std::string name)
+        : Expression(range), _name(std::move(name)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::NameExpression;
+    }
+    [[nodiscard]] const std::string& Name() const { return _name; }
+
+   private:
+    std::string _name;
+};
+
+class ParenthesizedExpression final : public Expression {
+   public:
+    ParenthesizedExpression(source::SourceRange range,
+                            std::unique_ptr<Expression> expression)
+        : Expression(range), _expression(std::move(expression)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::ParenthesizedExpression;
+    }
+    [[nodiscard]] const Expression& Inner() const { return *_expression; }
+
+   private:
+    std::unique_ptr<Expression> _expression;
+};
+
+class UnaryExpression final : public Expression {
+   public:
+    UnaryExpression(source::SourceRange range, TokenType operatorType,
+                    std::unique_ptr<Expression> operand)
+        : Expression(range),
+          _operatorType(operatorType),
+          _operand(std::move(operand)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::UnaryExpression;
+    }
+    [[nodiscard]] TokenType OperatorType() const { return _operatorType; }
+    [[nodiscard]] const Expression& Operand() const { return *_operand; }
+
+   private:
+    TokenType _operatorType;
+    std::unique_ptr<Expression> _operand;
+};
+
+class BinaryExpression final : public Expression {
+   public:
+    BinaryExpression(source::SourceRange range,
+                     std::unique_ptr<Expression> left, TokenType operatorType,
+                     std::unique_ptr<Expression> right)
+        : Expression(range),
+          _left(std::move(left)),
+          _operatorType(operatorType),
+          _right(std::move(right)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::BinaryExpression;
+    }
+    [[nodiscard]] const Expression& Left() const { return *_left; }
+    [[nodiscard]] TokenType OperatorType() const { return _operatorType; }
+    [[nodiscard]] const Expression& Right() const { return *_right; }
+
+   private:
+    std::unique_ptr<Expression> _left;
+    TokenType _operatorType;
+    std::unique_ptr<Expression> _right;
+};
+
+class AssignmentExpression final : public Expression {
+   public:
+    AssignmentExpression(source::SourceRange range,
+                         std::unique_ptr<Expression> target,
+                         std::unique_ptr<Expression> value)
+        : Expression(range),
+          _target(std::move(target)),
+          _value(std::move(value)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::AssignmentExpression;
+    }
+    [[nodiscard]] const Expression& Target() const { return *_target; }
+    [[nodiscard]] const Expression& Value() const { return *_value; }
+
+   private:
+    std::unique_ptr<Expression> _target;
+    std::unique_ptr<Expression> _value;
+};
+
+class CallExpression final : public Expression {
+   public:
+    CallExpression(source::SourceRange range,
+                   std::unique_ptr<Expression> callee,
+                   std::vector<std::unique_ptr<Expression>> arguments)
+        : Expression(range),
+          _callee(std::move(callee)),
+          _arguments(std::move(arguments)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::CallExpression;
+    }
+    [[nodiscard]] const Expression& Callee() const { return *_callee; }
+    [[nodiscard]] const std::vector<std::unique_ptr<Expression>>& Arguments()
+        const {
+        return _arguments;
     }
 
-    /**
-     * @brief The Accept visitor for traversal
-     *
-     * @param visitor - The visitor class object
-     */
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
+   private:
+    std::unique_ptr<Expression> _callee;
+    std::vector<std::unique_ptr<Expression>> _arguments;
 };
 
-/* Type nodes */
+}  // namespace flecha::core
 
-struct TypeNode : ASTNode {
-    virtual ~TypeNode() = default;
-    virtual string GetTypeName() const = 0;
-    virtual bool IsPrimitive() const = 0;
-};
-
-struct PrimitiveTypeNode : TypeNode {
-    string name;
-
-    /**
-     * @brief The PrimitiveTypeNode constructor
-     *
-     * @param name - The type name
-     */
-    PrimitiveTypeNode(const string& name) : name(name) {}
-
-    /**
-     * @brief Gets the type name of primitive type
-     *
-     * @return the type name
-     */
-    string GetTypeName() const override { return name; }
-
-    /**
-     * @brief Check if type is primitive
-     *
-     * @return True for primitive types
-     */
-    bool IsPrimitive() const override { return true; }
-
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
-};
-
-struct UserDefinedTypeNode : TypeNode {
-    string name;
-
-    /**
-     * @brief The UserDefinedTypeNode constructor
-     *
-     * @param name - The type name
-     */
-    UserDefinedTypeNode(const string& name) : name(name) {}
-
-    /**
-     * @brief Gets the type name of user defined type
-     *
-     * @return The type name
-     */
-    string GetTypeName() const override { return name; }
-
-    /**
-     * @brief Check if type is primitive
-     *
-     * @return False for user defined types
-     */
-    bool IsPrimitive() const override { return false; }
-
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
-};
-
-/* Memory nodes */
-
-struct PointerNode : ASTNode {
-    ASTNode* location;
-    ASTNode* type;
-    ASTNode* memory;
-    ASTNode* variable;
-
-    /**
-     * @brief The PointerNode constructor
-     *
-     * @param loc - The location node
-     * @param type - The type node
-     * @param mem - The memory node
-     */
-    PointerNode(ASTNode* loc, ASTNode* type, ASTNode* mem, ASTNode* var)
-        : location(loc), type(type), memory(mem), variable(var) {}
-
-    /**
-     * @brief Destructs and free memory
-     */
-    ~PointerNode() {
-        if (location) {
-            delete location;
-            location = nullptr;
-        }
-
-        // We don't delete the type node because
-        // its shared with the variable->value node
-
-        if (memory) {
-            delete memory;
-            memory = nullptr;
-        }
-
-        if (variable) {
-            delete variable;
-            variable = nullptr;
-        }
-    }
-
-    /**
-     * @brief The Accept visitor for traversal
-     *
-     * @param visitor - The visitor class object
-     */
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
-};
-
-struct MemoryNode : ASTNode {
-    ASTNode* location;
-    void* address;
-
-    /**
-     * @brief Allocates memory for a given size and stores the address
-     *
-     * @param loc - The AST location node
-     * @param size - The size of memory to allocate
-     */
-    MemoryNode(ASTNode* loc, size_t size) : location(loc), address(nullptr) {
-        address = malloc(size);  // Allocate memory
-        if (!address) {
-            throw std::bad_alloc();  // Handle allocation failure
-        }
-    }
-
-    /**
-     * @brief Frees the allocated memory
-     */
-    ~MemoryNode() {
-        free(address);
-
-        if (location) {
-            delete location;
-            location = nullptr;
-        }
-    }
-
-    /**
-     * @brief The Accept visitor for traversal
-     *
-     * @param visitor - The visitor class object
-     */
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
-};
-
-struct VariableNode : ASTNode {
-    string name;
-    ASTNode* location;
-    ASTNode* value;
-
-    /**
-     * @brief The VariableNode constructor
-     *
-     * @param name - The variable name
-     * @param loc - The location node
-     * @param val - The value node
-     */
-    VariableNode(const string& name, ASTNode* loc, ASTNode* val)
-        : name(name), location(loc), value(val) {}
-
-    /**
-     * @brief Destructs and free memory
-     */
-    ~VariableNode() {
-        if (location) {
-            delete location;
-            location = nullptr;
-        }
-
-        if (value) {
-            delete value;
-            value = nullptr;
-        }
-    }
-
-    /**
-     * @brief The Accept visitor for traversal
-     *
-     * @param visitor - The visitor class object
-     */
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
-};
-
-struct ValueNode : ASTNode {
-    string value;
-    ASTNode* location;
-    ASTNode* type;
-
-    /**
-     * @brief The ValueNode constructor
-     *
-     * @param val - The value as string
-     * @param loc - The location node
-     * @param type - The type node
-     */
-    ValueNode(const string& val, ASTNode* loc, ASTNode* type)
-        : value(val), location(loc), type(type) {}
-
-    /**
-     * @brief Destructs and free memory
-     */
-    ~ValueNode() {
-        if (location) {
-            delete location;
-            location = nullptr;
-        }
-
-        if (type) {
-            delete type;
-            type = nullptr;
-        }
-    }
-
-    void Accept(Visitor& visitor) override { visitor.Visit(*this); }
-};
-}  // namespace core
-}  // namespace flecha
-#endif  // FLECHA_AST_HPP
+#endif  // FLECHA_CORE_AST_HPP

@@ -2,17 +2,21 @@
 #include <gtest/gtest.h>
 #include <vector>
 
+using namespace flecha::diagnostics;
 using namespace flecha::core;
 
-std::vector<Token> tokenize(const std::string& source) {
-    Tokenizer tokenizer(source);
+std::vector<Token> Tokenize(const std::string& source,
+                            DiagnosticBag* diagnostics = nullptr) {
+    DiagnosticBag localDiagnostics;
+    Tokenizer tokenizer(source,
+                        diagnostics == nullptr ? localDiagnostics : *diagnostics);
     std::vector<Token> tokens = tokenizer.Tokenize(); 
     return tokens;
 }
 
 
 TEST(TokenizerTests, RecognizesKeywords) {
-    auto tokens = tokenize("i32 u8 f64 char bool void unsafe return none");
+    std::vector<Token> tokens = Tokenize("i32 u8 f64 char bool void unsafe return none");
     ASSERT_EQ(tokens.size(), 10);
 
     EXPECT_EQ(tokens[0].type, TokenType::I32);
@@ -30,7 +34,7 @@ TEST(TokenizerTests, RecognizesKeywords) {
 }
 
 TEST(TokenizerTests, RecognizesFunctionModifiersAndReservedWords) {
-    auto tokens = tokenize(
+    std::vector<Token> tokens = Tokenize(
         "export extern inline comptime yield if else error const volatile as "
         "null true false");
 
@@ -48,7 +52,7 @@ TEST(TokenizerTests, RecognizesFunctionModifiersAndReservedWords) {
 }
 
 TEST(TokenizerTests, RecognizesMultiCharacterOperators) {
-    auto tokens = tokenize("= := == != === !== <= >= && ||");
+    std::vector<Token> tokens = Tokenize("= := == != === !== <= >= && ||");
     ASSERT_EQ(tokens.size(), 11);
 
     EXPECT_EQ(tokens[0].type, TokenType::Assign);
@@ -64,8 +68,26 @@ TEST(TokenizerTests, RecognizesMultiCharacterOperators) {
     EXPECT_EQ(tokens[10].type, TokenType::EOF_TOKEN);
 }
 
+TEST(TokenizerTests, RecognizesTextualLogicalOperators) {
+    std::vector<Token> tokens = Tokenize("true and false or true");
+
+    ASSERT_EQ(tokens.size(), 6);
+    EXPECT_EQ(tokens[1].type, TokenType::And);
+    EXPECT_EQ(tokens[1].value, "and");
+    EXPECT_EQ(tokens[3].type, TokenType::Or);
+    EXPECT_EQ(tokens[3].value, "or");
+}
+
+TEST(TokenizerTests, RecognizesAlsoKeyword) {
+    std::vector<Token> tokens = Tokenize("also condition");
+
+    ASSERT_EQ(tokens.size(), 3);
+    EXPECT_EQ(tokens[0].type, TokenType::Also);
+    EXPECT_EQ(tokens[1].type, TokenType::Identifier);
+}
+
 TEST(TokenizerTests, RecognizesIdentifiers) {
-    auto tokens = tokenize("variable1 _v_ar2");
+    std::vector<Token> tokens = Tokenize("variable1 _v_ar2");
     ASSERT_EQ(tokens.size(), 3); // 2 identifiers + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::Identifier);
@@ -78,7 +100,7 @@ TEST(TokenizerTests, RecognizesIdentifiers) {
 }
 
 TEST(TokenizerTests, RecognizesNumbers) {
-    auto tokens = tokenize("123 0 3.14");
+    std::vector<Token> tokens = Tokenize("123 0 3.14");
     ASSERT_EQ(tokens.size(), 4); // 3 numbers + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::NumberLiteral);
@@ -94,7 +116,7 @@ TEST(TokenizerTests, RecognizesNumbers) {
 }
 
 TEST(TokenizerTests, RecognizesSpecialCharacters) {
-    auto tokens = tokenize("! ( ) [ ] { } , . : ; *");
+    std::vector<Token> tokens = Tokenize("! ( ) [ ] { } , . : ; *");
     ASSERT_EQ(tokens.size(), 13);
 
     EXPECT_EQ(tokens[0].type, TokenType::Bang);
@@ -115,7 +137,7 @@ TEST(TokenizerTests, RecognizesSpecialCharacters) {
 }
 
 TEST(TokenizerTests, RecognizesComplexStatements) {
-    auto tokens = tokenize("unsafe i32 main() { return none; }");
+    std::vector<Token> tokens = Tokenize("unsafe i32 main() { return none; }");
     ASSERT_EQ(tokens.size(), 11);
 
     EXPECT_EQ(tokens[0].type, TokenType::Unsafe);
@@ -132,7 +154,7 @@ TEST(TokenizerTests, RecognizesComplexStatements) {
 }
 
 TEST(TokenizerTests, LegacyAllocationWordsAreIdentifiers) {
-    auto tokens = tokenize("allot dellot");
+    std::vector<Token> tokens = Tokenize("allot dellot");
 
     ASSERT_EQ(tokens.size(), 3);
     EXPECT_EQ(tokens[0].type, TokenType::Identifier);
@@ -140,7 +162,7 @@ TEST(TokenizerTests, LegacyAllocationWordsAreIdentifiers) {
 }
 
 TEST(TokenizerTests, SkipsLineAndBlockComments) {
-    auto tokens = tokenize(
+    std::vector<Token> tokens = Tokenize(
         "i32 // result type\n"
         "main /* no parameters yet */ ()");
 
@@ -153,11 +175,17 @@ TEST(TokenizerTests, SkipsLineAndBlockComments) {
 }
 
 TEST(TokenizerTests, RejectsUnterminatedBlockComment) {
-    EXPECT_THROW(tokenize("i32 /* unfinished"), std::runtime_error);
+    DiagnosticBag diagnostics;
+    std::vector<Token> tokens = Tokenize("i32 /* unfinished", &diagnostics);
+
+    ASSERT_EQ(diagnostics.Diagnostics().size(), 1);
+    EXPECT_EQ(diagnostics.Diagnostics()[0].code,
+              DiagnosticCode::UnterminatedBlockComment);
+    EXPECT_EQ(tokens.back().type, TokenType::EOF_TOKEN);
 }
 
 TEST(TokenizerTests, RecognizesStringLiterals) {
-    auto tokens = tokenize("\"Hello, World!\" \"This is a test.\" \"Escape \\\"quote\\\"\"");
+    std::vector<Token> tokens = Tokenize("\"Hello, World!\" \"This is a test.\" \"Escape \\\"quote\\\"\"");
     ASSERT_EQ(tokens.size(), 4); // 3 string literals + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::StringLiteral);
@@ -173,13 +201,17 @@ TEST(TokenizerTests, RecognizesStringLiterals) {
 }
 
 TEST(TokenizerTests, UnterminatedStringLiteral) {
-    EXPECT_THROW({
-        tokenize("\"This string is not terminated");
-    }, std::runtime_error);
+    DiagnosticBag diagnostics;
+    std::vector<Token> tokens = Tokenize("\"This string is not terminated", &diagnostics);
+
+    ASSERT_TRUE(diagnostics.HasErrors());
+    EXPECT_EQ(diagnostics.Diagnostics()[0].code,
+              DiagnosticCode::UnterminatedStringLiteral);
+    EXPECT_EQ(tokens[0].type, TokenType::Invalid);
 }
 
 TEST(TokenizerTests, RecognizesEmptyStringLiteral) {
-    auto tokens = tokenize("\"\"");
+    std::vector<Token> tokens = Tokenize("\"\"");
     ASSERT_EQ(tokens.size(), 2); // 1 empty string + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::StringLiteral);
@@ -189,7 +221,7 @@ TEST(TokenizerTests, RecognizesEmptyStringLiteral) {
 }
 
 TEST(TokenizerTests, StringWithNewlineEscape) {
-    auto tokens = tokenize("\"Line1\\nLine2\"");
+    std::vector<Token> tokens = Tokenize("\"Line1\\nLine2\"");
     ASSERT_EQ(tokens.size(), 2); // 1 string + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::StringLiteral);
@@ -199,7 +231,7 @@ TEST(TokenizerTests, StringWithNewlineEscape) {
 }
 
 TEST(TokenizerTests, RecognizesCharacterLiterals) {
-    auto tokens = tokenize("'a' '\\n' '\\''");
+    std::vector<Token> tokens = Tokenize("'a' '\\n' '\\''");
     ASSERT_EQ(tokens.size(), 4); // 3 char literals + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::CharLiteral);
@@ -215,25 +247,31 @@ TEST(TokenizerTests, RecognizesCharacterLiterals) {
 }
 
 TEST(TokenizerTests, UnterminatedCharacterLiteral) {
-    EXPECT_THROW({
-        tokenize("'a");
-    }, std::runtime_error);
+    DiagnosticBag diagnostics;
+    std::vector<Token> tokens = Tokenize("'a", &diagnostics);
+
+    EXPECT_TRUE(diagnostics.HasErrors());
+    EXPECT_EQ(tokens[0].type, TokenType::Invalid);
 }
 
 TEST(TokenizerTests, InvalidMultiCharacterLiteral) {
-    EXPECT_THROW({
-        tokenize("'ab'");
-    }, std::runtime_error);
+    DiagnosticBag diagnostics;
+    std::vector<Token> tokens = Tokenize("'ab'", &diagnostics);
+
+    EXPECT_TRUE(diagnostics.HasErrors());
+    EXPECT_EQ(tokens[0].type, TokenType::Invalid);
 }
 
 TEST(TokenizerTests, EmptyCharacterLiteral) {
-    EXPECT_THROW({
-        tokenize("''");
-    }, std::runtime_error);
+    DiagnosticBag diagnostics;
+    std::vector<Token> tokens = Tokenize("''", &diagnostics);
+
+    EXPECT_TRUE(diagnostics.HasErrors());
+    EXPECT_EQ(tokens[0].type, TokenType::Invalid);
 }
 
 TEST(TokenizerTests, StringWithEscapedCharacters) {
-    auto tokens = tokenize("\"This is a \\\"test\\\" with \\n and \\t.\"");
+    std::vector<Token> tokens = Tokenize("\"This is a \\\"test\\\" with \\n and \\t.\"");
     ASSERT_EQ(tokens.size(), 2); // 1 string + EOF
 
     EXPECT_EQ(tokens[0].type, TokenType::StringLiteral);
@@ -243,7 +281,45 @@ TEST(TokenizerTests, StringWithEscapedCharacters) {
 }
 
 TEST(TokenizerTests, CharacterWithInvalidEscapeSequence) {
-    EXPECT_THROW({
-        tokenize("'\\x'");
-    }, std::runtime_error);
+    DiagnosticBag diagnostics;
+    std::vector<Token> tokens = Tokenize("'\\x'", &diagnostics);
+
+    ASSERT_TRUE(diagnostics.HasErrors());
+    EXPECT_EQ(diagnostics.Diagnostics()[0].code,
+              DiagnosticCode::InvalidCharacterEscape);
+    EXPECT_EQ(tokens[0].type, TokenType::Invalid);
+}
+
+TEST(TokenizerTests, RecordsExactHalfOpenSourceRanges) {
+    std::vector<Token> tokens = Tokenize("i32 value\n  = 42;");
+
+    EXPECT_EQ(tokens[0].range.start.offset, 0);
+    EXPECT_EQ(tokens[0].range.start.line, 1);
+    EXPECT_EQ(tokens[0].range.start.column, 1);
+    EXPECT_EQ(tokens[0].range.end.offset, 3);
+    EXPECT_EQ(tokens[0].range.end.line, 1);
+    EXPECT_EQ(tokens[0].range.end.column, 4);
+
+    EXPECT_EQ(tokens[2].range.start.offset, 12);
+    EXPECT_EQ(tokens[2].range.start.line, 2);
+    EXPECT_EQ(tokens[2].range.start.column, 3);
+    EXPECT_EQ(tokens[2].range.end.offset, 13);
+    EXPECT_EQ(tokens[2].range.end.column, 4);
+
+    EXPECT_TRUE(tokens.back().range.Empty());
+    EXPECT_EQ(tokens.back().range.start.offset, 17);
+}
+
+TEST(TokenizerTests, DiagnosticRangesIdentifyInvalidSource) {
+    DiagnosticBag diagnostics;
+    std::vector<Token> tokens = Tokenize("i32 @ value", &diagnostics);
+
+    ASSERT_EQ(diagnostics.Diagnostics().size(), 1);
+    const Diagnostic& diagnostic = diagnostics.Diagnostics()[0];
+    EXPECT_EQ(diagnostic.code, DiagnosticCode::UnexpectedCharacter);
+    EXPECT_EQ(diagnostic.range.start.offset, 4);
+    EXPECT_EQ(diagnostic.range.start.column, 5);
+    EXPECT_EQ(diagnostic.range.end.offset, 5);
+    EXPECT_EQ(tokens[1].type, TokenType::Invalid);
+    EXPECT_EQ(tokens[2].type, TokenType::Identifier);
 }

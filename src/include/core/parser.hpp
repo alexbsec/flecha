@@ -1,41 +1,64 @@
-#ifndef FLECHA_PARSER_HPP
-#define FLECHA_PARSER_HPP
+#ifndef FLECHA_CORE_PARSER_HPP
+#define FLECHA_CORE_PARSER_HPP
 
+#include <cstddef>
 #include <memory>
-#include <unordered_set>
+#include <string_view>
 #include <vector>
 
 #include "ast.hpp"
+#include "diagnostics/diagnostic_bag.hpp"
 #include "token.hpp"
 
-template <typename... Args>
-using vector = std::vector<Args...>;
+namespace flecha::core {
 
-template <typename... Args>
-using uset = std::unordered_set<Args...>;
-
-namespace flecha {
-namespace core {
 class Parser {
-   private:
-    vector<Token> _tokens;
-    size_t _index = 0;
-    Token _current_token;
-
-    Token _Advance();
-    bool _Match(TokenType type);
-    bool _Check(TokenType type);
-    void _Consume(TokenType type, const string& err = "");
-
-    // Parsing methods
-    std::unique_ptr<ASTNode> _ParseExpression();
-    std::unique_ptr<ASTNode> _ParseExpressionStatement();
-
    public:
-    explicit Parser(const vector<Token>& tokens);
-    std::unique_ptr<ASTNode> Parse();
-};
-}  // namespace core
-}  // namespace flecha
+    Parser(std::vector<Token> tokens,
+           diagnostics::DiagnosticBag& diagnostics);
 
-#endif  // FLECHA_PARSER_HPP
+    [[nodiscard]] std::unique_ptr<CompilationUnit> Parse();
+
+   private:
+    [[nodiscard]] const Token& Current() const;
+    [[nodiscard]] const Token& Peek(std::size_t offset) const;
+    [[nodiscard]] bool IsAtEnd() const;
+    [[nodiscard]] bool Check(TokenType type) const;
+    [[nodiscard]] bool IsInferredVariableDeclaration() const;
+    const Token& Advance();
+    bool Match(TokenType type);
+    const Token* Consume(TokenType type, std::string_view expectation);
+    [[nodiscard]] bool IsTypeToken(TokenType type) const;
+    std::unique_ptr<Declaration> ParseDeclaration();
+    std::unique_ptr<FunctionDeclaration> ParseFunctionDeclaration();
+    std::unique_ptr<TypeNode> ParseType();
+    std::unique_ptr<Parameter> ParseParameter();
+    std::unique_ptr<BlockStatement> ParseBlockStatement();
+    std::unique_ptr<Statement> ParseStatement();
+    std::unique_ptr<VariableDeclarationStatement>
+    ParseVariableDeclarationStatement();
+    std::unique_ptr<ReturnStatement> ParseReturnStatement();
+    std::unique_ptr<IfStatement> ParseIfStatement();
+    std::unique_ptr<ConditionalBranch> ParseConditionalBranch(
+        source::SourceLocation start);
+    std::unique_ptr<AlsoClause> ParseAlsoClause();
+    std::unique_ptr<Expression> ParseExpression();
+    std::unique_ptr<Expression> ParseAssignmentExpression();
+    std::unique_ptr<Expression> ParseBinaryExpression(int minimumPrecedence);
+    std::unique_ptr<Expression> ParseUnaryExpression();
+    std::unique_ptr<Expression> ParsePostfixExpression();
+    std::unique_ptr<Expression> ParsePrimaryExpression();
+    [[nodiscard]] int BinaryPrecedence(TokenType type) const;
+    [[nodiscard]] int UnaryPrecedence(TokenType type) const;
+    void ReportUnexpectedToken(std::string_view context);
+    void SynchronizeTopLevel();
+    void SynchronizeStatement();
+
+    std::vector<Token> _tokens;
+    std::size_t _position = 0;
+    diagnostics::DiagnosticBag& _diagnostics;
+};
+
+}  // namespace flecha::core
+
+#endif  // FLECHA_CORE_PARSER_HPP

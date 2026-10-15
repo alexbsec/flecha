@@ -2,6 +2,9 @@
 #define FLECHA_TOKEN_HPP
 
 #include <string>
+#include <utility>
+
+#include "source/source_range.hpp"
 #include "token_type.hpp"
 
 using string = std::string;
@@ -12,13 +15,11 @@ namespace core {
     struct Token {
         TokenType type;
         string value;
-        int line;
-        int column;
+        source::SourceRange range;
 
-        Token()
-            : type(TokenType::NoToken), value(""), line(-1), column(-1) {}
-        Token(TokenType type, const string& value, int line, int col)
-            : type(type), value(value), line(line), column(col) {}
+        Token() : type(TokenType::NoToken) {}
+        Token(TokenType type, string value, source::SourceRange range)
+            : type(type), value(std::move(value)), range(range) {}
     };
 
 }   // namespace core
