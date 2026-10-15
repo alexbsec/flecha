@@ -73,6 +73,7 @@ llvm::Type* LlvmCodeGenerator::MapType(semantic::SemanticType type) {
             return llvm::Type::getDoubleTy(_context);
         case semantic::SemanticTypeKind::Bool:
             return llvm::Type::getInt1Ty(_context);
+        case semantic::SemanticTypeKind::Reference:
         case semantic::SemanticTypeKind::Pointer:
         case semantic::SemanticTypeKind::Null:
             return llvm::PointerType::getUnqual(_context);
@@ -264,6 +265,7 @@ llvm::Value* LlvmCodeGenerator::CoerceValue(
         destinationType.Kind() == semantic::SemanticTypeKind::Pointer &&
         semantic::IsAssignable(destinationType, sourceType))
         return value;
+    if (semantic::CanReborrow(destinationType, sourceType)) return value;
     if (sourceType.WithoutConst() == destinationType.WithoutConst())
         return value;
     if (destinationType.Kind() == semantic::SemanticTypeKind::String) {

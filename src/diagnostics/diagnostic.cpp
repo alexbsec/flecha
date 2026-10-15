@@ -74,6 +74,18 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0025";
         case DiagnosticCode::InvalidPointerAccess:
             return "FLECHA-S0026";
+        case DiagnosticCode::ReferenceRequiresInitializer:
+            return "FLECHA-S0027";
+        case DiagnosticCode::MovedReference:
+            return "FLECHA-S0028";
+        case DiagnosticCode::BorrowConflict:
+            return "FLECHA-S0029";
+        case DiagnosticCode::ReferenceEscape:
+            return "FLECHA-S0030";
+        case DiagnosticCode::InvalidReference:
+            return "FLECHA-S0031";
+        case DiagnosticCode::IntegerLiteralOutOfRange:
+            return "FLECHA-S0032";
         case DiagnosticCode::NativeTargetUnavailable:
             return "FLECHA-C0001";
         case DiagnosticCode::ObjectEmissionFailed:

@@ -19,6 +19,12 @@ SemanticType SemanticType::WithoutConst() const {
     return result;
 }
 
+SemanticType SemanticType::WithConst() const {
+    SemanticType result = *this;
+    result._isConst = true;
+    return result;
+}
+
 bool SemanticType::operator==(const SemanticType& other) const {
     return _kind == other._kind && _isConst == other._isConst &&
            ((_target == nullptr && other._target == nullptr) ||
@@ -172,6 +178,14 @@ bool IsAssignable(SemanticType destination, SemanticType source) {
            destination.Kind() != SemanticTypeKind::Void &&
            destination.Kind() != SemanticTypeKind::Function &&
            destination.Kind() != SemanticTypeKind::Reference;
+}
+
+bool CanReborrow(SemanticType destination, SemanticType source) {
+    return destination.Kind() == SemanticTypeKind::Reference &&
+           source.Kind() == SemanticTypeKind::Reference &&
+           destination.Target()->WithoutConst() ==
+               source.Target()->WithoutConst() &&
+           (destination.Target()->IsConst() || !source.Target()->IsConst());
 }
 
 bool CanExplicitlyCast(SemanticType source, SemanticType destination) {

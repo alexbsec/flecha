@@ -482,3 +482,19 @@ TEST(LlvmCodeGeneratorTests,
     EXPECT_NE(ir.find("icmp ne ptr"), std::string::npos);
     EXPECT_NE(ir.find("load i32, ptr"), std::string::npos);
 }
+
+TEST(CodeGeneratorTests, EmitsCheckedReferencesAsAddressesAndReborrowingCalls) {
+    GeneratedSource result = Generate(
+        "void bump(&u8 r) { *r = *r + 1; }"
+        "u8 read(&const u8 r) { return *r; }"
+        "u8 main() { u8 x = 3; r := &x; *r = *r * 2; bump(r); return read(r); "
+        "}");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("define void @bump(ptr %r)"), std::string::npos);
+    EXPECT_NE(ir.find("define i8 @read(ptr %r)"), std::string::npos);
+    EXPECT_NE(ir.find("call void @bump(ptr"), std::string::npos);
+    EXPECT_NE(ir.find("mul i8"), std::string::npos);
+}

@@ -1027,35 +1027,25 @@ TEST(SemanticConstTests, CannotBypassInitializationWithJump) {
               DiagnosticCode::UninitializedVariable);
 }
 
-TEST(SemanticCompoundTypeTests,
-     ReportsUnsupportedReferenceTypesAtTheirFullRange) {
-    const std::vector<std::string> types{"&const u8", "constref u8",
-                                         "&const *const u8"};
-    for (const std::string& type : types) {
-        for (const std::string& source :
-             {"void f() { " + type + " value; }",
-              "void f(" + type + " value) {}", type + " f() {}",
-              "void f() { 1 as " + type + "; }",
-              "void f() { 1.cast<" + type + ">; }"}) {
-            SCOPED_TRACE(source);
-            Analysis analysis = Analyze(source);
-            ASSERT_EQ(analysis.diagnostics.Diagnostics().size(), 1);
-            const Diagnostic& diagnostic =
-                analysis.diagnostics.Diagnostics()[0];
-            EXPECT_EQ(DiagnosticCodeName(diagnostic.code), "FLECHA-S0024");
-            EXPECT_EQ(diagnostic.range.start.offset, source.find(type));
-            EXPECT_EQ(diagnostic.range.Length(), type.size());
-        }
+TEST(SemanticCompoundTypeTests, RejectsUnsupportedNestedReferenceStorage) {
+    for (const std::string& type :
+         {"*&i32", "& &i32", "&string", "&stringv", "&void"}) {
+        const std::string source = "void f(" + type + " value) {}";
+        SCOPED_TRACE(source);
+        Analysis analysis = Analyze(source);
+        const Diagnostic* diagnostic =
+            FindDiagnostic(analysis, DiagnosticCode::UnsupportedCompoundType);
+        ASSERT_NE(diagnostic, nullptr);
+        EXPECT_EQ(diagnostic->range.start.offset, source.find(type));
+        EXPECT_EQ(diagnostic->range.Length(), type.size());
     }
 }
 
-TEST(SemanticCompoundTypeTests, UnsupportedOperationsAreDiagnosed) {
-    for (const std::string& operation : {"&value", "*value"}) {
-        Analysis analysis =
-            Analyze("i32 f() { i32 value = 42; return " + operation + "; }");
-        EXPECT_NE(FindDiagnostic(analysis, DiagnosticCode::InvalidOperand),
-                  nullptr);
-    }
+TEST(SemanticCompoundTypeTests, RejectsDereferencingScalar) {
+    EXPECT_NE(
+        FindDiagnostic(Analyze("i32 f() { i32 value = 42; return *value; }"),
+                       DiagnosticCode::InvalidOperand),
+        nullptr);
 }
 
 TEST(SemanticUnsafeTests, EnforcesLexicalPermissionAndExactRanges) {
@@ -1177,9 +1167,7 @@ TEST(SemanticUnsafeTests,
     EXPECT_NE(FindDiagnostic(Analyze("void f(*&i32 p) {}"),
                              DiagnosticCode::UnsupportedCompoundType),
               nullptr);
-    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { i32 x = 1; &x; }"),
-                             DiagnosticCode::InvalidOperand),
-              nullptr);
+    EXPECT_FALSE(Analyze("unsafe void f() { i32 x = 1; &x; }").diagnostics.HasErrors());
 }
 
 TEST(SemanticUnsafeTests, RejectsConstTargetWritesAtTheDereferenceRange) {
@@ -1221,4 +1209,339 @@ TEST(SemanticUnsafeTests,
         EXPECT_EQ(analysis.diagnostics.Diagnostics()[0].code,
                   DiagnosticCode::InvalidOperand);
     }
+}
+
+TEST(SemanticReferenceTests, InfersReferenceAndContextualByteLiterals) {
+    Analysis analysis = Analyze(
+        "u8 f() { u8 value = 3; ref := &value; *ref = *ref * 2; return value; "
+        "}");
+    ASSERT_FALSE(analysis.diagnostics.HasErrors());
+    const auto& function = FunctionAt(analysis, 0);
+    EXPECT_EQ(
+        analysis.model.DeclaredSymbol(VariableAt(function, 1))->Type().Name(),
+        "&u8");
+    EXPECT_EQ(
+        analysis.model.TypeOf(*VariableAt(function, 0).Initializer()).Name(),
+        "u8");
+}
+
+TEST(SemanticReferenceTests, CopiesSharedHandlesAndInfersConstStorage) {
+    Analysis analysis = Analyze(
+        "i32 f() { const i32 value = 3; r := &value; copy := r; return *r + "
+        "*copy; }"
+        "i32 g() { i32 value = 3; &const i32 r = &value; copy := r; return *r "
+        "+ *copy; }");
+    EXPECT_FALSE(analysis.diagnostics.HasErrors());
+    EXPECT_EQ(
+        analysis.model.DeclaredSymbol(VariableAt(FunctionAt(analysis, 0), 1))
+            ->Type()
+            .Name(),
+        "&const i32");
+}
+
+TEST(SemanticReferenceTests,
+     TransfersMutableHandlesAndReinitializesMovedBindings) {
+    for (const std::string& body :
+         {"r := &x; moved := r; *moved = 4; return x;",
+          "r := &x; moved := r; *moved = 4; r = &y; *r = 5; return x + y;",
+          "r := &x; r = &y; *r = 5; return x + y;",
+          "r := &x; r = r; *r = 5; return x;"}) {
+        SCOPED_TRACE(body);
+        EXPECT_FALSE(Analyze("i32 f() { i32 x = 1; i32 y = 2; " + body + " }")
+                         .diagnostics.HasErrors());
+    }
+    const std::string source =
+        "i32 f() { i32 x = 1; r := &x; moved := r; return *r; }";
+    Analysis analysis = Analyze(source);
+    const Diagnostic* diagnostic =
+        FindDiagnostic(analysis, DiagnosticCode::MovedReference);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(diagnostic->range.start.offset, source.rfind("r;"));
+    EXPECT_EQ(diagnostic->range.Length(), 1);
+}
+
+TEST(SemanticReferenceTests,
+     FixedBindingsAllowMutationAndReborrowingButNotMoves) {
+    EXPECT_FALSE(Analyze("void use(&i32 p) { *p = 6; }"
+                         "i32 f() { i32 x = 1; constref i32 r = &x; *r = 2; "
+                         "use(r); return x; }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("void f() { i32 x = 1; constref i32 r = &x; moved := r; }"),
+            DiagnosticCode::MovedReference),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("void f() { i32 x = 1; i32 y = 2; "
+                                     "constref i32 r = &x; r = &y; }"),
+                             DiagnosticCode::SymbolNotWritable),
+              nullptr);
+    EXPECT_FALSE(Analyze("i32 f() { i32 x = 1; constref const i32 r = &x; copy "
+                         ":= r; return *copy + *r; }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticReferenceTests,
+     RequiresInitializedNonNullStorageAndCompatibleTypes) {
+    const std::vector<std::pair<std::string, DiagnosticCode>> cases{
+        {"&i32 r;", DiagnosticCode::ReferenceRequiresInitializer},
+        {"&i32 r = none;", DiagnosticCode::IncompatibleType},
+        {"&i32 r = null;", DiagnosticCode::IncompatibleType},
+        {"i32 x; r := &x;", DiagnosticCode::UninitializedVariable},
+        {"r := &42;", DiagnosticCode::InvalidReference},
+        {"i32 x = 1; u32 y = 2; r := &x; r = &y;",
+         DiagnosticCode::IncompatibleType},
+        {"i32 x = 1; r := &x; r = 2;", DiagnosticCode::IncompatibleType},
+        {"const i32 x = 1; &i32 r = &x;", DiagnosticCode::IncompatibleType},
+        {"i32 x = 1; &const i32 r = &x; *r = 2;",
+         DiagnosticCode::SymbolNotWritable},
+        {"i32 x = 1; r := &x; r as &i32;", DiagnosticCode::InvalidCast},
+        {"i32 x = 1; r := &x; r == r;", DiagnosticCode::InvalidOperand},
+    };
+    for (const auto& [body, code] : cases) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(Analyze("void f() { " + body + " }"), code),
+                  nullptr);
+    }
+}
+
+TEST(SemanticReferenceTests, ChecksConflictsUntilLastUse) {
+    for (const std::string& body :
+         {"r := &x; x = 2; return *r;",
+          "r := &x; i32 copy = x; return *r + copy;",
+          "r := &x; other := &x; return *r + *other;",
+          "&const i32 r = &x; other := &x; return *r + *other;",
+          "&const i32 r = &x; x = 2; return *r;"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(Analyze("i32 f() { i32 x = 1; " + body + " }"),
+                                 DiagnosticCode::BorrowConflict),
+                  nullptr);
+    }
+    EXPECT_FALSE(
+        Analyze("i32 f() { i32 x = 1; r := &x; *r = 4; x = x + 2; return x; }")
+            .diagnostics.HasErrors());
+    EXPECT_FALSE(
+        Analyze("i32 f() { i32 x = 1; &const i32 r = &x; return x + *r; }")
+            .diagnostics.HasErrors());
+    const std::string source =
+        "i32 f() { i32 x = 1; r := &x; x = 2; return *r; }";
+    Analysis analysis = Analyze(source);
+    const Diagnostic* diagnostic =
+        FindDiagnostic(analysis, DiagnosticCode::BorrowConflict);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(diagnostic->range.start.offset, source.find("x = 2"));
+    EXPECT_EQ(diagnostic->range.Length(), 1);
+}
+
+TEST(SemanticReferenceTests, ReborrowsForCallsWithoutMovingTheCallerHandle) {
+    EXPECT_FALSE(Analyze("void bump(&i32 r) { *r = *r + 1; }"
+                         "i32 read(&const i32 r) { return *r; }"
+                         "i32 f() { i32 x = 1; r := &x; bump(r); bump(r); "
+                         "return read(r) + *r; }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(
+        Analyze("i32 sum(&const i32 a, &const i32 b) { return *a + *b; }"
+                "i32 f() { i32 x = 3; r := &x; return sum(r, r); }")
+            .diagnostics.HasErrors());
+    for (const std::string& arguments :
+         {"r, r", "&*r, r", "r, &*r", "&x, &x"}) {
+        SCOPED_TRACE(arguments);
+        EXPECT_NE(FindDiagnostic(Analyze("void use(&i32 a, &i32 b) {} void f() "
+                                         "{ i32 x = 1; r := &x; use(" +
+                                         arguments + "); }"),
+                                 DiagnosticCode::BorrowConflict),
+                  nullptr);
+    }
+    EXPECT_NE(FindDiagnostic(Analyze("void use(&i32 a, i32 b) {} void f() { "
+                                     "i32 x = 1; use(&x, x); }"),
+                             DiagnosticCode::BorrowConflict),
+              nullptr);
+    EXPECT_FALSE(
+        Analyze(
+            "void use(i32 a, &i32 b) {} void f() { i32 x = 1; use(x, &x); }")
+            .diagnostics.HasErrors());
+}
+
+TEST(SemanticReferenceTests, ChildReborrowsFreezeParentsUntilLastUse) {
+    EXPECT_FALSE(Analyze("i32 f() { i32 x = 1; r := &x; child := &*r; *child = "
+                         "3; *r = 6; return x; }")
+                     .diagnostics.HasErrors());
+    for (const std::string& middle :
+         {"*r = 3;", "i32 copy = *r;", "r = &y;", "moved := r;"}) {
+        SCOPED_TRACE(middle);
+        EXPECT_NE(
+            FindDiagnostic(
+                Analyze(
+                    "i32 f() { i32 x = 1; i32 y = 2; r := &x; child := &*r; " +
+                    middle + " return *child; }"),
+                DiagnosticCode::BorrowConflict),
+            nullptr);
+    }
+    EXPECT_FALSE(Analyze("i32 f() { i32 x = 1; &const i32 r = &x; child := "
+                         "&*r; return *r + *child; }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticReferenceTests, RejectsEscapesAndUnsupportedConversions) {
+    for (const std::string& source :
+         {"&i32 f(&i32 r) { return r; }",
+          "void f() { i32 x = 1; r := &x; { i32 y = 2; r = &y; } }",
+          "void f() { i32 x = 1; r := &x; { child := &x; r = &*child; } }",
+          "unsafe void f() { i32 x = 1; r := &x; &raw r; }",
+          "unsafe void f() { i32 x = 1; r := &x; &raw *r; }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_NE(
+            FindDiagnostic(Analyze(source), DiagnosticCode::ReferenceEscape),
+            nullptr);
+    }
+    EXPECT_NE(FindDiagnostic(Analyze("unsafe void f(*i32 p) { r := &*p; }"),
+                             DiagnosticCode::InvalidReference),
+              nullptr);
+}
+
+TEST(SemanticReferenceTests,
+     ReferencesToPointerSlotsStillRequireUnsafePointeeAccess) {
+    EXPECT_FALSE(Analyze("void f(*i32 p, *i32 q) { slot := &p; *slot = q; "
+                         "unsafe { **slot = 6; } }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(Analyze("void f(*i32 p) { slot := &p; **slot = 6; }"),
+                       DiagnosticCode::UnsafeOperation),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze("void f(constptr i32 p) { slot := &p; *slot = null; }"),
+            DiagnosticCode::SymbolNotWritable),
+        nullptr);
+}
+
+TEST(SemanticReferenceTests, TracksMovesAcrossBranchesLoopsAndJumps) {
+    for (const std::string& body :
+         {"if flag { moved := r; } return *r;",
+          "while flag { moved := r; } return *r;",
+          "while flag { #again moved := r; jumpto again; } return 0;",
+          "while flag { if flag { moved := r; jumpto done; } #done return *r; "
+          "} return 0;",
+          "while flag { moved := r; proceed; } return 0;"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(
+            FindDiagnostic(Analyze("i32 f(bool flag) { i32 x = 1; r := &x; " +
+                                   body + " }"),
+                           DiagnosticCode::MovedReference),
+            nullptr);
+    }
+    EXPECT_FALSE(Analyze("i32 f(bool flag) { i32 x = 1; r := &x; if flag { "
+                         "moved := r; r = &x; } return *r; }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("i32 f(bool flag) { i32 x = 1; while flag { r := &x; "
+                         "moved := r; *moved = 2; } return x; }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticReferenceTests, UnionsOriginsAtJoinsAndRetainsLoopBorrows) {
+    EXPECT_NE(
+        FindDiagnostic(Analyze("i32 f(bool flag) { i32 x = 1; i32 y = 2; r := "
+                               "&x; if flag { r = &y; } x = 3; return *r; }"),
+                       DiagnosticCode::BorrowConflict),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze("i32 f(bool flag) { i32 x = 1; r := &x; while "
+                               "flag { *r = 2; x = 3; } return 0; }"),
+                       DiagnosticCode::BorrowConflict),
+        nullptr);
+    EXPECT_FALSE(Analyze("i32 f(bool flag) { i32 x = 1; r := &x; while flag { "
+                         "*r = 2; break; } x = 3; return x; }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticReferenceTests,
+     RejectsRebindingHandleDuringPendingIndirectAssignment) {
+    EXPECT_NE(FindDiagnostic(Analyze("i32 read(&const i32 r) { return *r; }"
+                                     "void f() { i32 x = 1; i32 y = 2; r := "
+                                     "&x; *r = read(r = &y); }"),
+                             DiagnosticCode::BorrowConflict),
+              nullptr);
+}
+
+TEST(SemanticReferenceTests,
+     ContextualIntegersCheckRangeWithoutConvertingTypedValues) {
+    EXPECT_FALSE(
+        Analyze("u8 twice(u8 x) { return x * 2; }"
+                "i8 low() { return -((128)); }"
+                "u64 high() { return 18446744073709551615; }"
+                "i64 lowest() { return -9223372036854775808; }"
+                "bool f() { u8 x = 255; x = 3; return twice(x) == 6; }")
+            .diagnostics.HasErrors());
+    for (const std::string& declaration :
+         {"u8 x = 256;", "u8 x = -1;", "i8 x = 128;", "i8 x = -129;",
+          "i64 x = 9223372036854775808;", "u64 x = 18446744073709551616;"}) {
+        SCOPED_TRACE(declaration);
+        EXPECT_NE(FindDiagnostic(Analyze("void f() { " + declaration + " }"),
+                                 DiagnosticCode::IntegerLiteralOutOfRange),
+                  nullptr);
+    }
+    EXPECT_NE(
+        FindDiagnostic(Analyze("void f() { i32 typed = 3; u8 x = typed; }"),
+                       DiagnosticCode::IncompatibleType),
+        nullptr);
+}
+
+TEST(SemanticReferenceTests, HandlesShortCircuitMovesAndUnreachableCode) {
+    EXPECT_NE(FindDiagnostic(Analyze("bool take(&i32 a) { return true; }"
+                                     "i32 f(bool flag) { i32 x = 1; i32 y = 2; "
+                                     "r := &x; other := &y; "
+                                     "flag and take(other = r); return *r; }"),
+                             DiagnosticCode::MovedReference),
+              nullptr);
+    EXPECT_FALSE(Analyze("i32 f() { i32 x = 1; r := &x; moved := r; return "
+                         "*moved; *r = 2; }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticReferenceTests, PreservesParentsAcrossMovedChildHandles) {
+    EXPECT_NE(FindDiagnostic(Analyze("i32 f() { i32 x = 1; i32 y = 2; r := &x; "
+                                     "child := &*r; moved := child; "
+                                     "r = &y; return *moved; }"),
+                             DiagnosticCode::BorrowConflict),
+              nullptr);
+    EXPECT_FALSE(Analyze("i32 f() { i32 x = 1; i32 y = 2; r := &x; child := "
+                         "&*r; moved := child; "
+                         "*moved = 3; r = &y; *r = 4; return x + y; }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticReferenceTests, CallLoansProtectAgainstMovesInLaterArguments) {
+    EXPECT_NE(
+        FindDiagnostic(Analyze("void take(&const i32 first, &i32 second) {}"
+                               "void f() { i32 x = 1; i32 y = 2; r := &x; "
+                               "other := &y; take(r, other = r); }"),
+                       DiagnosticCode::BorrowConflict),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("i32 f(bool flag) { while flag { i32 seed "
+                                     "= 0; r := &seed; #again "
+                                     "i32 x = 1; if flag { r = &x; jumpto "
+                                     "again; } return *r; } return 0; }"),
+                             DiagnosticCode::BorrowConflict),
+              nullptr);
+}
+
+TEST(SemanticReferenceTests, AnonymousReborrowsAndLexicalScopeEnds) {
+    EXPECT_FALSE(Analyze("void take(&i32 r) { *r = 6; }"
+                         "i32 f() { i32 x = 1; { r := &x; *r = 2; } "
+                         "take(&*(&x)); return x; }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("i32 f() { i32 x = 1; &const i32 r = &x; i32 y = 2; "
+                         "copy := r; r = &y; return *copy + *r; }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticReferenceTests,
+     ReportsBorrowErrorsAfterIndependentFunctionErrors) {
+    Analysis analysis = Analyze(
+        "void bad() { &i32 missing; }"
+        "i32 moved() { i32 x = 1; r := &x; next := r; return *r; }");
+    EXPECT_NE(
+        FindDiagnostic(analysis, DiagnosticCode::ReferenceRequiresInitializer),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(analysis, DiagnosticCode::MovedReference),
+              nullptr);
 }

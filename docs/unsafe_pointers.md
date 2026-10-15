@@ -2,7 +2,7 @@
 
 Raw pointer declarations, parameters, returns, address creation, and indirect
 reads/writes are implemented. See [the runnable example](../examples/unsafe_pointers.fl).
-Safe references and borrow checking remain a later milestone.
+Safe scalar and pointer-slot references now have [borrow checking](checked_references.md).
 
 ## Permission is lexical
 
@@ -43,8 +43,8 @@ dereference. Functions, literals, computed values, and cast results are not
 addressable. `&raw *pointer` retrieves the designated address without loading
 its pointee. Taking a raw address is not allocation.
 
-`&value` remains reserved for safe reference creation and is currently rejected;
-its meaning does not change inside an unsafe block. There is no implicit
+`&value` creates a checked reference; its meaning does not change inside an
+unsafe block. Reference storage cannot be exposed with `&raw ref` or `&raw *ref`. There is no implicit
 reference-to-pointer conversion.
 
 ## Pointer values and storage
@@ -98,9 +98,9 @@ dangling pointers, or use-after-free.
 | `FLECHA-S0026` | Invalid raw address operand or dereference of `*void` |
 | `FLECHA-S0005` | Assignment to a fixed binding or read-only target |
 | `FLECHA-S0021` | Possibly uninitialized pointer or raw-address operand |
-| `FLECHA-S0024` | Reference type, including a reference nested inside a pointer, is not yet executable |
+| `FLECHA-S0024` | Unsupported compound storage, such as a reference nested inside a pointer |
 
-Allocation/free, defer, safe references, slices, volatile access, and arbitrary
+Allocation/free, defer, slices, volatile access, and arbitrary
 pointer conversions remain outside this milestone.
 
 ## Validation
