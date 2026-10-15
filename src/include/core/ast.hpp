@@ -36,6 +36,8 @@ enum class AstNodeKind {
     BinaryExpression,
     AssignmentExpression,
     CallExpression,
+    MemberCallExpression,
+    IndexExpression,
     CastExpression,
 };
 
@@ -582,6 +584,58 @@ class CallExpression final : public Expression {
    private:
     std::unique_ptr<Expression> _callee;
     std::vector<std::unique_ptr<Expression>> _arguments;
+};
+
+class MemberCallExpression final : public Expression {
+   public:
+    MemberCallExpression(
+        source::SourceRange range, std::unique_ptr<Expression> receiver,
+        std::string member, source::SourceRange memberRange,
+        std::vector<std::unique_ptr<Expression>> arguments)
+        : Expression(range),
+          _receiver(std::move(receiver)),
+          _member(std::move(member)),
+          _memberRange(memberRange),
+          _arguments(std::move(arguments)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::MemberCallExpression;
+    }
+    [[nodiscard]] const Expression& Receiver() const { return *_receiver; }
+    [[nodiscard]] const std::string& Member() const { return _member; }
+    [[nodiscard]] const source::SourceRange& MemberRange() const {
+        return _memberRange;
+    }
+    [[nodiscard]] const std::vector<std::unique_ptr<Expression>>& Arguments()
+        const {
+        return _arguments;
+    }
+
+   private:
+    std::unique_ptr<Expression> _receiver;
+    std::string _member;
+    source::SourceRange _memberRange;
+    std::vector<std::unique_ptr<Expression>> _arguments;
+};
+
+class IndexExpression final : public Expression {
+   public:
+    IndexExpression(source::SourceRange range,
+                    std::unique_ptr<Expression> receiver,
+                    std::unique_ptr<Expression> index)
+        : Expression(range),
+          _receiver(std::move(receiver)),
+          _index(std::move(index)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::IndexExpression;
+    }
+    [[nodiscard]] const Expression& Receiver() const { return *_receiver; }
+    [[nodiscard]] const Expression& Index() const { return *_index; }
+
+   private:
+    std::unique_ptr<Expression> _receiver;
+    std::unique_ptr<Expression> _index;
 };
 
 }  // namespace flecha::core

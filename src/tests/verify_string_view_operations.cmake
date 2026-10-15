@@ -1,0 +1,31 @@
+execute_process(
+    COMMAND "${FLECHA_COMPILER}" build "${FLECHA_SOURCE}" -o "${FLECHA_OUTPUT}"
+    RESULT_VARIABLE compileResult
+    ERROR_VARIABLE compileError
+)
+if(NOT compileResult EQUAL 0)
+    message(FATAL_ERROR "native compilation failed: ${compileError}")
+endif()
+
+execute_process(
+    COMMAND "${FLECHA_OUTPUT}"
+    RESULT_VARIABLE runResult
+    OUTPUT_VARIABLE actualOutput
+    ERROR_VARIABLE runError
+)
+if(NOT runResult EQUAL 42)
+    message(FATAL_ERROR
+        "native program returned ${runResult}, expected 42: ${runError}"
+    )
+endif()
+
+set(expectedOutput [=[6
+f
+a
+lec
+]=])
+if(NOT actualOutput STREQUAL expectedOutput)
+    message(FATAL_ERROR
+        "native output mismatch\nexpected:\n${expectedOutput}\nactual:\n${actualOutput}"
+    )
+endif()

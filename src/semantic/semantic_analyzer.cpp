@@ -377,6 +377,14 @@ SemanticType SemanticAnalyzer::AnalyzeExpression(
             type = AnalyzeCall(
                 static_cast<const core::CallExpression&>(expression));
             break;
+        case core::AstNodeKind::MemberCallExpression:
+            type = AnalyzeMemberCall(
+                static_cast<const core::MemberCallExpression&>(expression));
+            break;
+        case core::AstNodeKind::IndexExpression:
+            type = AnalyzeIndex(
+                static_cast<const core::IndexExpression&>(expression));
+            break;
         case core::AstNodeKind::CastExpression:
             type = AnalyzeCast(
                 static_cast<const core::CastExpression&>(expression));
@@ -593,6 +601,92 @@ SemanticType SemanticAnalyzer::AnalyzeCall(
         }
     }
     return function->ReturnType();
+}
+
+namespace {
+
+bool IsStringViewIndex(SemanticType type) {
+    return type.Kind() == SemanticTypeKind::I32 ||
+           type.Kind() == SemanticTypeKind::U32;
+}
+
+}  // namespace
+
+SemanticType SemanticAnalyzer::AnalyzeMemberCall(
+    const core::MemberCallExpression& expression) {
+    const SemanticType receiver = AnalyzeExpression(expression.Receiver());
+    std::vector<SemanticType> arguments;
+    arguments.reserve(expression.Arguments().size());
+    for (const std::unique_ptr<core::Expression>& argument :
+         expression.Arguments()) {
+        arguments.push_back(AnalyzeExpression(*argument));
+    }
+    if (receiver.IsError()) return SemanticType::Error();
+    if (receiver.Kind() != SemanticTypeKind::StringView) {
+        Report(diagnostics::DiagnosticCode::InvalidMember,
+               expression.MemberRange(),
+               "type '" + std::string(receiver.Name()) +
+                   "' has no member '" + expression.Member() + "'");
+        return SemanticType::Error();
+    }
+
+    std::size_t expectedCount = 0;
+    SemanticType result = SemanticType::Error();
+    if (expression.Member() == "len") {
+        result = SemanticType(SemanticTypeKind::U32);
+    } else if (expression.Member() == "at") {
+        expectedCount = 1;
+        result = SemanticType(SemanticTypeKind::Char);
+    } else if (expression.Member() == "substr") {
+        expectedCount = 2;
+        result = SemanticType(SemanticTypeKind::StringView);
+    } else {
+        Report(diagnostics::DiagnosticCode::InvalidMember,
+               expression.MemberRange(),
+               "stringv has no member '" + expression.Member() + "'");
+        return SemanticType::Error();
+    }
+
+    if (arguments.size() != expectedCount) {
+        Report(diagnostics::DiagnosticCode::WrongArgumentCount,
+               expression.Range(),
+               "member '" + expression.Member() + "' expects " +
+                   std::to_string(expectedCount) + " argument(s), found " +
+                   std::to_string(arguments.size()));
+        return result;
+    }
+    for (std::size_t index = 0; index < arguments.size(); ++index) {
+        if (!arguments[index].IsError() &&
+            !IsStringViewIndex(arguments[index])) {
+            Report(diagnostics::DiagnosticCode::IncompatibleArgument,
+                   expression.Arguments()[index]->Range(),
+                   "stringv index must have type 'i32' or 'u32', found '" +
+                       std::string(arguments[index].Name()) + "'");
+        }
+    }
+    return result;
+}
+
+SemanticType SemanticAnalyzer::AnalyzeIndex(
+    const core::IndexExpression& expression) {
+    const SemanticType receiver = AnalyzeExpression(expression.Receiver());
+    const SemanticType index = AnalyzeExpression(expression.Index());
+    if (!receiver.IsError() &&
+        receiver.Kind() != SemanticTypeKind::StringView) {
+        Report(diagnostics::DiagnosticCode::NotIndexable,
+               expression.Receiver().Range(),
+               "type '" + std::string(receiver.Name()) +
+                   "' cannot be indexed");
+        return SemanticType::Error();
+    }
+    if (!index.IsError() && !IsStringViewIndex(index)) {
+        Report(diagnostics::DiagnosticCode::IncompatibleArgument,
+               expression.Index().Range(),
+               "stringv index must have type 'i32' or 'u32', found '" +
+                   std::string(index.Name()) + "'");
+    }
+    return receiver.IsError() ? SemanticType::Error()
+                              : SemanticType(SemanticTypeKind::Char);
 }
 
 }  // namespace flecha::semantic

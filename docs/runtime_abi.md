@@ -25,3 +25,8 @@ reported with a structured `FLECHA-C` diagnostic.
 
 Breaking an existing declaration requires a new ABI version and symbol prefix.
 New symbols may be added to version 1 without changing existing declarations.
+
+The runtime also owns dynamic safety checks. Version 1 provides checked
+`stringv` byte access and substring bounds validation. Invalid indices print a
+runtime diagnostic to standard error and terminate the process rather than
+allowing an out-of-bounds memory access.

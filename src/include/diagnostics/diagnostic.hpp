@@ -37,6 +37,8 @@ enum class DiagnosticCode {
     DuplicatePosition,
     UnknownPosition,
     InvalidCast,
+    InvalidMember,
+    NotIndexable,
     NativeTargetUnavailable,
     ObjectEmissionFailed,
     RuntimeUnavailable,

@@ -1,6 +1,7 @@
 #include "runtime/runtime_abi.h"
 
 #include <cinttypes>
+#include <cstdlib>
 #include <cstdio>
 
 extern "C" {
@@ -69,6 +70,31 @@ void flecha_runtime_v1_stdout_char(uint8_t value) {
 
 void flecha_runtime_v1_stdout_newline(void) {
     (void)std::fputc('\n', stdout);
+}
+
+uint8_t flecha_runtime_v1_string_view_at(const char* data, size_t length,
+                                         uint32_t index) {
+    if (index >= length) {
+        (void)std::fprintf(
+            stderr,
+            "Flecha runtime error: stringv index %" PRIu32
+            " is out of bounds for length %zu\n",
+            index, length);
+        std::abort();
+    }
+    return static_cast<uint8_t>(data[index]);
+}
+
+void flecha_runtime_v1_string_view_check_substr(size_t length, uint32_t start,
+                                                uint32_t count) {
+    if (start > length || count > length - start) {
+        (void)std::fprintf(
+            stderr,
+            "Flecha runtime error: stringv substring (%" PRIu32 ", %" PRIu32
+            ") is out of bounds for length %zu\n",
+            start, count, length);
+        std::abort();
+    }
 }
 
 }  // extern "C"

@@ -26,6 +26,10 @@ void flecha_runtime_v1_stdout_f64(double value);
 void flecha_runtime_v1_stdout_bool(uint8_t value);
 void flecha_runtime_v1_stdout_char(uint8_t value);
 void flecha_runtime_v1_stdout_newline(void);
+uint8_t flecha_runtime_v1_string_view_at(const char* data, size_t length,
+                                         uint32_t index);
+void flecha_runtime_v1_string_view_check_substr(size_t length, uint32_t start,
+                                                uint32_t count);
 
 #ifdef __cplusplus
 }

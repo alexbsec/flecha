@@ -264,6 +264,34 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
             return std::make_unique<BoundCallExpression>(
                 expression.Range(), function, std::move(arguments));
         }
+        case core::AstNodeKind::MemberCallExpression: {
+            const core::MemberCallExpression& member =
+                static_cast<const core::MemberCallExpression&>(expression);
+            StringViewOperation operation = StringViewOperation::Length;
+            if (member.Member() == "at") {
+                operation = StringViewOperation::At;
+            } else if (member.Member() == "substr") {
+                operation = StringViewOperation::Substring;
+            }
+            std::vector<std::unique_ptr<BoundExpression>> arguments;
+            arguments.reserve(member.Arguments().size());
+            for (const std::unique_ptr<core::Expression>& argument :
+                 member.Arguments()) {
+                arguments.push_back(LowerExpression(*argument));
+            }
+            return std::make_unique<BoundStringViewOperationExpression>(
+                expression.Range(), type, operation,
+                LowerExpression(member.Receiver()), std::move(arguments));
+        }
+        case core::AstNodeKind::IndexExpression: {
+            const core::IndexExpression& index =
+                static_cast<const core::IndexExpression&>(expression);
+            std::vector<std::unique_ptr<BoundExpression>> arguments;
+            arguments.push_back(LowerExpression(index.Index()));
+            return std::make_unique<BoundStringViewOperationExpression>(
+                expression.Range(), type, StringViewOperation::At,
+                LowerExpression(index.Receiver()), std::move(arguments));
+        }
         default:
             return nullptr;
     }
