@@ -60,6 +60,8 @@ enum class DiagnosticCode {
     InvalidDefer,
     InvalidTuple,
     InvalidDestructure,
+    InvalidErrorDeclaration,
+    UnknownType,
     NativeTargetUnavailable,
     ObjectEmissionFailed,
     RuntimeUnavailable,

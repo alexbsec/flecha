@@ -16,6 +16,7 @@ namespace flecha::core {
 enum class AstNodeKind {
     CompilationUnit,
     FunctionDeclaration,
+    ErrorDeclaration,
     Parameter,
     Type,
     BlockStatement,
@@ -44,6 +45,7 @@ enum class AstNodeKind {
     AssignmentExpression,
     CallExpression,
     MemberCallExpression,
+    MemberAccessExpression,
     IndexExpression,
     SliceExpression,
     CastExpression,
@@ -99,12 +101,83 @@ enum class PrimitiveType {
     Void,
     String,
     StringView,
+    ErrorValue,
 };
 
-enum class TypeKind { Primitive, Pointer, Reference, Array, Slice, Tuple };
+enum class TypeKind {
+    Primitive,
+    Named,
+    Pointer,
+    Reference,
+    Array,
+    Slice,
+    Tuple
+};
+
+struct ErrorVariant final {
+    std::string name;
+    source::SourceRange range;
+};
+
+class ErrorDeclaration final : public Declaration {
+   public:
+    ErrorDeclaration(source::SourceRange range, std::string name,
+                     source::SourceRange nameRange,
+                     std::vector<ErrorVariant> variants)
+        : Declaration(range),
+          _name(std::move(name)),
+          _nameRange(nameRange),
+          _variants(std::move(variants)) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::ErrorDeclaration;
+    }
+    [[nodiscard]] const std::string& Name() const { return _name; }
+    [[nodiscard]] source::SourceRange NameRange() const { return _nameRange; }
+    [[nodiscard]] const std::vector<ErrorVariant>& Variants() const {
+        return _variants;
+    }
+
+   private:
+    std::string _name;
+    source::SourceRange _nameRange;
+    std::vector<ErrorVariant> _variants;
+};
+
+class MemberAccessExpression final : public Expression {
+   public:
+    MemberAccessExpression(source::SourceRange range,
+                           std::unique_ptr<Expression> receiver,
+                           std::string member, source::SourceRange memberRange)
+        : Expression(range),
+          _receiver(std::move(receiver)),
+          _member(std::move(member)),
+          _memberRange(memberRange) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::MemberAccessExpression;
+    }
+    [[nodiscard]] const Expression& Receiver() const { return *_receiver; }
+    [[nodiscard]] const std::string& Member() const { return _member; }
+    [[nodiscard]] source::SourceRange MemberRange() const {
+        return _memberRange;
+    }
+
+   private:
+    std::unique_ptr<Expression> _receiver;
+    std::string _member;
+    source::SourceRange _memberRange;
+};
 
 class TypeNode final : public AstNode {
    public:
+    TypeNode(source::SourceRange range, std::string name, bool isConst = false,
+             source::SourceRange qualifierRange = {})
+        : AstNode(range),
+          _typeKind(TypeKind::Named),
+          _name(std::move(name)),
+          _isConst(isConst),
+          _qualifierRange(qualifierRange) {}
+    [[nodiscard]] const std::string& Name() const { return _name; }
+
     TypeNode(source::SourceRange range, PrimitiveType type,
              bool isConst = false, source::SourceRange qualifierRange = {})
         : AstNode(range),
@@ -154,6 +227,7 @@ class TypeNode final : public AstNode {
 
    private:
     TypeKind _typeKind;
+    std::string _name;
     std::uint64_t _length = 0;
     PrimitiveType _type = PrimitiveType::Void;
     std::unique_ptr<TypeNode> _target;

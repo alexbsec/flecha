@@ -190,8 +190,7 @@ TEST(LlvmCodeGeneratorTests, EmitsCheckedStringViewOperations) {
     ASSERT_NE(result.module, nullptr) << result.generator->Error();
     EXPECT_TRUE(VerifyModule(*result.module).empty());
     const std::string ir = ModuleText(*result.module);
-    EXPECT_NE(ir.find("@flecha_runtime_v1_string_view_at"),
-              std::string::npos);
+    EXPECT_NE(ir.find("@flecha_runtime_v1_string_view_at"), std::string::npos);
     EXPECT_NE(ir.find("@flecha_runtime_v1_string_view_check_substr"),
               std::string::npos);
     EXPECT_NE(ir.find("getelementptr inbounds i8"), std::string::npos);
@@ -211,32 +210,29 @@ TEST(LlvmCodeGeneratorTests, EmitsOwnedStringConversionsAndCleanup) {
     const std::string ir = ModuleText(*result.module);
     EXPECT_NE(ir.find("@flecha_runtime_v1_string_from_view"),
               std::string::npos);
-    EXPECT_NE(ir.find("@flecha_runtime_v1_string_from_i32"),
-              std::string::npos);
-    EXPECT_NE(ir.find("@flecha_runtime_v1_string_destroy"),
-              std::string::npos);
+    EXPECT_NE(ir.find("@flecha_runtime_v1_string_from_i32"), std::string::npos);
+    EXPECT_NE(ir.find("@flecha_runtime_v1_string_destroy"), std::string::npos);
     EXPECT_NE(ir.find("@flecha_runtime_v1_stdout_string_view"),
               std::string::npos);
 }
 
 TEST(LlvmCodeGeneratorTests, EmitsLengthAwareStandardOutput) {
-    GeneratedSource result =
-        Generate("i32 main() { stdout(\"Flecha\"); "
-                 "stdoutln(\"Language\"); stdout(-42); stdout(1 as i8); "
-                 "stdout(2 as i16); stdout(3 as i64); stdout(4 as isize); "
-                 "stdout(5 as u8); stdout(6 as u16); stdout(7 as u32); "
-                 "stdout(8 as u64); stdout(9 as usize); stdout(1 as f32); "
-                 "stdout(1.5); stdout(true); stdout('x'); return 42; }");
+    GeneratedSource result = Generate(
+        "i32 main() { stdout(\"Flecha\"); "
+        "stdoutln(\"Language\"); stdout(-42); stdout(1 as i8); "
+        "stdout(2 as i16); stdout(3 as i64); stdout(4 as isize); "
+        "stdout(5 as u8); stdout(6 as u16); stdout(7 as u32); "
+        "stdout(8 as u64); stdout(9 as usize); stdout(1 as f32); "
+        "stdout(1.5); stdout(true); stdout('x'); return 42; }");
 
     ASSERT_FALSE(result.diagnostics.HasErrors());
     ASSERT_NE(result.module, nullptr) << result.generator->Error();
     EXPECT_TRUE(VerifyModule(*result.module).empty());
     const std::string ir = ModuleText(*result.module);
-    const std::string suffixes[] = {
-        "string_view", "i8",    "i16",  "i32",  "i64",
-        "isize",       "u8",    "u16",  "u32",  "u64",
-        "usize",       "f32",   "f64",  "bool", "char",
-        "newline"};
+    const std::string suffixes[] = {"string_view", "i8",    "i16",   "i32",
+                                    "i64",         "isize", "u8",    "u16",
+                                    "u32",         "u64",   "usize", "f32",
+                                    "f64",         "bool",  "char",  "newline"};
     for (const std::string& suffix : suffixes) {
         EXPECT_NE(ir.find("@flecha_runtime_v1_stdout_" + suffix),
                   std::string::npos)
@@ -343,16 +339,14 @@ TEST(NativeCompilerTests, RunsForwardAndRecursiveCalls) {
 }
 
 TEST(NativeCompilerTests, ObjectEmissionDoesNotRequireRuntimeLibrary) {
-    GeneratedSource result =
-        Generate("i32 main() { stdoutln(42); return 0; }");
+    GeneratedSource result = Generate("i32 main() { stdoutln(42); return 0; }");
     ASSERT_NE(result.boundProgram, nullptr);
 
     const std::filesystem::path objectPath =
         std::filesystem::temp_directory_path() /
         "flecha_object_without_runtime_test.o";
     const std::filesystem::path executablePath =
-        std::filesystem::temp_directory_path() /
-        "flecha_missing_runtime_test";
+        std::filesystem::temp_directory_path() / "flecha_missing_runtime_test";
     std::filesystem::remove(objectPath);
     std::filesystem::remove(executablePath);
 
@@ -633,4 +627,26 @@ TEST(CodeGeneratorTests, VerifiesOwnedTupleCleanupAndDeferredCaptures) {
     ASSERT_FALSE(result.diagnostics.HasErrors());
     ASSERT_NE(result.module, nullptr);
     EXPECT_TRUE(VerifyModule(*result.module).empty());
+}
+
+TEST(CodeGeneratorTests,
+     VerifiesErrorFamilyIdentityWideningAndTuplePropagation) {
+    GeneratedSource result = Generate(
+        "error Fault { Bad } error Other { Bad } "
+        "(i32, Fault) named(bool bad) { if bad { return (0, Fault.Bad); } "
+        "return (42, none); } "
+        "(i32, error) generic(bool bad) { return named(bad); } "
+        "bool equal(error a, error b) { return a == b; } "
+        "bool compare() { return equal(Fault.Bad, Other.Bad); }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("@.flecha.error.Fault = private constant i8 0"),
+              std::string::npos);
+    EXPECT_NE(ir.find("@.flecha.error.Other = private constant i8 0"),
+              std::string::npos);
+    EXPECT_NE(ir.find("select i1"), std::string::npos);
+    EXPECT_NE(ir.find("define { i32, { ptr, i32 } } @generic"),
+              std::string::npos);
 }

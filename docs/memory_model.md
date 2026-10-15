@@ -440,8 +440,8 @@ unsafe {
 `alloc<T>(value)` allocates one element and initializes it with `value`.
 `alloc<T>(none)` initializes to T's defined zero value, when one exists; it
 does not mean uninitialized storage. Success produces a live allocation and
-no error; failure assigns null and an error. Tuple/error syntax and generic
-member calls require implementation work. Array allocation spelling is still
+no error; failure assigns null and an error. Tuple/error values are implemented;
+generic member calls require implementation work. Array allocation spelling is still
 provisional.
 
 Raw allocation and free require an unsafe function or block. Allocations are
@@ -583,7 +583,8 @@ implementation milestone, const declarations and compound type representation,
 is documented in [const declarations and types](const_types.md). Unsafe pointer operations are documented in [unsafe pointers](unsafe_pointers.md).
 Checked scalar and pointer-slot references are documented in
 [checked references](checked_references.md). Deferred calls are also implemented; the next stages are
-error values, system allocation, and cross-function resource effects.
+system allocation and cross-function resource effects. Named and generic
+[error values](error_values.md) are implemented.
 [Tuples and destructuring](tuples.md) are implemented.
 
 Concurrency, atomics, shared ownership, partial moves, and arbitrary pointer

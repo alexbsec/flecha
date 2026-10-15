@@ -75,6 +75,9 @@ call assert_equal('flechaType', s:HighlightAt('bool ready', 0))
 
 call assert_equal('flechaType', s:HighlightAt('i32 quotient', 0))
 
+call assert_equal('flechaType', s:HighlightAt('error MathError', 0))
+call assert_equal('flechaType', s:HighlightAt('error genericError', 0))
+
 if !empty(v:errors)
     for error in v:errors
         echomsg error

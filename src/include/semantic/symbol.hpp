@@ -10,7 +10,7 @@
 
 namespace flecha::semantic {
 
-enum class SymbolKind { Function, Parameter, LocalVariable };
+enum class SymbolKind { Function, Parameter, LocalVariable, ErrorType };
 
 enum class BuiltInFunction { None, Stdout, StdoutLine };
 

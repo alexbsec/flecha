@@ -49,6 +49,12 @@ bool LlvmCodeGenerator::Fail(std::string message) {
 
 llvm::Type* LlvmCodeGenerator::MapType(semantic::SemanticType type) {
     switch (type.Kind()) {
+        case semantic::SemanticTypeKind::ErrorValue:
+            return llvm::StructType::get(
+                _context, {llvm::PointerType::getUnqual(_context),
+                           llvm::Type::getInt32Ty(_context)});
+        case semantic::SemanticTypeKind::NamedError:
+            return llvm::Type::getInt32Ty(_context);
         case semantic::SemanticTypeKind::Tuple: {
             std::vector<llvm::Type*> fields;
             for (const auto& element : type.Elements())
@@ -533,6 +539,28 @@ bool LlvmCodeGenerator::EmitDeferredCalls(const CleanupScope& scope) {
 llvm::Value* LlvmCodeGenerator::CoerceValue(
     llvm::Value* value, semantic::SemanticType sourceType,
     semantic::SemanticType destinationType) {
+    if (sourceType.Kind() == semantic::SemanticTypeKind::NamedError &&
+        destinationType.Kind() == semantic::SemanticTypeKind::ErrorValue) {
+        const std::string name = ".flecha.error." + sourceType.Family().name;
+        llvm::GlobalVariable* identity = _module->getNamedGlobal(name);
+        if (identity == nullptr) {
+            // The address is the family identity: do not mark it unnamed_addr.
+            identity = new llvm::GlobalVariable(
+                *_module, llvm::Type::getInt8Ty(_context), true,
+                llvm::GlobalValue::PrivateLinkage,
+                llvm::ConstantInt::get(llvm::Type::getInt8Ty(_context), 0),
+                name);
+        }
+        llvm::Value* zero = llvm::ConstantInt::get(value->getType(), 0);
+        llvm::Value* family =
+            _builder.CreateSelect(_builder.CreateICmpEQ(value, zero),
+                                  llvm::ConstantPointerNull::get(
+                                      llvm::PointerType::getUnqual(_context)),
+                                  identity, "error.family");
+        llvm::Value* result = llvm::PoisonValue::get(MapType(destinationType));
+        result = _builder.CreateInsertValue(result, family, 0);
+        return _builder.CreateInsertValue(result, value, 1, "error.value");
+    }
     if (sourceType.Kind() == semantic::SemanticTypeKind::Null &&
         destinationType.Kind() == semantic::SemanticTypeKind::Pointer)
         return value;
@@ -1203,7 +1231,8 @@ llvm::Value* LlvmCodeGenerator::EmitLiteral(
                                                      expression.Value().size());
         return _builder.CreateInsertValue(value, length, 1, "stringv");
     }
-    if (expression.Type().IsInteger()) {
+    if (expression.Type().IsInteger() ||
+        expression.Type().Kind() == semantic::SemanticTypeKind::NamedError) {
         return llvm::ConstantInt::get(
             type,
             llvm::APInt(type->getIntegerBitWidth(), expression.Value(), 10));
@@ -1316,9 +1345,47 @@ llvm::Value* LlvmCodeGenerator::EmitBinary(
          expression.OperatorType() == TokenType::Or)) {
         return EmitBooleanLogical(expression);
     }
+    const auto leftType = expression.Left().Type();
+    const auto rightType = expression.Right().Type();
+    const bool strict = expression.OperatorType() == TokenType::StrictEqual ||
+                        expression.OperatorType() == TokenType::StrictNotEqual;
+    if (strict && (leftType.IsErrorValue() || rightType.IsErrorValue()) &&
+        leftType != rightType) {
+        // Preserve operand effects even when differing static types decide
+        // equality.
+        if (leftType.Kind() != semantic::SemanticTypeKind::None &&
+            EmitExpression(expression.Left()) == nullptr)
+            return nullptr;
+        if (rightType.Kind() != semantic::SemanticTypeKind::None &&
+            EmitExpression(expression.Right()) == nullptr)
+            return nullptr;
+        return llvm::ConstantInt::get(
+            llvm::Type::getInt1Ty(_context),
+            expression.OperatorType() == TokenType::StrictNotEqual);
+    }
     llvm::Value* left = EmitExpression(expression.Left());
     llvm::Value* right = EmitExpression(expression.Right());
     if (left == nullptr || right == nullptr) return nullptr;
+    if (leftType.Kind() == semantic::SemanticTypeKind::ErrorValue ||
+        rightType.Kind() == semantic::SemanticTypeKind::ErrorValue) {
+        const semantic::SemanticType generic(
+            semantic::SemanticTypeKind::ErrorValue);
+        left = CoerceValue(left, leftType, generic);
+        right = CoerceValue(right, rightType, generic);
+        if (left == nullptr || right == nullptr) return nullptr;
+        llvm::Value* sameFamily =
+            _builder.CreateICmpEQ(_builder.CreateExtractValue(left, 0),
+                                  _builder.CreateExtractValue(right, 0));
+        llvm::Value* sameCode =
+            _builder.CreateICmpEQ(_builder.CreateExtractValue(left, 1),
+                                  _builder.CreateExtractValue(right, 1));
+        llvm::Value* equal =
+            _builder.CreateAnd(sameFamily, sameCode, "error.equal");
+        return expression.OperatorType() == TokenType::NotEqual ||
+                       expression.OperatorType() == TokenType::StrictNotEqual
+                   ? _builder.CreateNot(equal)
+                   : equal;
+    }
     const bool leftString =
         expression.Left().Type().Kind() ==
             semantic::SemanticTypeKind::StringView ||

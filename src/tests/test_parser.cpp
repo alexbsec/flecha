@@ -61,7 +61,7 @@ TEST(ParserTests, UsesTokenRangesForCompilationUnit) {
 
 TEST(ParserTests, ReportsUnexpectedTopLevelTokensWithoutThrowing) {
     DiagnosticBag diagnostics;
-    std::vector<Token> tokens = Lex("main other", diagnostics);
+    std::vector<Token> tokens = Lex("main + other", diagnostics);
     Parser parser(std::move(tokens), diagnostics);
 
     std::unique_ptr<CompilationUnit> unit;
@@ -466,11 +466,11 @@ TEST(ParserStringViewTests, ParsesMembersIndexingAndPostfixChains) {
 
     const FunctionDeclaration& atFunction =
         static_cast<const FunctionDeclaration&>(*unit->Declarations()[1]);
-    const ReturnStatement& atReturn = static_cast<const ReturnStatement&>(
-        *atFunction.Body().Statements()[0]);
-    EXPECT_EQ(static_cast<const MemberCallExpression&>(*atReturn.Value())
-                  .Member(),
-              "at");
+    const ReturnStatement& atReturn =
+        static_cast<const ReturnStatement&>(*atFunction.Body().Statements()[0]);
+    EXPECT_EQ(
+        static_cast<const MemberCallExpression&>(*atReturn.Value()).Member(),
+        "at");
 
     const FunctionDeclaration& indexFunction =
         static_cast<const FunctionDeclaration&>(*unit->Declarations()[2]);
@@ -625,14 +625,14 @@ TEST(ParserCastTests, ParsesBothSpellingsAndChainsLeftToRight) {
 
 TEST(ParserCastTests, CastBindsTighterThanBinaryOperators) {
     DiagnosticBag diagnostics;
-    std::unique_ptr<CompilationUnit> unit = ParseSource(
-        "i64 Test() { return 10 + 32 as i64; }", diagnostics);
+    std::unique_ptr<CompilationUnit> unit =
+        ParseSource("i64 Test() { return 10 + 32 as i64; }", diagnostics);
 
     ASSERT_FALSE(diagnostics.HasErrors());
     const FunctionDeclaration& function =
         static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
-    const ReturnStatement& statement = static_cast<const ReturnStatement&>(
-        *function.Body().Statements()[0]);
+    const ReturnStatement& statement =
+        static_cast<const ReturnStatement&>(*function.Body().Statements()[0]);
     const BinaryExpression& binary =
         static_cast<const BinaryExpression&>(*statement.Value());
     EXPECT_EQ(binary.Right().Kind(), AstNodeKind::CastExpression);
@@ -653,7 +653,8 @@ TEST(ParserStringTests, ParsesOwningStringTypesAndLiteralConversions) {
         static_cast<const VariableDeclarationStatement&>(
             *function.Body().Statements()[0]);
     EXPECT_EQ(variable.ExplicitType()->Type(), PrimitiveType::String);
-    EXPECT_EQ(variable.Initializer()->Kind(), AstNodeKind::MemberCallExpression);
+    EXPECT_EQ(variable.Initializer()->Kind(),
+              AstNodeKind::MemberCallExpression);
 }
 
 TEST(ParserTests, PreservesRecursiveTypeQualifiersAndRanges) {
@@ -1078,4 +1079,75 @@ TEST(ParserTupleTests, DistinguishesBareBindingsFromCallsTypesAndGrouping) {
         ParseSource(source, diagnostics);
         EXPECT_TRUE(diagnostics.HasErrors());
     }
+}
+
+TEST(ParserErrorTests, ParsesFamiliesGenericReturnsAndNamedCompoundTypes) {
+    const std::string source =
+        "error Fault { Bad, Worse, } "
+        "error widen(Fault value) { return value; } "
+        "(Fault, error) f() { "
+        "const Fault first, second = (Fault.Bad, none); "
+        "[2]Fault values = [first, second]; "
+        "&const Fault ref = &values[0]; "
+        "(Fault, error) pair = (first, second); return pair; }";
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource(source, diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    ASSERT_EQ(unit->Declarations().size(), 3);
+    const auto& family =
+        static_cast<const ErrorDeclaration&>(*unit->Declarations()[0]);
+    EXPECT_EQ(family.Name(), "Fault");
+    ASSERT_EQ(family.Variants().size(), 2);
+    EXPECT_EQ(family.Variants()[0].range.start.offset, source.find("Bad"));
+    EXPECT_EQ(family.Variants()[1].name, "Worse");
+    const auto& widen =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[1]);
+    EXPECT_EQ(widen.ReturnType().Type(), PrimitiveType::ErrorValue);
+    EXPECT_EQ(widen.Parameters()[0]->Type().TypeForm(), TypeKind::Named);
+    EXPECT_EQ(widen.Parameters()[0]->Type().Name(), "Fault");
+    const auto& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[2]);
+    const auto& binding = static_cast<const DestructureStatement&>(
+        *function.Body().Statements()[0]);
+    EXPECT_EQ(binding.Bindings()[1]->ExplicitType()->Name(), "Fault");
+    EXPECT_TRUE(binding.Bindings()[1]->ExplicitType()->IsConst());
+    const auto& tuple = static_cast<const TupleExpression&>(binding.Value());
+    const auto& variant =
+        static_cast<const MemberAccessExpression&>(*tuple.Elements()[0]);
+    EXPECT_EQ(variant.Member(), "Bad");
+    EXPECT_EQ(variant.MemberRange().start.offset, source.find("Fault.Bad") + 6);
+}
+
+TEST(ParserErrorTests, RejectsMalformedErrorDeclarationsAndRecovers) {
+    for (const std::string& declaration :
+         {"error Fault { Bad Worse }", "error Fault { none = 0, Bad }",
+          "error Fault { Bad = 1 }", "error Fault { Bad(i32) }",
+          "error Fault { , }", "error Fault { Bad,"}) {
+        SCOPED_TRACE(declaration);
+        DiagnosticBag diagnostics;
+        auto unit = ParseSource(declaration + " void after() {}", diagnostics);
+        ASSERT_NE(unit, nullptr);
+        EXPECT_TRUE(diagnostics.HasErrors());
+        ASSERT_FALSE(unit->Declarations().empty());
+        EXPECT_EQ(static_cast<const FunctionDeclaration&>(
+                      *unit->Declarations().back())
+                      .Name(),
+                  "after");
+    }
+}
+
+TEST(ParserErrorTests, KeepsQualifiedValuesAndRawAddressesAsExpressions) {
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource(
+        "error Fault { Bad } unsafe void f() { Fault value = Fault.Bad; "
+        "Fault.Bad; (Fault.Bad); &raw value; *ptr = Fault.Bad; "
+        "a, b := (Fault.Bad, none); }",
+        diagnostics);
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const auto& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[1]);
+    ASSERT_EQ(function.Body().Statements().size(), 6);
+    for (std::size_t i = 1; i < 5; ++i)
+        EXPECT_EQ(function.Body().Statements()[i]->Kind(),
+                  AstNodeKind::ExpressionStatement);
 }

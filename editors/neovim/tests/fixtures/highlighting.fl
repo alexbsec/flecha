@@ -46,3 +46,6 @@ void Deferred() { defer stdoutln("done"); }
 void TupleBindings() { (i32 count, bool ready) = TupleResult(); }
 
 void BareTupleBindings() { i32 quotient, remainder = (3, 2); }
+
+error MathError { DivisionByZero, Overflow }
+error genericError = MathError.Overflow;

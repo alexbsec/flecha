@@ -37,6 +37,13 @@ enum class SemanticTypeKind {
     None,
     Function,
     Error,
+    ErrorValue,
+    NamedError,
+};
+
+struct ErrorFamily final {
+    std::string name;
+    std::vector<std::string> variants;
 };
 
 class SemanticType final {
@@ -56,6 +63,16 @@ class SemanticType final {
               std::move(elements))) {}
     [[nodiscard]] const std::vector<SemanticType>& Elements() const {
         return *_elements;
+    }
+    explicit SemanticType(std::shared_ptr<const ErrorFamily> family,
+                          bool isConst = false)
+        : _kind(SemanticTypeKind::NamedError),
+          _isConst(isConst),
+          _family(std::move(family)) {}
+    [[nodiscard]] const ErrorFamily& Family() const { return *_family; }
+    [[nodiscard]] bool IsErrorValue() const {
+        return _kind == SemanticTypeKind::ErrorValue ||
+               _kind == SemanticTypeKind::NamedError;
     }
     [[nodiscard]] bool OwnsStorage() const;
     [[nodiscard]] SemanticTypeKind Kind() const { return _kind; }
@@ -100,6 +117,7 @@ class SemanticType final {
    private:
     SemanticTypeKind _kind;
     bool _isConst;
+    std::shared_ptr<const ErrorFamily> _family;
     std::uint64_t _length = 0;
     std::shared_ptr<const SemanticType> _target;
     std::shared_ptr<const std::vector<SemanticType>> _elements;
