@@ -34,9 +34,13 @@ class LlvmCodeGenerator final {
         llvm::StructType* recordType;
         std::vector<semantic::SemanticType> argumentTypes;
     };
+    struct OwnedStorage final {
+        llvm::AllocaInst* storage;
+        semantic::SemanticType type;
+    };
     struct CleanupScope final {
         const lowering::BoundBlockStatement* block;
-        std::vector<llvm::AllocaInst*> ownedStrings;
+        std::vector<OwnedStorage> ownedValues;
         std::vector<DeferredCall> deferredCalls;
         llvm::AllocaInst* deferredHead = nullptr;
         llvm::AllocaInst* stackMark = nullptr;
@@ -104,6 +108,14 @@ class LlvmCodeGenerator final {
         bool temporary = true);
     [[nodiscard]] llvm::Value* EmitStringView(llvm::Value* value,
                                               semantic::SemanticType type);
+    llvm::Value* EmitValueCopy(llvm::Value* value, semantic::SemanticType type,
+                               bool temporary);
+    void EmitValueDestroy(llvm::Value* value, semantic::SemanticType type);
+    void EmitValueStorageCleanup(llvm::AllocaInst* storage,
+                                 semantic::SemanticType type);
+    llvm::AllocaInst* CreateOwnedValueTemporary(semantic::SemanticType type,
+                                                std::string_view name);
+    bool EmitDestructure(const lowering::BoundDestructureStatement& statement);
     void EmitStringDestroy(llvm::Value* value);
     void EmitStringStorageCleanup(llvm::AllocaInst* storage);
     [[nodiscard]] llvm::AllocaInst* CreateOwnedStringTemporary(

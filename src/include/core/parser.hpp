@@ -38,6 +38,9 @@ class Parser {
     std::unique_ptr<Parameter> ParseParameter();
     std::unique_ptr<BlockStatement> ParseBlockStatement(bool isUnsafe = false);
     std::unique_ptr<Statement> ParseStatement();
+    bool HasParenthesizedBindings() const;
+    bool IsDestructureStatement() const;
+    std::unique_ptr<Statement> ParseDestructureStatement();
     std::unique_ptr<VariableDeclarationStatement>
     ParseVariableDeclarationStatement();
     std::unique_ptr<ReturnStatement> ParseReturnStatement();

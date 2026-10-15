@@ -110,6 +110,26 @@ class Dumper final {
                 _stream << "\n";
                 break;
             }
+            case BoundNodeKind::DestructureStatement: {
+                const auto& destructure =
+                    static_cast<const BoundDestructureStatement&>(statement);
+                _stream << "destructure (";
+                bool first = true;
+                for (const auto& binding : destructure.Bindings()) {
+                    if (!first) _stream << ", ";
+                    first = false;
+                    if (binding.variable == nullptr)
+                        _stream << "_";
+                    else
+                        _stream << (binding.declaration ? "local " : "")
+                                << binding.variable->Name() << ": "
+                                << binding.variable->Type().Name();
+                }
+                _stream << ") = ";
+                WriteExpression(destructure.Value());
+                _stream << "\n";
+                break;
+            }
             case BoundNodeKind::DeferStatement:
                 _stream << "defer ";
                 WriteExpression(
@@ -202,6 +222,19 @@ class Dumper final {
                     WriteExpression(*slice.End());
                 else
                     _stream << "len";
+                _stream << ")";
+                break;
+            }
+            case BoundNodeKind::TupleExpression: {
+                const auto& tuple =
+                    static_cast<const BoundTupleExpression&>(expression);
+                _stream << "(";
+                bool first = true;
+                for (const auto& element : tuple.Elements()) {
+                    if (!first) _stream << ", ";
+                    first = false;
+                    WriteExpression(*element);
+                }
                 _stream << ")";
                 break;
             }

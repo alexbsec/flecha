@@ -69,6 +69,12 @@ call assert_equal('flechaNumber', s:HighlightAt('values[1:3]', 7))
 call assert_equal('flechaFunction', s:HighlightAt('readonly.front()', 9))
 call assert_equal('flechaFunction', s:HighlightAt('fixed.back()', 6))
 
+call assert_equal('flechaType', s:HighlightAt('(i32, bool)', 1))
+call assert_equal('flechaFunction', s:HighlightAt('TupleResult()', 0))
+call assert_equal('flechaType', s:HighlightAt('bool ready', 0))
+
+call assert_equal('flechaType', s:HighlightAt('i32 quotient', 0))
+
 if !empty(v:errors)
     for error in v:errors
         echomsg error

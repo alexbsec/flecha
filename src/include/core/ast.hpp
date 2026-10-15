@@ -32,6 +32,9 @@ enum class AstNodeKind {
     AlsoClause,
     VariableDeclarationStatement,
     ExpressionStatement,
+    TupleExpression,
+    DestructureStatement,
+    DestructureBinding,
     ArrayExpression,
     LiteralExpression,
     NameExpression,
@@ -98,7 +101,7 @@ enum class PrimitiveType {
     StringView,
 };
 
-enum class TypeKind { Primitive, Pointer, Reference, Array, Slice };
+enum class TypeKind { Primitive, Pointer, Reference, Array, Slice, Tuple };
 
 class TypeNode final : public AstNode {
    public:
@@ -122,6 +125,18 @@ class TypeNode final : public AstNode {
         assert(typeKind != TypeKind::Primitive && _target != nullptr);
     }
 
+    TypeNode(source::SourceRange range,
+             std::vector<std::unique_ptr<TypeNode>> elements,
+             bool isConst = false, source::SourceRange qualifierRange = {})
+        : AstNode(range),
+          _typeKind(TypeKind::Tuple),
+          _elements(std::move(elements)),
+          _isConst(isConst),
+          _qualifierRange(qualifierRange) {}
+    [[nodiscard]] const std::vector<std::unique_ptr<TypeNode>>& Elements()
+        const {
+        return _elements;
+    }
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::Type;
     }
@@ -142,6 +157,7 @@ class TypeNode final : public AstNode {
     std::uint64_t _length = 0;
     PrimitiveType _type = PrimitiveType::Void;
     std::unique_ptr<TypeNode> _target;
+    std::vector<std::unique_ptr<TypeNode>> _elements;
     bool _isConst;
     source::SourceRange _qualifierRange;
 };
@@ -473,6 +489,62 @@ class VariableDeclarationStatement final : public Statement {
     std::unique_ptr<Expression> _initializer;
     source::SourceRange _nameRange;
     bool _isRangeSource;
+};
+
+class TupleExpression final : public Expression {
+   public:
+    TupleExpression(source::SourceRange range,
+                    std::vector<std::unique_ptr<Expression>> elements)
+        : Expression(range), _elements(std::move(elements)) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::TupleExpression;
+    }
+    [[nodiscard]] const std::vector<std::unique_ptr<Expression>>& Elements()
+        const {
+        return _elements;
+    }
+
+   private:
+    std::vector<std::unique_ptr<Expression>> _elements;
+};
+
+class DestructureBinding final : public AstNode {
+   public:
+    DestructureBinding(source::SourceRange range, std::string name,
+                       std::unique_ptr<TypeNode> type)
+        : AstNode(range), _name(std::move(name)), _type(std::move(type)) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::DestructureBinding;
+    }
+    [[nodiscard]] const std::string& Name() const { return _name; }
+    [[nodiscard]] const TypeNode* ExplicitType() const { return _type.get(); }
+
+   private:
+    std::string _name;
+    std::unique_ptr<TypeNode> _type;
+};
+
+class DestructureStatement final : public Statement {
+   public:
+    DestructureStatement(
+        source::SourceRange range,
+        std::vector<std::unique_ptr<DestructureBinding>> bindings,
+        std::unique_ptr<Expression> value, bool inferred)
+        : Statement(range),
+          _bindings(std::move(bindings)),
+          _value(std::move(value)),
+          _inferred(inferred) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::DestructureStatement;
+    }
+    [[nodiscard]] const auto& Bindings() const { return _bindings; }
+    [[nodiscard]] const Expression& Value() const { return *_value; }
+    [[nodiscard]] bool IsInferred() const { return _inferred; }
+
+   private:
+    std::vector<std::unique_ptr<DestructureBinding>> _bindings;
+    std::unique_ptr<Expression> _value;
+    bool _inferred;
 };
 
 class DeferStatement final : public Statement {

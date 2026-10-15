@@ -2119,3 +2119,135 @@ TEST(SemanticDeferTests, TracksRegistrationAndLoanReleaseThroughJumps) {
                          "jumpto done; defer g(&x); #done x++; break; } }")
                      .diagnostics.HasErrors());
 }
+
+TEST(SemanticTupleTests, SupportsValuesReturnsParametersAndContextualElements) {
+    const auto result = Analyze(R"(
+        (u8, (bool, string)) f(u8 n) { return (n, (true, "text")); }
+        (u8, (bool, string)) pass((u8, (bool, string)) p) { return p; }
+        i32 main() {
+            (u8, (bool, string)) t;
+            t = pass(f(42));
+            (n, nested) := t;
+            (bool ok, string text) = nested;
+            (n, (bool, string) copy) = (3, nested);
+            (const u8 fixed, _) = t;
+            const (u8, bool) frozen = (1, true);
+            (u8, bool) zero = none;
+            (u8 small, *i32 pointer) = (none, null);
+            return n as i32;
+        }
+    )");
+    EXPECT_FALSE(result.diagnostics.HasErrors());
+    const SemanticType type =
+        result.model.TypeOf(*static_cast<const ReturnStatement&>(
+                                 *FunctionAt(result, 0).Body().Statements()[0])
+                                 .Value());
+    EXPECT_EQ(type.Name(), "(u8, (bool, string))");
+    EXPECT_TRUE(type.OwnsStorage());
+    EXPECT_TRUE(type.IsCompound());
+}
+
+TEST(SemanticTupleTests, ChecksArityTypesMutabilityAndUnsupportedElements) {
+    for (const std::string& source :
+         {"void f() { (a, b) := 1; }",
+          "void f() { (a, b) := (1, 2, 3); }",
+          "void f() { (a, a) := (1, 2); }",
+          "void f() { a := 0; (a, a) = (1, 2); }",
+          "void f() { (a, b) = (1, 2); }",
+          "void f() { (i32 a, b) := (1, 2); }",
+          "void f() { (bool a, i32 b) = (1, 2); }",
+          "void f() { (u8 a, i32 b) = (256, 2); }",
+          "void f() { const i32 a = 1; (a, _) = (2, 3); }",
+          "void f() { const (i32, bool) a = (1, true); a = (2, false); }",
+          "(i32, bool) f() { return (1, 2); }",
+          "(i32, bool) f() { return 1; }",
+          "void f() { t := (1, 2); t == t; }",
+          "void f() { t := (1, 2); t as (i32, i32); }",
+          "void f() { (void, i32) t; }",
+          "void f() { x := 1; t := (&x, 2); }",
+          "void f() { a := [1]; t := (a[:], 2); }",
+          "void f() { t := (\"view\", 2); }",
+          "void f() { (*&i32, i32) t; }",
+          "void f() { [2](i32, bool) t; }",
+          "void f() { (string, i32) t = (\"s\", 1); r := &t; }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+    const std::string source = "void f() { (a, a) := (1, 2); }";
+    const auto invalid = Analyze(source);
+    const auto* diagnostic =
+        FindDiagnostic(invalid, DiagnosticCode::InvalidDestructure);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(diagnostic->range.start.offset, source.find("a)"));
+}
+
+TEST(SemanticTupleTests, PreservesInitializationAndSimultaneousBindingRules) {
+    for (const std::string& source :
+         {"void f() { i32 a; i32 b; (a, b) = (1, 2); stdoutln(a + b); }",
+          "void f() { i32 a; (i32 b, i32 c) = (a = 1, a); stdoutln(a); }",
+          "void f() { a := 1; b := 2; (a, b) = (b, a); }",
+          "void f() { a := 1; { (a, b) := (a, 2); stdoutln(a); } }",
+          "void f() { (_, _) := (1, 2); }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_FALSE(Analyze(source).diagnostics.HasErrors());
+    }
+    for (const std::string& source :
+         {"void f() { i32 a; i32 b; (a, b) = (1, a); }",
+          "void f() { (a, b) := (1, a); }",
+          "void f(bool c) { i32 a; i32 b; if c { (a, b) = (1, 2); } "
+          "stdoutln(a); }",
+          "void f() { i32 a; while true { jumpto use; (a, i32 b) = (1, 2); "
+          "#use stdoutln(a); break; } }",
+          "void f() { (i32, bool) t; (a, b) := t; }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+}
+
+TEST(SemanticTupleTests, DestructuringCannotWriteThroughActiveLoans) {
+    for (const std::string& source :
+         {"void use(&i32 r) {} void f() { x := 1; defer use(&x); (x, _) = (2, "
+          "3); }",
+          "void f() { x := 1; r := &x; (x, _) = (2, 3); stdoutln(*r); }",
+          "void f() { a := [1]; r := &a[0]; (a, _) = ([2], 3); stdoutln(*r); }",
+          "void f() { t := (1, 2); r := &t; (t, _) = ((2, 3), 4); p := *r; "
+          "}"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+    EXPECT_FALSE(
+        Analyze("void f() { t := (1, 2); r := &t; (a, b) := *r; t = (b, a); }")
+            .diagnostics.HasErrors());
+}
+
+TEST(SemanticTupleTests, BareBindingGroupsInheritTypesAndQualifiers) {
+    EXPECT_FALSE(Analyze(R"(
+        (i32, i32) divide() { return (3, 2); }
+        void f() {
+            i32 q, r = divide();
+            i32 first, i32 second = divide();
+            a, b := divide();
+            a, b = (b, a);
+            bool ok, changed, i32 code = (true, false, 42);
+            const u8 low, high = (0, 255);
+            (i32, bool) left, right = ((42, true), (7, false));
+            q, i32 fresh, another = (1, 2, 3);
+            _, b = divide();
+            (i32 explicit_new, q) = divide();
+        }
+    )")
+                     .diagnostics.HasErrors());
+    for (const std::string& source :
+         {"void f() { i32 q, r = (1, true); }",
+          "void f() { u8 q, r = (1, 256); }",
+          "void f() { const i32 q, r = (1, 2); r = 3; }",
+          "void f() { i32 q, r := (1, 2); }",
+          "void f() { i32 q, r = (1, 2, 3); }", "void f() { q, r = (1, 2); }",
+          "void f() { i32 q, q = (1, 2); }",
+          "void f() { r := 0; i32 q, r = (1, 2); }",
+          "void f() { i32 q, r = (1, q); }",
+          "void f() { string q, r = (\"one\", 2); }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+}

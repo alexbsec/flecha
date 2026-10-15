@@ -92,6 +92,20 @@ std::unique_ptr<BoundStatement> Lowerer::LowerStatement(
             return std::make_unique<BoundVariableDeclarationStatement>(
                 declaration.Range(), symbol, std::move(initializer));
         }
+        case core::AstNodeKind::DestructureStatement: {
+            const auto& destructure =
+                static_cast<const core::DestructureStatement&>(statement);
+            std::vector<BoundDestructureBinding> bindings;
+            for (const auto& binding : destructure.Bindings())
+                bindings.push_back(
+                    {static_cast<const semantic::VariableSymbol*>(
+                         _semanticModel->DestructureTarget(*binding)),
+                     destructure.IsInferred() ||
+                         binding->ExplicitType() != nullptr});
+            return std::make_unique<BoundDestructureStatement>(
+                statement.Range(), std::move(bindings),
+                LowerExpression(destructure.Value()));
+        }
         case core::AstNodeKind::DeferStatement:
             return std::make_unique<BoundDeferStatement>(
                 statement.Range(),
@@ -255,6 +269,16 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                                          : LowerExpression(*slice.Start()),
                 slice.End() == nullptr ? nullptr
                                        : LowerExpression(*slice.End()));
+        }
+        case core::AstNodeKind::TupleExpression: {
+            const auto& tuple =
+                static_cast<const core::TupleExpression&>(expression);
+            std::vector<std::unique_ptr<BoundExpression>> elements;
+            for (std::size_t i = 0; i < tuple.Elements().size(); ++i)
+                elements.push_back(
+                    LowerExpression(*tuple.Elements()[i], type.Elements()[i]));
+            return std::make_unique<BoundTupleExpression>(
+                expression.Range(), type, std::move(elements));
         }
         case core::AstNodeKind::ArrayExpression: {
             const auto& array =

@@ -304,16 +304,26 @@ Functions can return tuples directly:
 Tuple destructuring binds the returned elements:
 
 ```flecha
-(quotient, remainder) := divide(10, 3);
+quotient, remainder := divide(10, 3);
 ```
 
-An explicitly typed form may also be supported:
+Explicitly typed destructuring is also supported:
 
 ```flecha
-(i32 quotient, i32 remainder) = divide(10, 3);
+i32 quotient, i32 remainder = divide(10, 3);
+i32 q, r = divide(10, 3); // One type applies to both names.
 ```
 
-The tuple memory layout, calling convention, element access syntax, and destructuring rules remain to be finalized.
+Tuples, tuple parameters/results, and flat destructuring are implemented.
+Binding-list parentheses are optional. Without parentheses, explicit types
+carry forward to subsequent names until another type is written. Mixed
+bindings such as `(existing, i32 fresh) = value;` and `_` discards are supported.
+The right-hand side evaluates once before destination stores. Tuples use value
+semantics, including deep copies of owning strings; stored borrowed elements
+remain unsupported. The native representation is an LLVM non-packed struct,
+with a compiler-internal aggregate calling convention. See
+[tuples and destructuring](docs/tuples.md) for syntax, cleanup, and current limits.
+Error values remain a later feature.
 
 ## 11. Errors as values
 

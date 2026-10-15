@@ -411,3 +411,19 @@ TEST(LoweringTests, RetainsDeferredCallInsteadOfAnImmediateExpression) {
     LoweredSource invalid = Lower("void f() { defer 42; }");
     EXPECT_EQ(invalid.program, nullptr);
 }
+
+TEST(LoweringTests, PreservesTupleEvaluationAndDestructuringTargets) {
+    auto result = Lower(
+        "(i32, bool) pair() { return (42, true); } void f() { x := 0; (x, bool "
+        "ok) = pair(); (_, _) := pair(); }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.program, nullptr);
+    const auto& statement = static_cast<const BoundDestructureStatement&>(
+        *result.program->Functions()[1]->Body().Statements()[1]);
+    EXPECT_FALSE(statement.Bindings()[0].declaration);
+    EXPECT_TRUE(statement.Bindings()[1].declaration);
+    EXPECT_EQ(statement.Value().Kind(), BoundNodeKind::CallExpression);
+    EXPECT_NE(DumpBoundProgram(*result.program)
+                  .find("destructure (x: i32, local ok: bool)"),
+              std::string::npos);
+}

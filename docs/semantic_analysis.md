@@ -140,3 +140,13 @@ Argument typing, definite assignment, and unsafe permission apply at
 registration. Synthetic capture symbols keep reference/slice loans live until
 their enclosing scope exits, including across backward jumps and control-flow
 joins. See [defer.md](defer.md) for capture and cleanup rules.
+
+### Tuples and destructuring
+
+Tuple element types are structural and recursive. Expected tuple types supply
+element contexts for literals. Destructuring resolves existing destinations
+before analyzing its right-hand side and introduces new bindings afterward.
+The shared CFG evaluates the complete source before destination writes, with
+scope resets for declarations. Borrow checking treats each destination as a
+write to its owner. `FLECHA-S0039` and `FLECHA-S0040` diagnose unsupported tuple
+contents/layout and invalid destructuring. See [tuples.md](tuples.md).

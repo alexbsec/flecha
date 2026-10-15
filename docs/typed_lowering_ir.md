@@ -26,3 +26,8 @@ debugging and tests. It is not Flecha syntax and is not a serialization format.
 `BoundDeferStatement` retains a resolved direct call separately from immediate
 expression statements. Its arguments capture at registration, and codegen
 invokes the call during scope cleanup. See [defer.md](defer.md).
+
+`BoundTupleExpression` retains ordered, typed elements. A
+`BoundDestructureStatement` holds one right-hand side and resolved destinations,
+including declaration/assignment flags and blank discards. It is not expanded
+into repeated evaluations of the source expression. See [tuples.md](tuples.md).

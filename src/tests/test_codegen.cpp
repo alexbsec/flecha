@@ -595,3 +595,42 @@ TEST(CodeGeneratorTests, VerifiesDeferAcrossEarlyReturnsAndScopeEntryJumps) {
     ASSERT_NE(result.module, nullptr) << result.generator->Error();
     EXPECT_TRUE(VerifyModule(*result.module).empty());
 }
+
+TEST(CodeGeneratorTests, VerifiesNestedTupleReturnsArgumentsAndDestructuring) {
+    auto result = Generate(R"(
+        (i32, (bool, u8)) pair(i32 n) { return (n, (true, 7)); }
+        (i32, (bool, u8)) pass((i32, (bool, u8)) p) { return p; }
+        i32 main() { t := pass(pair(42)); (n, inner) := t; (ok, byte) := inner; return n; }
+    )");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr);
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    EXPECT_NE(
+        ModuleText(*result.module).find("define { i32, { i1, i8 } } @pair"),
+        std::string::npos);
+}
+
+TEST(CodeGeneratorTests, VerifiesOwnedTupleCleanupAndDeferredCaptures) {
+    auto result = Generate(R"(
+        (string, i32) pair() { return ("value", 42); }
+        void use((string, i32) p) { (s, n) := p; }
+        i32 main() {
+            i32 count = 0;
+            loop ;; {
+                #again
+                if count == 1 { return 42; }
+                t := pair();
+                defer use(t);
+                defer pair();
+                t = pair();
+                (string s, _) = t;
+                (s, _) = pair();
+                count++;
+                jumpto again;
+            }
+        }
+    )");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr);
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+}

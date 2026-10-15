@@ -1,0 +1,187 @@
+(i32, i32) divide(i32 dividend, i32 divisor) {
+    return (dividend / divisor, dividend % divisor);
+}
+(i32, bool) counted(&i32 calls) { (*calls)++; return (*calls, true); }
+(i32, bool) recurse(i32 n) {
+    if n == 0 { return (42, true); }
+    return recurse(n - 1);
+}
+void replace_pair(&(i32, i32) target) { *target = (40, 2); }
+
+i32 tuple_values_test() {
+    (q, r) := divide(17, 5);
+    if q != 3 or r != 2 { return 1; }
+    (q, r) = (r, q);
+    if q != 2 or r != 3 { return 2; }
+    (i32 next, q) = (7, 9);
+    if next != 7 or q != 9 { return 3; }
+    i32 a;
+    bool b;
+    i32 calls = 0;
+    (a, b) = counted(&calls);
+    if calls != 1 or a != 1 or !b { return 4; }
+    (_, b) = counted(&calls);
+    (_, _) := counted(&calls);
+    if calls != 3 { return 5; }
+    (a, b) = recurse(7);
+    if a != 42 or !b { return 6; }
+    pair := (1, 2);
+    replace_pair(&pair);
+    (a, i32 tail) = pair;
+    if a + tail != 42 { return 7; }
+    (u8 small, (bool, u64) nested) = (255, (true, 18446744073709551615));
+    (flag, big) := nested;
+    if small != 255 or !flag or big != 18446744073709551615 { return 8; }
+    (u32, bool, *i32) zero = none;
+    (number, flag_zero, pointer) := zero;
+    if number != 0 or flag_zero or pointer != none { return 9; }
+    (const i32 fixed, _) = (42, true);
+    if fixed != 42 { return 10; }
+    {
+        (a, b) := (a + 1, false);
+        if a != 41 or b { return 11; }
+    }
+    if a != 40 or !b { return 12; }
+    return 42;
+}
+
+([4]i32, (f64, bool)) aggregate([4]i32 source) {
+    return (source, (1.5, true));
+}
+([1024]i32, i32) big_aggregate() { return ([7; 1024], 42); }
+i32 tuple_aggregate_test() {
+    a := [1, 2, 3, 4];
+    t := aggregate(a);
+    a[0] = 99;
+    (copy, nested) := t;
+    (fraction, flag) := nested;
+    if copy[0] != 1 or copy[3] != 4 or fraction != 1.5 or !flag { return 1; }
+    copy[0] = 88;
+    (copy, _) = t;
+    if copy[0] != 1 { return 2; }
+    (huge, answer) := big_aggregate();
+    if huge[1023] != 7 or answer != 42 { return 3; }
+    (i32, bool) pointed = (7, true);
+    unsafe {
+        ptr := &raw pointed;
+        *ptr = (42, false);
+        (answer, flag) = *ptr;
+    }
+    if answer != 42 or flag { return 4; }
+    return 42;
+}
+
+(string, (string, i32)) owned_tuple() { return ("left", ("right", 42)); }
+(string, (string, i32)) pass_owned((string, (string, i32)) tuple) {
+    copy := tuple;
+    tuple = ("changed", ("changed too", 0));
+    return copy;
+}
+bool ordered_arguments((string, i32) first, (string, i32) second) {
+    (a, _) := first;
+    (b, _) := second;
+    return a == "before" and b == "after";
+}
+unsafe void deferred_owned(*i32 calls, (string, i32) value) {
+    (s, n) := value;
+    if s == "before" and n == 42 { (*calls)++; }
+}
+
+i32 tuple_strings_test() {
+    tuple := pass_owned(owned_tuple());
+    copy := tuple;
+    tuple = ("new left", ("new right", 3));
+    (s, nested) := copy;
+    (other, answer) := nested;
+    if s != "left" or other != "right" or answer != 42 { return 1; }
+    (s, other) = (other, s);
+    if s != "right" or other != "left" { return 2; }
+    copy = copy;
+    (s, nested) = copy;
+    if s != "left" { return 3; }
+    string original = "before";
+    (string, i32) snapshot = (original, (original = "after").len() as i32);
+    (s, answer) = snapshot;
+    if s != "before" or original != "after" or answer != 5 { return 4; }
+    (string, i32) arguments = ("before", 42);
+    if !ordered_arguments(arguments, arguments = ("after", 0)) { return 5; }
+    (string, (string, bool)) zero = none;
+    (s, (string, bool) zero_nested) = zero;
+    (other, bool flag) = zero_nested;
+    if s != "" or other != "" or flag { return 6; }
+    i32 calls = 0;
+    unsafe {
+        (string, i32) capture = ("before", 42);
+        defer deferred_owned(&raw calls, capture);
+        defer owned_tuple();
+        capture = ("after", 0);
+    }
+    if calls != 1 { return 7; }
+    (_, _) := owned_tuple();
+    return 42;
+}
+
+i32 tuple_cleanup_test() {
+    i32 calls = 0;
+    loop i := 0; i < 1000; i++ {
+        value := owned_tuple();
+        (s, inner) := value;
+        (text, number) := inner;
+        value = pass_owned(value);
+        (s, inner) = owned_tuple();
+        defer owned_tuple();
+        if i < 999 { proceed; }
+        break;
+    }
+    i32 count = 0;
+    unsafe {
+        loop ;; {
+            #again
+            if count == 4 { break; }
+            (string, i32) local = ("before", 42);
+            defer deferred_owned(&raw calls, local);
+            (string s, _) = local;
+            count++;
+            jumpto again;
+        }
+    }
+    if calls != 4 { return 1; }
+    loop ;; {
+        outer := owned_tuple();
+        {
+            inner := pass_owned(outer);
+            defer owned_tuple();
+            jumpto finish;
+        }
+        #finish
+        return 42;
+    }
+}
+
+i32 tuple_bare_bindings_test() {
+    i32 q, r = divide(17, 5);
+    if q != 3 or r != 2 { return 1; }
+    i32 first, i32 second = divide(20, 3);
+    if first != 6 or second != 2 { return 2; }
+    quotient, remainder := divide(19, 5);
+    quotient, remainder = (remainder, quotient);
+    if quotient != 4 or remainder != 3 { return 3; }
+    bool ok, changed, i32 answer = (true, false, 42);
+    if !ok or changed or answer != 42 { return 4; }
+    const u8 low, high = (0, 255);
+    if low != 0 or high != 255 { return 5; }
+    (i32, bool) left, right = ((1, true), (2, false));
+    number, flag := right;
+    if number != 2 or flag { return 6; }
+    string a, b = ("one", "two");
+    a, b = (b, a);
+    if a != "two" or b != "one" { return 7; }
+    i32 calls = 0;
+    i32 n, bool done = counted(&calls);
+    if calls != 1 or n != 1 or !done { return 8; }
+    q, i32 fresh, next = (7, 8, 9);
+    if q != 7 or fresh != 8 or next != 9 { return 9; }
+    (i32 declared, q) = divide(17, 5);
+    if declared != 3 or q != 2 { return 10; }
+    return 42;
+}

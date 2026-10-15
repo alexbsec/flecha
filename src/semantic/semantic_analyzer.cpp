@@ -35,6 +35,19 @@ bool IsArrayElement(SemanticType type) {
 std::optional<std::uint64_t> StorageSize(SemanticType type) {
     constexpr std::uint64_t MAX_BYTES =
         std::numeric_limits<std::ptrdiff_t>::max() / 8;
+    if (type.Kind() == SemanticTypeKind::Tuple) {
+        std::uint64_t size = 0;
+        for (const auto& field : type.Elements()) {
+            const auto bytes = StorageSize(field);
+            // Conservative padding bound for the currently supported field
+            // types.
+            if (!bytes || *bytes > MAX_BYTES - 16 ||
+                size > MAX_BYTES - *bytes - 16)
+                return std::nullopt;
+            size += *bytes + 16;
+        }
+        return size;
+    }
     if (type.Kind() == SemanticTypeKind::Array) {
         const std::optional<std::uint64_t> element =
             StorageSize(*type.Target());
@@ -44,6 +57,8 @@ std::optional<std::uint64_t> StorageSize(SemanticType type) {
         return type.Length() * *element;
     }
     switch (type.Kind()) {
+        case SemanticTypeKind::String:
+            return 3 * sizeof(void*);
         case SemanticTypeKind::I8:
         case SemanticTypeKind::U8:
         case SemanticTypeKind::Bool:
@@ -151,6 +166,11 @@ const Symbol* SemanticAnalyzer::AddSymbol(std::unique_ptr<Symbol> symbol,
 }
 
 SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type) {
+    const core::TypeNode* leaf = &type;
+    while (leaf->Target() != nullptr) leaf = leaf->Target();
+    if (leaf->TypeForm() == core::TypeKind::Tuple)
+        for (const auto& element : leaf->Elements())
+            (void)ResolveType(*element);
     const SemanticType result = SemanticType::FromSyntax(type);
     const SemanticType* layer = &result;
     if (layer->Kind() == SemanticTypeKind::Slice) {
@@ -171,7 +191,7 @@ SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type) {
                 "references currently require scalar or raw-pointer storage");
         }
     }
-    while (layer->IsCompound()) {
+    while (layer->Target() != nullptr) {
         if (layer->IsBorrowed()) {
             Report(diagnostics::DiagnosticCode::UnsupportedCompoundType,
                    type.Range(),
@@ -183,7 +203,131 @@ SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type) {
             ValidateArrayType(*layer, type.Range());
         layer = layer->Target();
     }
+    if (layer->Kind() == SemanticTypeKind::Tuple)
+        ValidateTupleType(*layer, type.Range());
+    if (result.Kind() == SemanticTypeKind::Reference &&
+        result.Target()->OwnsStorage())
+        Report(diagnostics::DiagnosticCode::UnsupportedCompoundType,
+               type.Range(),
+               "references to owning tuple storage are not yet supported");
     return result;
+}
+
+void SemanticAnalyzer::ValidateTupleType(SemanticType type,
+                                         source::SourceRange range) {
+    if (!StorageSize(type).has_value())
+        Report(diagnostics::DiagnosticCode::InvalidTuple, range,
+               "tuple has unsupported elements or its storage is too large");
+    for (const SemanticType& element : type.Elements()) {
+        if (element.Kind() == SemanticTypeKind::Tuple)
+            ValidateTupleType(element, range);
+        else if (element.Kind() == SemanticTypeKind::Array)
+            ValidateArrayType(element, range);
+        else if (!element.IsError() && !element.IsNumeric() &&
+                 element.Kind() != SemanticTypeKind::Bool &&
+                 element.Kind() != SemanticTypeKind::Char &&
+                 element.Kind() != SemanticTypeKind::Pointer &&
+                 element.Kind() != SemanticTypeKind::String)
+            Report(diagnostics::DiagnosticCode::InvalidTuple, range,
+                   "tuple elements must be owned values: scalars, raw "
+                   "pointers, strings, fixed arrays, or tuples; found '" +
+                       element.Name() + "'");
+    }
+}
+
+SemanticType SemanticAnalyzer::AnalyzeTuple(
+    const core::TupleExpression& expression, SemanticType expected) {
+    std::vector<SemanticType> elements;
+    const bool contextual =
+        expected.Kind() == SemanticTypeKind::Tuple &&
+        expected.Elements().size() == expression.Elements().size();
+    for (std::size_t i = 0; i < expression.Elements().size(); ++i) {
+        const SemanticType target =
+            contextual ? expected.Elements()[i] : SemanticType::Error();
+        const SemanticType actual =
+            AnalyzeExpression(*expression.Elements()[i], target);
+        if (!target.IsError() && !IsAssignable(target, actual))
+            Report(diagnostics::DiagnosticCode::IncompatibleType,
+                   expression.Elements()[i]->Range(),
+                   TypeMismatch(target, actual));
+        elements.push_back(target.IsError() ? actual.WithoutConst() : target);
+    }
+    SemanticType result(std::move(elements));
+    ValidateTupleType(result, expression.Range());
+    return result;
+}
+
+void SemanticAnalyzer::AnalyzeDestructure(
+    const core::DestructureStatement& statement) {
+    std::vector<SemanticType> expected;
+    std::vector<const Symbol*> targets;
+    std::unordered_set<std::string> names;
+    for (const auto& binding : statement.Bindings()) {
+        const Symbol* target = nullptr;
+        SemanticType type = SemanticType::Error();
+        if (binding->Name() != "_" && !names.insert(binding->Name()).second)
+            Report(diagnostics::DiagnosticCode::InvalidDestructure,
+                   binding->Range(),
+                   "duplicate destructuring destination '" + binding->Name() +
+                       "'");
+        if (binding->ExplicitType() != nullptr) {
+            type = ResolveType(*binding->ExplicitType());
+            if (statement.IsInferred())
+                Report(diagnostics::DiagnosticCode::InvalidDestructure,
+                       binding->Range(),
+                       "typed destructuring bindings require '=' rather than "
+                       "':='");
+        } else if (!statement.IsInferred() && binding->Name() != "_") {
+            target = _currentScope->Lookup(binding->Name());
+            if (target == nullptr)
+                Report(diagnostics::DiagnosticCode::UnknownName,
+                       binding->Range(),
+                       "unknown name '" + binding->Name() + "'");
+            else {
+                type = target->Type();
+                if (target->Kind() == SymbolKind::Function ||
+                    !target->Writable())
+                    Report(diagnostics::DiagnosticCode::SymbolNotWritable,
+                           binding->Range(),
+                           "destructuring destination is not writable");
+            }
+        }
+        expected.push_back(type);
+        targets.push_back(target);
+    }
+    const SemanticType value =
+        AnalyzeExpression(statement.Value(), SemanticType(expected));
+    if (value.Kind() != SemanticTypeKind::Tuple) {
+        if (!value.IsError())
+            Report(diagnostics::DiagnosticCode::InvalidDestructure,
+                   statement.Value().Range(),
+                   "destructuring requires a tuple value");
+        return;
+    }
+    if (statement.Bindings().size() != value.Elements().size() ||
+        statement.Bindings().size() < 2) {
+        Report(diagnostics::DiagnosticCode::InvalidDestructure,
+               statement.Range(), "destructuring arity must match the tuple");
+        return;
+    }
+    for (std::size_t i = 0; i < statement.Bindings().size(); ++i) {
+        const auto& binding = *statement.Bindings()[i];
+        const SemanticType actual = value.Elements()[i];
+        const SemanticType type =
+            expected[i].IsError() ? actual.WithoutConst() : expected[i];
+        if (!IsAssignable(type, actual))
+            Report(diagnostics::DiagnosticCode::IncompatibleType,
+                   binding.Range(), TypeMismatch(type, actual));
+        if (binding.Name() == "_") continue;
+        const Symbol* target = targets[i];
+        if (statement.IsInferred() || binding.ExplicitType() != nullptr)
+            target = AddSymbol(std::make_unique<VariableSymbol>(
+                                   SymbolKind::LocalVariable, binding.Name(),
+                                   type, binding.Range(), !type.IsConst()),
+                               binding);
+        if (target != nullptr)
+            _model._destructureTargets.emplace(&binding, target);
+    }
 }
 
 void SemanticAnalyzer::RegisterBuiltIns() {
@@ -393,6 +537,10 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             _inUnsafe = previousUnsafe;
             break;
         }
+        case core::AstNodeKind::DestructureStatement:
+            AnalyzeDestructure(
+                static_cast<const core::DestructureStatement&>(statement));
+            break;
         case core::AstNodeKind::VariableDeclarationStatement: {
             const core::VariableDeclarationStatement& variable =
                 static_cast<const core::VariableDeclarationStatement&>(
@@ -660,6 +808,11 @@ SemanticType SemanticAnalyzer::AnalyzeExpression(
     const core::Expression& expression, SemanticType expected) {
     SemanticType type = SemanticType::Error();
     switch (expression.Kind()) {
+        case core::AstNodeKind::TupleExpression:
+            type = AnalyzeTuple(
+                static_cast<const core::TupleExpression&>(expression),
+                expected);
+            break;
         case core::AstNodeKind::ArrayExpression:
             type = AnalyzeArray(
                 static_cast<const core::ArrayExpression&>(expression),
@@ -1025,7 +1178,9 @@ SemanticType SemanticAnalyzer::AnalyzeUnary(
             !(target.IsNumeric() || target.Kind() == SemanticTypeKind::Bool ||
               target.Kind() == SemanticTypeKind::Char ||
               target.Kind() == SemanticTypeKind::Pointer ||
-              target.Kind() == SemanticTypeKind::Array) ||
+              target.Kind() == SemanticTypeKind::Array ||
+              (target.Kind() == SemanticTypeKind::Tuple &&
+               !target.OwnsStorage())) ||
             !IsSafePlace(expression.Operand())) {
             Report(diagnostics::DiagnosticCode::InvalidReference,
                    expression.Range(),
@@ -1095,9 +1250,10 @@ SemanticType SemanticAnalyzer::AnalyzeBinary(
         expression.Left().Kind() == core::AstNodeKind::LiteralExpression)
         left = AnalyzeExpression(expression.Left(), right);
     if (left.IsBorrowed() || right.IsBorrowed() || left.IsSequence() ||
-        right.IsSequence()) {
+        right.IsSequence() || left.Kind() == SemanticTypeKind::Tuple ||
+        right.Kind() == SemanticTypeKind::Tuple) {
         Report(diagnostics::DiagnosticCode::InvalidOperand, expression.Range(),
-               "arrays and reference handles do not support binary operators");
+               "arrays, tuples, and reference handles do not support binary operators");
         return SemanticType::Error();
     }
     if (left.IsError() || right.IsError()) return SemanticType::Error();

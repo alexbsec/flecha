@@ -142,6 +142,12 @@ class BorrowChecker final {
                 if (slice.End() != nullptr) CollectUses(*slice.End(), uses);
                 break;
             }
+            case Kind::TupleExpression:
+                for (const auto& element :
+                     static_cast<const core::TupleExpression&>(expression)
+                         .Elements())
+                    CollectUses(*element, uses);
+                break;
             case Kind::ArrayExpression:
                 for (const auto& element :
                      static_cast<const core::ArrayExpression&>(expression)
@@ -219,6 +225,8 @@ class BorrowChecker final {
                 if (node.declaration->Initializer() != nullptr)
                     CollectUses(*node.declaration->Initializer(), _uses[id]);
             }
+            if (node.destructure != nullptr)
+                CollectUses(node.destructure->Value(), _uses[id]);
             if (node.deferRegistration != nullptr)
                 CollectUses(node.deferRegistration->Call(), _uses[id]);
             if (node.evaluation != nullptr) {
@@ -287,6 +295,15 @@ class BorrowChecker final {
                     value = Borrow(std::move(value), false,
                                    node.declaration->Range());
                 Store(symbol, value, node.declaration->Initializer()->Range());
+            }
+        }
+        if (node.destructure != nullptr) {
+            (void)Evaluate(node.destructure->Value());
+            for (const auto& binding : node.destructure->Bindings()) {
+                const Symbol* target = _model.DestructureTarget(*binding);
+                if (target != nullptr)
+                    CheckAccess({{{target, {}}}, nullptr, 0}, true,
+                                binding->Range());
             }
         }
         if (node.deferRegistration != nullptr) {
@@ -482,6 +499,12 @@ class BorrowChecker final {
                               !_model.TypeOf(expression).Target()->IsConst(),
                               expression.Range());
             }
+            case Kind::TupleExpression:
+                for (const auto& element :
+                     static_cast<const core::TupleExpression&>(expression)
+                         .Elements())
+                    (void)Evaluate(*element);
+                return {};
             case Kind::ArrayExpression:
                 for (const auto& element :
                      static_cast<const core::ArrayExpression&>(expression)
