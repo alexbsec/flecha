@@ -36,7 +36,7 @@ bool SemanticType::OwnsStorage() const {
 
 bool SemanticType::operator==(const SemanticType& other) const {
     return _kind == other._kind && _isConst == other._isConst &&
-           _length == other._length &&
+           _family == other._family && _length == other._length &&
            ((_elements == nullptr && other._elements == nullptr) ||
             (_elements != nullptr && other._elements != nullptr &&
              *_elements == *other._elements)) &&
@@ -46,6 +46,7 @@ bool SemanticType::operator==(const SemanticType& other) const {
 }
 
 SemanticType SemanticType::FromSyntax(const core::TypeNode& type) {
+    if (type.TypeForm() == core::TypeKind::Named) return Error();
     if (type.TypeForm() == core::TypeKind::Tuple) {
         std::vector<SemanticType> elements;
         for (const auto& element : type.Elements())
@@ -72,6 +73,10 @@ SemanticType SemanticType::FromSyntax(const core::TypeNode& type) {
 std::string SemanticType::Name() const {
     if (_isConst) return "const " + WithoutConst().Name();
     switch (_kind) {
+        case SemanticTypeKind::ErrorValue:
+            return "error";
+        case SemanticTypeKind::NamedError:
+            return _family->name;
         case SemanticTypeKind::I8:
             return "i8";
         case SemanticTypeKind::I16:
@@ -156,6 +161,8 @@ bool SemanticType::IsPrintable() const {
 
 SemanticType SemanticType::FromSyntax(core::PrimitiveType type) {
     switch (type) {
+        case core::PrimitiveType::ErrorValue:
+            return SemanticType(SemanticTypeKind::ErrorValue);
         case core::PrimitiveType::I8:
             return SemanticType(SemanticTypeKind::I8);
         case core::PrimitiveType::I16:
@@ -197,6 +204,9 @@ SemanticType SemanticType::FromSyntax(core::PrimitiveType type) {
 bool IsAssignable(SemanticType destination, SemanticType source) {
     if (destination.IsError() || source.IsError()) return true;
     if (destination.WithoutConst() == source.WithoutConst()) return true;
+    if (destination.Kind() == SemanticTypeKind::ErrorValue &&
+        source.Kind() == SemanticTypeKind::NamedError)
+        return true;
     if (destination.Kind() == SemanticTypeKind::Tuple &&
         source.Kind() == SemanticTypeKind::Tuple) {
         if (destination.Elements().size() != source.Elements().size())

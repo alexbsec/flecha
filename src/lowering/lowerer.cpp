@@ -290,6 +290,18 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                 expression.Range(), type, std::move(elements),
                 array.IsRepeat());
         }
+        case core::AstNodeKind::MemberAccessExpression: {
+            const auto& member =
+                static_cast<const core::MemberAccessExpression&>(expression);
+            const auto& variants = type.Family().variants;
+            std::size_t code = 1;
+            for (const auto& variant : variants) {
+                if (variant == member.Member()) break;
+                ++code;
+            }
+            return std::make_unique<BoundLiteralExpression>(
+                expression.Range(), type, std::to_string(code));
+        }
         case core::AstNodeKind::LiteralExpression: {
             const core::LiteralExpression& literal =
                 static_cast<const core::LiteralExpression&>(expression);
@@ -353,20 +365,24 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                 _semanticModel->TypeOf(binary.Left());
             const semantic::SemanticType rightType =
                 _semanticModel->TypeOf(binary.Right());
-            // Contextualize null/none only for pointer equality in this
-            // milestone.
+            const bool errorEquality =
+                (binary.OperatorType() == TokenType::Equal ||
+                 binary.OperatorType() == TokenType::NotEqual);
+            // Error success is contextual only for ordinary value equality.
             return std::make_unique<BoundBinaryExpression>(
                 expression.Range(), type,
                 LowerExpression(
                     binary.Left(),
-                    (rightType.Kind() == semantic::SemanticTypeKind::Pointer ||
+                    ((errorEquality && rightType.IsErrorValue()) ||
+                     rightType.Kind() == semantic::SemanticTypeKind::Pointer ||
                      rightType.Kind() == semantic::SemanticTypeKind::Null)
                         ? rightType
                         : semantic::SemanticType::Error()),
                 binary.OperatorType(),
                 LowerExpression(
                     binary.Right(),
-                    (leftType.Kind() == semantic::SemanticTypeKind::Pointer ||
+                    ((errorEquality && leftType.IsErrorValue()) ||
+                     leftType.Kind() == semantic::SemanticTypeKind::Pointer ||
                      leftType.Kind() == semantic::SemanticTypeKind::Null)
                         ? leftType
                         : semantic::SemanticType::Error()));

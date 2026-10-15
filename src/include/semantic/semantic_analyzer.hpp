@@ -30,6 +30,10 @@ class SemanticAnalyzer final {
     SemanticType PlaceType(const core::Expression& expression) const;
     void RequireUnsafe(source::SourceRange range);
     SemanticType ResolveType(const core::TypeNode& type);
+    SemanticType ResolveTypeSyntax(const core::TypeNode& type);
+    void RegisterErrorTypes(const core::CompilationUnit& unit);
+    SemanticType AnalyzeMemberAccess(
+        const core::MemberAccessExpression& expression);
     void RegisterBuiltIns();
     void RegisterFunctions(const core::CompilationUnit& unit);
     void AnalyzeFunction(const core::FunctionDeclaration& function);

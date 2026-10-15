@@ -8,8 +8,8 @@ checks that tree. Syntax types (`core::TypeNode` and `core::PrimitiveType`) stay
 in the AST. `semantic::SemanticType` is the resolved type used by symbols and
 expression checking.
 
-Analysis first registers every top-level function so calls may refer to
-functions declared later in the file. It then analyzes each function body in
+Analysis first registers named error families, then every top-level function,
+so signatures and calls may refer to declarations later in the file. It analyzes each function body in
 source order. The resulting `SemanticModel` provides:
 
 - the symbol declared by a function, parameter, or local declaration;
@@ -29,7 +29,7 @@ queries are used.
 
 ## Scopes and declarations
 
-The compilation-unit scope contains functions. Each function has a child scope
+The compilation-unit scope contains functions and named error types. Each function has a child scope
 containing its parameters and top-level body locals. Conditional bodies,
 `else` bodies, and `also` bodies introduce nested lexical scopes. Lookup starts
 in the current scope and walks outward. A declaration name may appear only once
@@ -45,8 +45,10 @@ is diagnosed.
 ## Types and inference
 
 Semantic types cover every syntax primitive plus the literal-only `null` and
-`none` types, the internal `function` type, and an error-recovery type. Literal
-defaults are:
+`none` types, named error families, built-in `error`, the internal `function`
+type, and a separate error-recovery type. Named error types preserve nominal
+identity and implicitly widen to `error`; see [error_values.md](error_values.md).
+Literal defaults are:
 
 | Literal | Inferred type |
 | --- | --- |

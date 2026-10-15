@@ -9,6 +9,9 @@ namespace flecha::core {
 namespace {
 
 std::unique_ptr<TypeNode> CloneType(const TypeNode& type) {
+    if (type.TypeForm() == TypeKind::Named)
+        return std::make_unique<TypeNode>(
+            type.Range(), type.Name(), type.IsConst(), type.QualifierRange());
     if (type.TypeForm() == TypeKind::Tuple) {
         std::vector<std::unique_ptr<TypeNode>> elements;
         for (const auto& element : type.Elements())
@@ -97,6 +100,7 @@ bool Parser::IsTypeToken(TokenType type) const {
         case TokenType::Void:
         case TokenType::String:
         case TokenType::StringView:
+        case TokenType::Error:
             return true;
         default:
             return false;
@@ -104,6 +108,10 @@ bool Parser::IsTypeToken(TokenType type) const {
 }
 
 bool Parser::StartsType() const {
+    // Preserve the contextual raw-address operator before named-type lookahead.
+    if (Check(TokenType::Ampersand) && Peek(1).type == TokenType::Identifier &&
+        Peek(1).value == "raw")
+        return false;
     if (Check(TokenType::Const) || Check(TokenType::ConstPtr) ||
         Check(TokenType::ConstRef))
         return true;
@@ -130,7 +138,44 @@ bool Parser::StartsType() const {
         } else
             break;
     }
-    return IsTypeToken(Peek(offset).type);
+    if (IsTypeToken(Peek(offset).type)) return true;
+    offset = 0;
+    return ScanType(offset) && Peek(offset).type == TokenType::Identifier;
+}
+
+bool Parser::ScanType(std::size_t& offset) const {
+    if (Peek(offset).type == TokenType::Const) ++offset;
+    const TokenType token = Peek(offset).type;
+    if (token == TokenType::Mul || token == TokenType::Ampersand ||
+        token == TokenType::ConstPtr || token == TokenType::ConstRef) {
+        ++offset;
+        return ScanType(offset);
+    }
+    if (token == TokenType::LBracket) {
+        ++offset;
+        if (Peek(offset).type == TokenType::NumberLiteral) ++offset;
+        if (Peek(offset).type != TokenType::RBracket) return false;
+        ++offset;
+        return ScanType(offset);
+    }
+    if (token == TokenType::LParen) {
+        ++offset;
+        if (!ScanType(offset)) return false;
+        if (Peek(offset).type != TokenType::Comma) return false;
+        do {
+            ++offset;
+            if (Peek(offset).type == TokenType::RParen) break;
+            if (!ScanType(offset)) return false;
+        } while (Peek(offset).type == TokenType::Comma);
+        if (Peek(offset).type != TokenType::RParen) return false;
+        ++offset;
+        return true;
+    }
+    if (IsTypeToken(token) || token == TokenType::Identifier) {
+        ++offset;
+        return true;
+    }
+    return false;
 }
 
 const Token* Parser::Consume(TokenType type, std::string_view expectation) {
@@ -218,9 +263,16 @@ std::unique_ptr<TypeNode> Parser::ParseType() {
             source::SourceRange{start, close->range.end}, std::move(elements),
             explicitConst, qualifierRange);
     }
+    if (Match(TokenType::Identifier))
+        return std::make_unique<TypeNode>(
+            source::SourceRange{start, token.range.end}, token.value,
+            explicitConst, qualifierRange);
     PrimitiveType type;
 
     switch (token.type) {
+        case TokenType::Error:
+            type = PrimitiveType::ErrorValue;
+            break;
         case TokenType::I8:
             type = PrimitiveType::I8;
             break;
@@ -351,7 +403,32 @@ std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
         std::move(body), name->range);
 }
 
+std::unique_ptr<ErrorDeclaration> Parser::ParseErrorDeclaration() {
+    const auto start = Advance().range.start;
+    const Token* name = Consume(TokenType::Identifier, "error type name");
+    if (name == nullptr ||
+        Consume(TokenType::LCurly, "'{' after error type name") == nullptr)
+        return nullptr;
+    std::vector<ErrorVariant> variants;
+    if (!Check(TokenType::RCurly)) {
+        do {
+            const Token* variant =
+                Consume(TokenType::Identifier, "error variant name");
+            if (variant == nullptr) return nullptr;
+            variants.push_back({variant->value, variant->range});
+        } while (Match(TokenType::Comma) && !Check(TokenType::RCurly));
+    }
+    const Token* close = Consume(TokenType::RCurly, "'}' after error variants");
+    if (close == nullptr) return nullptr;
+    return std::make_unique<ErrorDeclaration>(
+        source::SourceRange{start, close->range.end}, name->value, name->range,
+        std::move(variants));
+}
+
 std::unique_ptr<Declaration> Parser::ParseDeclaration() {
+    if (Check(TokenType::Error) && Peek(1).type == TokenType::Identifier &&
+        Peek(2).type == TokenType::LCurly)
+        return ParseErrorDeclaration();
     if (StartsType() || Check(TokenType::Unsafe)) {
         return ParseFunctionDeclaration();
     }
@@ -1056,10 +1133,11 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
                 continue;
             }
             if (!Match(TokenType::LParen)) {
-                _diagnostics.Report(diagnostics::DiagnosticCode::ExpectedToken,
-                                    Current().range,
-                                    "expected '(' after member name");
-                return expression;
+                expression = std::make_unique<MemberAccessExpression>(
+                    source::SourceRange{expression->Range().start,
+                                        member->range.end},
+                    std::move(expression), member->value, member->range);
+                continue;
             }
             source::SourceLocation end = member->range.end;
             std::vector<std::unique_ptr<Expression>> arguments =
@@ -1263,7 +1341,8 @@ std::unique_ptr<Expression> Parser::ParsePrimaryExpression() {
 }
 
 void Parser::SynchronizeTopLevel() {
-    if (!IsAtEnd()) Advance();
+    // Parse() guarantees progress if a failed declaration consumed nothing.
+    // Keep a following declaration's first token after a partially parsed one.
     while (!IsAtEnd() && !StartsType() && !Check(TokenType::Unsafe)) {
         Advance();
     }

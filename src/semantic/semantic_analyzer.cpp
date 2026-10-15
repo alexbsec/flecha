@@ -1,5 +1,6 @@
 #include "semantic/semantic_analyzer.hpp"
 
+#include <algorithm>
 #include <charconv>
 #include <cstdint>
 #include <limits>
@@ -25,7 +26,8 @@ bool IsArrayElement(SemanticType type) {
     if (type.IsConst()) return false;
     if (type.Kind() == SemanticTypeKind::Array)
         return IsArrayElement(*type.Target());
-    return type.IsNumeric() || type.Kind() == SemanticTypeKind::Bool ||
+    return type.IsNumeric() || type.IsErrorValue() ||
+           type.Kind() == SemanticTypeKind::Bool ||
            type.Kind() == SemanticTypeKind::Char ||
            type.Kind() == SemanticTypeKind::Pointer;
 }
@@ -57,6 +59,10 @@ std::optional<std::uint64_t> StorageSize(SemanticType type) {
         return type.Length() * *element;
     }
     switch (type.Kind()) {
+        case SemanticTypeKind::NamedError:
+            return 4;
+        case SemanticTypeKind::ErrorValue:
+            return 2 * sizeof(void*);
         case SemanticTypeKind::String:
             return 3 * sizeof(void*);
         case SemanticTypeKind::I8:
@@ -165,19 +171,48 @@ const Symbol* SemanticAnalyzer::AddSymbol(std::unique_ptr<Symbol> symbol,
     return result;
 }
 
+SemanticType SemanticAnalyzer::ResolveTypeSyntax(const core::TypeNode& type) {
+    if (type.TypeForm() == core::TypeKind::Named) {
+        const Symbol* symbol = _currentScope->Lookup(type.Name());
+        if (symbol == nullptr || symbol->Kind() != SymbolKind::ErrorType) {
+            Report(diagnostics::DiagnosticCode::UnknownType, type.Range(),
+                   "unknown type '" + type.Name() + "'");
+            return SemanticType::Error();
+        }
+        return type.IsConst() ? symbol->Type().WithConst() : symbol->Type();
+    }
+    if (type.TypeForm() == core::TypeKind::Primitive)
+        return SemanticType::FromSyntax(type);
+    if (type.TypeForm() == core::TypeKind::Tuple) {
+        std::vector<SemanticType> elements;
+        for (const auto& element : type.Elements())
+            elements.push_back(ResolveTypeSyntax(*element));
+        return SemanticType(std::move(elements), type.IsConst());
+    }
+    const SemanticTypeKind kind =
+        type.TypeForm() == core::TypeKind::Pointer ? SemanticTypeKind::Pointer
+        : type.TypeForm() == core::TypeKind::Reference
+            ? SemanticTypeKind::Reference
+        : type.TypeForm() == core::TypeKind::Array ? SemanticTypeKind::Array
+                                                   : SemanticTypeKind::Slice;
+    return SemanticType(kind, ResolveTypeSyntax(*type.Target()), type.IsConst(),
+                        type.Length());
+}
+
 SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type) {
     const core::TypeNode* leaf = &type;
     while (leaf->Target() != nullptr) leaf = leaf->Target();
     if (leaf->TypeForm() == core::TypeKind::Tuple)
         for (const auto& element : leaf->Elements())
             (void)ResolveType(*element);
-    const SemanticType result = SemanticType::FromSyntax(type);
+    const SemanticType result = ResolveTypeSyntax(type);
     const SemanticType* layer = &result;
     if (layer->Kind() == SemanticTypeKind::Slice) {
         if (!IsArrayElement(layer->Target()->WithoutConst()))
             Report(diagnostics::DiagnosticCode::UnsupportedCompoundType,
                    type.Range(),
-                   "slice elements must be scalars, raw pointers, or fixed "
+                   "slice elements must be scalars, error values, raw "
+                   "pointers, or fixed "
                    "arrays");
         layer = layer->Target();
     } else if (layer->Kind() == SemanticTypeKind::Reference) {
@@ -223,13 +258,15 @@ void SemanticAnalyzer::ValidateTupleType(SemanticType type,
             ValidateTupleType(element, range);
         else if (element.Kind() == SemanticTypeKind::Array)
             ValidateArrayType(element, range);
-        else if (!element.IsError() && !element.IsNumeric() &&
+        else if (!element.IsError() && !element.IsErrorValue() &&
+                 !element.IsNumeric() &&
                  element.Kind() != SemanticTypeKind::Bool &&
                  element.Kind() != SemanticTypeKind::Char &&
                  element.Kind() != SemanticTypeKind::Pointer &&
                  element.Kind() != SemanticTypeKind::String)
             Report(diagnostics::DiagnosticCode::InvalidTuple, range,
-                   "tuple elements must be owned values: scalars, raw "
+                   "tuple elements must be owned values: scalars, error "
+                   "values, raw "
                    "pointers, strings, fixed arrays, or tuples; found '" +
                        element.Name() + "'");
     }
@@ -347,6 +384,34 @@ void SemanticAnalyzer::RegisterBuiltIns() {
     registerOutput("stdoutln", BuiltInFunction::StdoutLine);
 }
 
+void SemanticAnalyzer::RegisterErrorTypes(const core::CompilationUnit& unit) {
+    for (const auto& declaration : unit.Declarations()) {
+        if (declaration->Kind() != core::AstNodeKind::ErrorDeclaration)
+            continue;
+        const auto& error =
+            static_cast<const core::ErrorDeclaration&>(*declaration);
+        auto family = std::make_shared<ErrorFamily>();
+        family->name = error.Name();
+        std::unordered_set<std::string> variants;
+        for (const auto& variant : error.Variants()) {
+            if (!variants.insert(variant.name).second)
+                Report(diagnostics::DiagnosticCode::DuplicateDeclaration,
+                       variant.range,
+                       "duplicate error variant '" + variant.name + "'");
+            family->variants.push_back(variant.name);
+        }
+        if (family->variants.empty())
+            Report(diagnostics::DiagnosticCode::InvalidErrorDeclaration,
+                   error.Range(),
+                   "error types require at least one failure variant; none is "
+                   "implicit");
+        AddSymbol(std::make_unique<Symbol>(SymbolKind::ErrorType, error.Name(),
+                                           SemanticType(std::move(family)),
+                                           error.NameRange(), false),
+                  error);
+    }
+}
+
 void SemanticAnalyzer::RegisterFunctions(const core::CompilationUnit& unit) {
     for (const std::unique_ptr<core::Declaration>& declaration :
          unit.Declarations()) {
@@ -381,6 +446,7 @@ SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
     _model = SemanticModel{};
     _currentScope = &AddScope(nullptr);
     RegisterBuiltIns();
+    RegisterErrorTypes(unit);
     RegisterFunctions(unit);
     for (const std::unique_ptr<core::Declaration>& declaration :
          unit.Declarations()) {
@@ -413,11 +479,12 @@ void SemanticAnalyzer::AnalyzeFunction(
 
     Scope* previousScope = _currentScope;
     _currentScope = &AddScope(previousScope);
+    std::size_t parameterIndex = 0;
     for (const std::unique_ptr<core::Parameter>& parameter :
          function.Parameters()) {
         AddSymbol(std::make_unique<VariableSymbol>(
                       SymbolKind::Parameter, parameter->Name(),
-                      SemanticType::FromSyntax(parameter->Type()),
+                      _currentFunction->ParameterTypes()[parameterIndex++],
                       parameter->NameRange(), !parameter->Type().IsConst()),
                   *parameter);
     }
@@ -851,6 +918,10 @@ SemanticType SemanticAnalyzer::AnalyzeExpression(
             type = AnalyzeCall(
                 static_cast<const core::CallExpression&>(expression));
             break;
+        case core::AstNodeKind::MemberAccessExpression:
+            type = AnalyzeMemberAccess(
+                static_cast<const core::MemberAccessExpression&>(expression));
+            break;
         case core::AstNodeKind::MemberCallExpression:
             type = AnalyzeMemberCall(
                 static_cast<const core::MemberCallExpression&>(expression));
@@ -879,7 +950,8 @@ void SemanticAnalyzer::ValidateArrayType(SemanticType type,
                                          source::SourceRange range) {
     if (!IsArrayElement(*type.Target())) {
         Report(diagnostics::DiagnosticCode::InvalidArrayElement, range,
-               "array elements must be unqualified scalars, raw pointers, or "
+               "array elements must be unqualified scalars, error values, raw "
+               "pointers, or "
                "arrays of those types; use const [N]T for a read-only array");
     } else if (!StorageSize(type)) {
         Report(diagnostics::DiagnosticCode::InvalidArrayLength, range,
@@ -997,8 +1069,39 @@ SemanticType SemanticAnalyzer::AnalyzeName(
                "unknown name '" + expression.Name() + "'");
         return SemanticType::Error();
     }
+    if (symbol->Kind() == SymbolKind::ErrorType) {
+        Report(diagnostics::DiagnosticCode::InvalidOperand, expression.Range(),
+               "error type '" + expression.Name() +
+                   "' is not a value; select a variant");
+        return SemanticType::Error();
+    }
     _model._bindings.emplace(&expression, symbol);
     return symbol->Type().WithoutConst();
+}
+
+SemanticType SemanticAnalyzer::AnalyzeMemberAccess(
+    const core::MemberAccessExpression& expression) {
+    const Symbol* symbol = nullptr;
+    if (expression.Receiver().Kind() == core::AstNodeKind::NameExpression)
+        symbol = _currentScope->Lookup(
+            static_cast<const core::NameExpression&>(expression.Receiver())
+                .Name());
+    if (symbol == nullptr || symbol->Kind() != SymbolKind::ErrorType) {
+        Report(diagnostics::DiagnosticCode::InvalidMember,
+               expression.Receiver().Range(),
+               "error variants must be qualified by an error type name");
+        return SemanticType::Error();
+    }
+    const auto& variants = symbol->Type().Family().variants;
+    if (std::find(variants.begin(), variants.end(), expression.Member()) ==
+        variants.end()) {
+        Report(diagnostics::DiagnosticCode::InvalidMember,
+               expression.MemberRange(),
+               "error type '" + symbol->Name() + "' has no variant '" +
+                   expression.Member() + "'");
+        return SemanticType::Error();
+    }
+    return symbol->Type();
 }
 
 void SemanticAnalyzer::RequireUnsafe(source::SourceRange range) {
@@ -1175,7 +1278,8 @@ SemanticType SemanticAnalyzer::AnalyzeUnary(
     if (operation == TokenType::Ampersand) {
         SemanticType target = PlaceType(expression.Operand());
         if (target.IsError() ||
-            !(target.IsNumeric() || target.Kind() == SemanticTypeKind::Bool ||
+            !(target.IsNumeric() || target.IsErrorValue() ||
+              target.Kind() == SemanticTypeKind::Bool ||
               target.Kind() == SemanticTypeKind::Char ||
               target.Kind() == SemanticTypeKind::Pointer ||
               target.Kind() == SemanticTypeKind::Array ||
@@ -1253,11 +1357,29 @@ SemanticType SemanticAnalyzer::AnalyzeBinary(
         right.IsSequence() || left.Kind() == SemanticTypeKind::Tuple ||
         right.Kind() == SemanticTypeKind::Tuple) {
         Report(diagnostics::DiagnosticCode::InvalidOperand, expression.Range(),
-               "arrays, tuples, and reference handles do not support binary operators");
+               "arrays, tuples, and reference handles do not support binary "
+               "operators");
         return SemanticType::Error();
     }
     if (left.IsError() || right.IsError()) return SemanticType::Error();
     const TokenType operation = expression.OperatorType();
+    if (left.IsErrorValue() || right.IsErrorValue()) {
+        const bool strict = operation == TokenType::StrictEqual ||
+                            operation == TokenType::StrictNotEqual;
+        const bool equality = strict || operation == TokenType::Equal ||
+                              operation == TokenType::NotEqual;
+        const bool compatible =
+            left == right || left.Kind() == SemanticTypeKind::None ||
+            right.Kind() == SemanticTypeKind::None ||
+            (left.IsErrorValue() && right.IsErrorValue() &&
+             (strict || left.Kind() == SemanticTypeKind::ErrorValue ||
+              right.Kind() == SemanticTypeKind::ErrorValue));
+        if (equality && compatible) return SemanticType(SemanticTypeKind::Bool);
+        Report(diagnostics::DiagnosticCode::InvalidOperand, expression.Range(),
+               "operator is not defined for error operands '" + left.Name() +
+                   "' and '" + right.Name() + "'");
+        return SemanticType::Error();
+    }
     const bool hasPointer = left.Kind() == SemanticTypeKind::Pointer ||
                             right.Kind() == SemanticTypeKind::Pointer;
     if (hasPointer || left.Kind() == SemanticTypeKind::Null ||
@@ -1389,8 +1511,7 @@ bool SemanticAnalyzer::BorrowsLocalString(
         case core::AstNodeKind::CastExpression: {
             const core::CastExpression& cast =
                 static_cast<const core::CastExpression&>(expression);
-            return SemanticType::FromSyntax(cast.TargetType()).Kind() ==
-                       SemanticTypeKind::StringView &&
+            return _model.TypeOf(cast).Kind() == SemanticTypeKind::StringView &&
                    (_model.TypeOf(cast.Value()).Kind() ==
                         SemanticTypeKind::String ||
                     BorrowsLocalString(cast.Value()));

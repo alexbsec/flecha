@@ -71,8 +71,7 @@ TEST(SemanticTypeTests, RepresentsEverySyntaxPrimitive) {
     EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::Bool).Name(), "bool");
     EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::Char).Name(), "char");
     EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::Void).Name(), "void");
-    EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::String).Name(),
-              "string");
+    EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::String).Name(), "string");
     EXPECT_EQ(SemanticType::FromSyntax(PrimitiveType::StringView).Name(),
               "stringv");
     EXPECT_TRUE(IsAssignable(SemanticType(SemanticTypeKind::I32),
@@ -120,9 +119,9 @@ TEST(SemanticDeclarationTests, RegistersFunctionsParametersAndLocals) {
 }
 
 TEST(SemanticBuiltInTests, ProvidesTypedStandardOutput) {
-    Analysis analysis =
-        Analyze("i32 main() { stdout(\"Flecha\"); "
-                "stdoutln(\"Language\"); return 42; }");
+    Analysis analysis = Analyze(
+        "i32 main() { stdout(\"Flecha\"); "
+        "stdoutln(\"Language\"); return 42; }");
 
     ASSERT_FALSE(analysis.diagnostics.HasErrors());
     const FunctionDeclaration& function = FunctionAt(analysis, 0);
@@ -148,8 +147,8 @@ TEST(SemanticBuiltInTests, ProvidesTypedStandardOutput) {
         static_cast<const CallExpression&>(lineStatement.Value());
     const NameExpression& lineName =
         static_cast<const NameExpression&>(lineCall.Callee());
-    const FunctionSymbol* lineSymbol = static_cast<const FunctionSymbol*>(
-        analysis.model.SymbolFor(lineName));
+    const FunctionSymbol* lineSymbol =
+        static_cast<const FunctionSymbol*>(analysis.model.SymbolFor(lineName));
     ASSERT_NE(lineSymbol, nullptr);
     EXPECT_EQ(lineSymbol->BuiltIn(), BuiltInFunction::StdoutLine);
 }
@@ -182,18 +181,18 @@ TEST(SemanticStringViewTests, TypesEveryStringViewOperation) {
 
     ASSERT_FALSE(analysis.diagnostics.HasErrors());
     const FunctionDeclaration& function = FunctionAt(analysis, 0);
-    EXPECT_EQ(analysis.model.TypeOf(*VariableAt(function, 1).Initializer())
-                  .Kind(),
-              SemanticTypeKind::U32);
-    EXPECT_EQ(analysis.model.TypeOf(*VariableAt(function, 2).Initializer())
-                  .Kind(),
-              SemanticTypeKind::Char);
-    EXPECT_EQ(analysis.model.TypeOf(*VariableAt(function, 3).Initializer())
-                  .Kind(),
-              SemanticTypeKind::Char);
-    EXPECT_EQ(analysis.model.TypeOf(*VariableAt(function, 4).Initializer())
-                  .Kind(),
-              SemanticTypeKind::StringView);
+    EXPECT_EQ(
+        analysis.model.TypeOf(*VariableAt(function, 1).Initializer()).Kind(),
+        SemanticTypeKind::U32);
+    EXPECT_EQ(
+        analysis.model.TypeOf(*VariableAt(function, 2).Initializer()).Kind(),
+        SemanticTypeKind::Char);
+    EXPECT_EQ(
+        analysis.model.TypeOf(*VariableAt(function, 3).Initializer()).Kind(),
+        SemanticTypeKind::Char);
+    EXPECT_EQ(
+        analysis.model.TypeOf(*VariableAt(function, 4).Initializer()).Kind(),
+        SemanticTypeKind::StringView);
 }
 
 TEST(SemanticStringViewTests, DiagnosesInvalidMembersIndicesAndArguments) {
@@ -227,14 +226,12 @@ TEST(SemanticStringTests, SupportsOwningConversionsAndLiteralMembers) {
 
     ASSERT_FALSE(analysis.diagnostics.HasErrors());
     const FunctionDeclaration& function = FunctionAt(analysis, 0);
-    EXPECT_EQ(analysis.model.DeclaredSymbol(VariableAt(function, 0))
-                  ->Type()
-                  .Kind(),
-              SemanticTypeKind::String);
-    EXPECT_EQ(analysis.model.DeclaredSymbol(VariableAt(function, 2))
-                  ->Type()
-                  .Kind(),
-              SemanticTypeKind::StringView);
+    EXPECT_EQ(
+        analysis.model.DeclaredSymbol(VariableAt(function, 0))->Type().Kind(),
+        SemanticTypeKind::String);
+    EXPECT_EQ(
+        analysis.model.DeclaredSymbol(VariableAt(function, 2))->Type().Kind(),
+        SemanticTypeKind::StringView);
 }
 
 TEST(SemanticStringTests, FormatsScalarsOnlyAsOwningStrings) {
@@ -283,13 +280,13 @@ TEST(SemanticStringTests, RejectsViewsThatEscapeLocalOwners) {
     EXPECT_NE(FindDiagnostic(indirect, DiagnosticCode::BorrowEscapesOwner),
               nullptr);
 
-    Analysis parameter = Analyze(
-        "stringv Bad(string owned) { return owned.view(); }");
+    Analysis parameter =
+        Analyze("stringv Bad(string owned) { return owned.view(); }");
     EXPECT_NE(FindDiagnostic(parameter, DiagnosticCode::BorrowEscapesOwner),
               nullptr);
 
-    Analysis temporary = Analyze(
-        "stringv Bad() { return (\"a\" + \"b\").view(); }");
+    Analysis temporary =
+        Analyze("stringv Bad() { return (\"a\" + \"b\").view(); }");
     EXPECT_NE(FindDiagnostic(temporary, DiagnosticCode::BorrowEscapesOwner),
               nullptr);
 
@@ -356,22 +353,20 @@ TEST(SemanticDeclarationTests, SupportsDefiniteAssignmentForValueTypes) {
     EXPECT_FALSE(valid.diagnostics.HasErrors());
 
     Analysis directRead = Analyze("i32 Main() { i32 value; return value; }");
-    EXPECT_NE(FindDiagnostic(directRead,
-                             DiagnosticCode::UninitializedVariable),
+    EXPECT_NE(FindDiagnostic(directRead, DiagnosticCode::UninitializedVariable),
               nullptr);
 
     Analysis incompleteBranch = Analyze(
         "i32 Main(bool choose) { i32 value; if choose { value = 42; } "
         "return value; }");
-    EXPECT_NE(FindDiagnostic(incompleteBranch,
-                             DiagnosticCode::UninitializedVariable),
-              nullptr);
+    EXPECT_NE(
+        FindDiagnostic(incompleteBranch, DiagnosticCode::UninitializedVariable),
+        nullptr);
 
     Analysis loopOnly = Analyze(
         "i32 Main(bool run) { i32 value; while run { value = 42; break; } "
         "return value; }");
-    EXPECT_NE(FindDiagnostic(loopOnly,
-                             DiagnosticCode::UninitializedVariable),
+    EXPECT_NE(FindDiagnostic(loopOnly, DiagnosticCode::UninitializedVariable),
               nullptr);
 
     Analysis everyType = Analyze(
@@ -387,9 +382,9 @@ TEST(SemanticDeclarationTests, SupportsDefiniteAssignmentForValueTypes) {
 
 TEST(SemanticDeclarationTests, BorrowedViewsRequireImmediateInitialization) {
     Analysis analysis = Analyze("void Main() { stringv view; }");
-    EXPECT_NE(FindDiagnostic(analysis,
-                             DiagnosticCode::BorrowRequiresInitializer),
-              nullptr);
+    EXPECT_NE(
+        FindDiagnostic(analysis, DiagnosticCode::BorrowRequiresInitializer),
+        nullptr);
 }
 
 TEST(SemanticInferenceTests, InfersEverySupportedLiteralCategory) {
@@ -401,8 +396,8 @@ TEST(SemanticInferenceTests, InfersEverySupportedLiteralCategory) {
     ASSERT_FALSE(analysis.diagnostics.HasErrors());
     const FunctionDeclaration& function = FunctionAt(analysis, 0);
     const SemanticTypeKind expected[] = {
-        SemanticTypeKind::I32,    SemanticTypeKind::F64,
-        SemanticTypeKind::Bool,   SemanticTypeKind::Char,
+        SemanticTypeKind::I32,        SemanticTypeKind::F64,
+        SemanticTypeKind::Bool,       SemanticTypeKind::Char,
         SemanticTypeKind::StringView, SemanticTypeKind::Null,
         SemanticTypeKind::None};
     for (std::size_t index = 0; index < 7; ++index) {
@@ -469,8 +464,7 @@ TEST(SemanticLoopControlTests, DiagnosesInvalidLoopControlAndPositions) {
         "void Test() { proceed; break; jumpto missing; #outside "
         "while true { #duplicate #duplicate jumpto unknown; } }");
 
-    EXPECT_NE(FindDiagnostic(analysis,
-                             DiagnosticCode::LoopControlOutsideLoop),
+    EXPECT_NE(FindDiagnostic(analysis, DiagnosticCode::LoopControlOutsideLoop),
               nullptr);
     EXPECT_NE(FindDiagnostic(analysis, DiagnosticCode::DuplicatePosition),
               nullptr);
@@ -485,10 +479,9 @@ TEST(SemanticCastTests, TypesChainedNumericCasts) {
 
     ASSERT_FALSE(analysis.diagnostics.HasErrors());
     const FunctionDeclaration& function = FunctionAt(analysis, 0);
-    EXPECT_EQ(analysis.model.DeclaredSymbol(VariableAt(function, 0))
-                  ->Type()
-                  .Kind(),
-              SemanticTypeKind::I32);
+    EXPECT_EQ(
+        analysis.model.DeclaredSymbol(VariableAt(function, 0))->Type().Kind(),
+        SemanticTypeKind::I32);
 }
 
 TEST(SemanticCastTests, AllowsSameTypeCastsInBothForms) {
@@ -507,12 +500,10 @@ TEST(SemanticCastTests, RejectsNonNumericCasts) {
 }
 
 TEST(SemanticCastTests, CentralizesExtensibleExplicitCastPolicy) {
-    EXPECT_TRUE(CanExplicitlyCast(
-        SemanticType(SemanticTypeKind::I32),
-        SemanticType(SemanticTypeKind::F64)));
-    EXPECT_FALSE(CanExplicitlyCast(
-        SemanticType(SemanticTypeKind::StringView),
-        SemanticType(SemanticTypeKind::I32)));
+    EXPECT_TRUE(CanExplicitlyCast(SemanticType(SemanticTypeKind::I32),
+                                  SemanticType(SemanticTypeKind::F64)));
+    EXPECT_FALSE(CanExplicitlyCast(SemanticType(SemanticTypeKind::StringView),
+                                   SemanticType(SemanticTypeKind::I32)));
 }
 
 TEST(SemanticStringViewTests, SupportsExplicitAndInferredViews) {
@@ -1167,7 +1158,8 @@ TEST(SemanticUnsafeTests,
     EXPECT_NE(FindDiagnostic(Analyze("void f(*&i32 p) {}"),
                              DiagnosticCode::UnsupportedCompoundType),
               nullptr);
-    EXPECT_FALSE(Analyze("unsafe void f() { i32 x = 1; &x; }").diagnostics.HasErrors());
+    EXPECT_FALSE(
+        Analyze("unsafe void f() { i32 x = 1; &x; }").diagnostics.HasErrors());
 }
 
 TEST(SemanticUnsafeTests, RejectsConstTargetWritesAtTheDereferenceRange) {
@@ -2250,4 +2242,164 @@ TEST(SemanticTupleTests, BareBindingGroupsInheritTypesAndQualifiers) {
         SCOPED_TRACE(source);
         EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
     }
+}
+
+TEST(SemanticErrorTests, ResolvesForwardFamiliesAndPreservesNominalIdentity) {
+    Analysis analysis = Analyze(
+        "Fault f(Fault x) { return x; } "
+        "error Fault { Bad, Worse } error Other { Bad } "
+        "void use() { first := Fault.Bad; second := Other.Bad; "
+        "error any = first; error success = none; Fault ok = none; "
+        "Fault a, b = (first, ok); }");
+    ASSERT_FALSE(analysis.diagnostics.HasErrors());
+    const auto& function = FunctionAt(analysis, 3);
+    const auto first =
+        analysis.model.DeclaredSymbol(VariableAt(function, 0))->Type();
+    const auto second =
+        analysis.model.DeclaredSymbol(VariableAt(function, 1))->Type();
+    const auto generic =
+        analysis.model.DeclaredSymbol(VariableAt(function, 2))->Type();
+    EXPECT_EQ(first.Name(), "Fault");
+    EXPECT_EQ(generic.Name(), "error");
+    EXPECT_TRUE(first.IsErrorValue());
+    EXPECT_FALSE(first.IsError());
+    EXPECT_NE(first, second);
+    EXPECT_TRUE(IsAssignable(generic, first));
+    EXPECT_FALSE(IsAssignable(first, generic));
+    EXPECT_FALSE(IsAssignable(first, second));
+    EXPECT_EQ(
+        analysis.model.DeclaredSymbol(*FunctionAt(analysis, 0).Parameters()[0])
+            ->Type(),
+        first);
+    EXPECT_FALSE(first.OwnsStorage());
+    EXPECT_FALSE(generic.OwnsStorage());
+}
+
+TEST(SemanticErrorTests, ChecksErrorOperatorsAndConversions) {
+    const std::string prefix = "error Fault { Bad } error Other { Bad } ";
+    for (const std::string& expression :
+         {"Fault.Bad == none", "none != Fault.Bad", "Fault.Bad == Fault.Bad",
+          "a == Fault.Bad", "Fault.Bad != a", "a == b", "a === b",
+          "Fault.Bad === Other.Bad", "Fault.Bad !== none", "a === Fault.Bad"}) {
+        SCOPED_TRACE(expression);
+        EXPECT_FALSE(Analyze(prefix + "bool f(error a, error b) { return " +
+                             expression + "; }")
+                         .diagnostics.HasErrors());
+    }
+    for (const std::string& expression :
+         {"Fault.Bad == Other.Bad", "Fault.Bad != Other.Bad", "a + b", "a < b",
+          "a == 0", "a == false", "a == null", "!a", "a and b"}) {
+        SCOPED_TRACE(expression);
+        EXPECT_NE(
+            FindDiagnostic(Analyze(prefix + "void f(error a, error b) { " +
+                                   expression + "; }"),
+                           DiagnosticCode::InvalidOperand),
+            nullptr);
+    }
+    for (const std::string& body :
+         {"Fault value = a;", "Fault value = Other.Bad;", "i32 value = a;",
+          "error value = 1;", "error value = null;"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(
+            FindDiagnostic(Analyze(prefix + "void f(error a) { " + body + " }"),
+                           DiagnosticCode::IncompatibleType),
+            nullptr);
+    }
+    for (const std::string& expression :
+         {"a as Fault", "Fault.Bad as i32", "1 as error", "a as string"}) {
+        SCOPED_TRACE(expression);
+        EXPECT_NE(FindDiagnostic(Analyze(prefix + "void f(error a) { " +
+                                         expression + "; }"),
+                                 DiagnosticCode::InvalidCast),
+                  nullptr);
+    }
+    EXPECT_NE(FindDiagnostic(Analyze(prefix + "void f(error a) { if a {} }"),
+                             DiagnosticCode::InvalidCondition),
+              nullptr);
+}
+
+TEST(SemanticErrorTests, ReportsInvalidFamiliesNamesAndVariantsAtTheirRanges) {
+    for (const std::string& source :
+         {"error Fault { Bad, Bad }",
+          "error Fault { Bad } error Fault { Worse }",
+          "error Fault { Bad } void Fault() {}", "error stdout { Bad }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_NE(FindDiagnostic(Analyze(source),
+                                 DiagnosticCode::DuplicateDeclaration),
+                  nullptr);
+    }
+    EXPECT_NE(FindDiagnostic(Analyze("error Empty {}"),
+                             DiagnosticCode::InvalidErrorDeclaration),
+              nullptr);
+    const std::string source =
+        "error Fault { Bad } void f() { Fault.Missing; }";
+    Analysis missing = Analyze(source);
+    const Diagnostic* diagnostic =
+        FindDiagnostic(missing, DiagnosticCode::InvalidMember);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(diagnostic->range.start.offset, source.find("Missing"));
+    EXPECT_EQ(diagnostic->range.Length(), 7);
+    for (const std::string& body :
+         {"Unknown value = none;", "*Unknown value = none;",
+          "(error, Unknown) value = none;"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(Analyze("void f() { " + body + " }"),
+                                 DiagnosticCode::UnknownType),
+                  nullptr);
+    }
+    for (const std::string& body : {"Unknown.Bad;", "i32 Fault = 1; Fault.Bad;",
+                                    "Fault value = none; value.Bad;"}) {
+        SCOPED_TRACE(body);
+        EXPECT_NE(FindDiagnostic(
+                      Analyze("error Fault { Bad } void f() { " + body + " }"),
+                      DiagnosticCode::InvalidMember),
+                  nullptr);
+    }
+    EXPECT_NE(FindDiagnostic(
+                  Analyze("error Fault { Bad } void f() { value := Fault; }"),
+                  DiagnosticCode::InvalidOperand),
+              nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze("error Fault { Bad } void f() { Fault.Bad(); }"),
+                       DiagnosticCode::InvalidOperand),
+        nullptr);
+    EXPECT_FALSE(Analyze("error Fault { Bad } Fault f(Fault Fault, Fault next) "
+                         "{ return next; }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticErrorTests, IntegratesDefiniteAssignmentQualifiersAndBorrowing) {
+    const std::string prefix = "error Fault { Bad } ";
+    EXPECT_NE(
+        FindDiagnostic(Analyze(prefix + "error f() { error e; return e; }"),
+                       DiagnosticCode::UninitializedVariable),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze(prefix + "Fault f(bool flag) { Fault e; if flag "
+                                        "{ e = Fault.Bad; } return e; }"),
+                       DiagnosticCode::UninitializedVariable),
+        nullptr);
+    EXPECT_FALSE(Analyze(prefix + "error f(bool flag) { error e; if flag { e = "
+                                  "Fault.Bad; } else { e = none; } return e; }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(FindDiagnostic(
+                  Analyze(prefix +
+                          "void f() { const error e = none; e = Fault.Bad; }"),
+                  DiagnosticCode::SymbolNotWritable),
+              nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze(prefix + "void f() { error e = none; &const "
+                                        "error r = &e; *r = Fault.Bad; }"),
+                       DiagnosticCode::SymbolNotWritable),
+        nullptr);
+    EXPECT_NE(
+        FindDiagnostic(Analyze(prefix + "void f() { error e = none; r := &e; e "
+                                        "= Fault.Bad; copy := *r; }"),
+                       DiagnosticCode::BorrowConflict),
+        nullptr);
+    EXPECT_FALSE(Analyze(prefix + "void f() { [2]error a = [Fault.Bad, none]; "
+                                  "{ []error s = a[:]; s[0] = none; } "
+                                  "(Fault, error) pair = (Fault.Bad, a[0]); "
+                                  "Fault x, error y = pair; }")
+                     .diagnostics.HasErrors());
 }

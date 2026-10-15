@@ -126,4 +126,6 @@ Errors use `FLECHA-S0039` for unsupported tuple contents/layout and
 `FLECHA-S0040` for invalid destructuring. Ordinary type, initialization,
 mutability, and borrow failures retain their existing diagnostics.
 
-Error values, allocator APIs, and error propagation are separate later features.
+Named and generic [error values](error_values.md) work as tuple elements, with
+implicit named-to-generic widening. Allocator APIs and propagation sugar remain
+separate later features.

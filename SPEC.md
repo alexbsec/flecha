@@ -323,7 +323,7 @@ semantics, including deep copies of owning strings; stored borrowed elements
 remain unsupported. The native representation is an LLVM non-packed struct,
 with a compiler-internal aggregate calling convention. See
 [tuples and destructuring](docs/tuples.md) for syntax, cleanup, and current limits.
-Error values remain a later feature.
+Named and generic error values are implemented; see [error_values.md](docs/error_values.md).
 
 ## 11. Errors as values
 
@@ -331,7 +331,6 @@ Flecha does not use exceptions in its core error model. Errors are ordinary type
 
 ```flecha
 error CopyError {
-    none = 0,
     InvalidPointer,
     DestinationTooSmall,
 }
@@ -364,7 +363,24 @@ unsafe {
 }
 ```
 
-The grammar and representation of error declarations are provisional. Error propagation sugar may be considered later, but the underlying tuple-and-value model must remain understandable without it.
+Error declarations contain one or more distinct failure names, with an optional
+trailing comma. `none` is implicit. Named types only accept their own family or
+`none`; built-in `error` accepts any family and preserves its identity. Conversion
+from a named error to `error` is implicit, including within tuples. The reverse
+conversion and numeric casts are rejected.
+
+`==`/`!=` compare matching named families, or widen a named error when the other
+operand is generic `error`. Direct comparison of two different named families is
+rejected. `none` is contextually success; all named successes widen to the same
+generic success. Strict `===`/`!==` perform no widening or contextual conversion:
+different static error types, and error versus literal `none`, are unequal.
+
+Error values support ordinary const, definite-assignment, aggregate, and
+borrowing rules. An uninitialized error variable cannot be read. They are
+allocation-free and copyable, with no payloads or automatic propagation.
+See [error_values.md](docs/error_values.md) for implemented behavior and the
+compiler-private representation. The allocator example above still depends on
+future allocation APIs.
 
 ## 12. Unsafe code
 
@@ -625,7 +641,6 @@ The following example demonstrates the current core direction. It is illustrativ
 
 ```flecha
 error CopyError {
-    none = 0,
     InvalidPointer,
     DestinationTooSmall,
 }
@@ -698,7 +713,7 @@ These questions should be resolved by prioritizing predictable behavior, a small
 5. Implement calls and a minimal C backend.
 6. Implement tuples, tuple returns, and destructuring.
 7. Implement universal `none`, zero initialization, `==`, and `===`.
-8. Implement error types and tuple-based error handling.
+8. Error types and tuple-based error handling are implemented; payloads and propagation sugar remain future work.
 9. Implement pointers, slices, and explicit unsafe blocks.
 10. Introduce a compiler-owned intermediate representation.
 11. Add an LLVM backend and native debug information.
