@@ -1,4 +1,5 @@
 add_library(semantic STATIC
+    definite_assignment.cpp
     scope.cpp
     semantic_analyzer.cpp
     semantic_model.cpp

@@ -120,3 +120,11 @@ literal storage or a borrowed `stringv` parameter, but a view into any owning
 
 Owning `string` locals are destroyed at their lexical scope edge, including
 control-flow exits through `return`, `break`, `proceed`, and `jumpto`.
+
+Cleanup includes every owning slot in an exited scope, even when a backward
+jump reaches an exit before that slot's declaration in source order. Slots
+start null at function entry and are cleared after destruction. Temporary
+storage used to transfer ownership is also cleared after the transfer, so
+repeated declarations and assignments in loops cannot free the same allocation
+twice. See [definite assignment](definite_assignment.md) for initialization
+rules across positions and scope boundaries.

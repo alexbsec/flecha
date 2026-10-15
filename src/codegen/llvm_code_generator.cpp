@@ -137,6 +137,15 @@ llvm::Value* LlvmCodeGenerator::EmitOwnedString(
                                  output);
     }
     EmitStringStorageCleanup(output);
+    const auto takeResult = [&](const char* name) -> llvm::Value* {
+        llvm::Value* result = _builder.CreateLoad(resultType, output, name);
+        if (!temporary) {
+            // Ownership moves to the caller. Re-executing this expression must
+            // not destroy a pointer already held (or freed) by its destination.
+            _builder.CreateStore(llvm::Constant::getNullValue(resultType), output);
+        }
+        return result;
+    };
     if (sourceType.Kind() == semantic::SemanticTypeKind::String) {
         llvm::Value* data =
             _builder.CreateExtractValue(value, 0, "string.copy.data");
@@ -148,7 +157,7 @@ llvm::Value* LlvmCodeGenerator::EmitOwnedString(
         llvm::FunctionCallee clone = _module->getOrInsertFunction(
             "flecha_runtime_v1_string_clone", cloneType);
         _builder.CreateCall(clone, {output, data, length});
-        return _builder.CreateLoad(resultType, output, "string.copy");
+        return takeResult("string.copy");
     }
     if (sourceType.Kind() == semantic::SemanticTypeKind::StringView) {
         llvm::Value* data =
@@ -161,7 +170,7 @@ llvm::Value* LlvmCodeGenerator::EmitOwnedString(
         llvm::FunctionCallee fromView = _module->getOrInsertFunction(
             "flecha_runtime_v1_string_from_view", fromViewType);
         _builder.CreateCall(fromView, {output, data, length});
-        return _builder.CreateLoad(resultType, output, "string");
+        return takeResult("string");
     }
 
     std::string suffix;
@@ -195,7 +204,7 @@ llvm::Value* LlvmCodeGenerator::EmitOwnedString(
     llvm::FunctionCallee format = _module->getOrInsertFunction(
         "flecha_runtime_v1_string_from_" + suffix, formatType);
     _builder.CreateCall(format, {output, value});
-    return _builder.CreateLoad(resultType, output, "string.format");
+    return takeResult("string.format");
 }
 
 void LlvmCodeGenerator::EmitStringDestroy(llvm::Value* value) {
@@ -224,19 +233,22 @@ llvm::AllocaInst* LlvmCodeGenerator::CreateOwnedStringTemporary(
     llvm::AllocaInst* storage =
         entryBuilder.CreateAlloca(type, nullptr, std::string(name));
     entryBuilder.CreateStore(llvm::Constant::getNullValue(type), storage);
-    _cleanupScopes.back().ownedStrings.push_back(storage);
+    _cleanupScopes.back()->ownedStrings.push_back(storage);
     return storage;
 }
 
 void LlvmCodeGenerator::EmitCleanupsTo(std::size_t retainedScopeCount) {
-    for (std::size_t scopeIndex = _cleanupScopes.size();
-         scopeIndex > retainedScopeCount; --scopeIndex) {
-        const CleanupScope& scope = _cleanupScopes[scopeIndex - 1];
-        for (auto iterator = scope.ownedStrings.rbegin();
-             iterator != scope.ownedStrings.rend(); ++iterator) {
-            EmitStringStorageCleanup(*iterator);
-        }
-    }
+    if (retainedScopeCount == _cleanupScopes.size()) return;
+    // Defer emission until every slot in each lexical scope is registered.
+    // Backward jumps may reach an earlier exit after later declarations (or
+    // temporaries) have allocated strings. All slots start null in entry.
+    llvm::BasicBlock* cleanup =
+        llvm::BasicBlock::Create(_context, "cleanup", _currentFunction);
+    _builder.CreateBr(cleanup);
+    _builder.SetInsertPoint(cleanup);
+    _cleanupRequests.push_back(
+        {cleanup, {_cleanupScopes.begin() + retainedScopeCount,
+                   _cleanupScopes.end()}});
 }
 
 llvm::Value* LlvmCodeGenerator::CoerceValue(
@@ -460,6 +472,7 @@ bool LlvmCodeGenerator::EmitFunction(
     _proceedTargets.clear();
     _breakTargets.clear();
     _cleanupScopes.clear();
+    _cleanupRequests.clear();
     _currentReturnType = boundFunction.Symbol().ReturnType();
     llvm::BasicBlock* entry =
         llvm::BasicBlock::Create(_context, "entry", _currentFunction);
@@ -467,7 +480,8 @@ bool LlvmCodeGenerator::EmitFunction(
     DeclarePositions(boundFunction.Body());
     std::vector<const lowering::BoundBlockStatement*> positionPath;
     CollectPositionScopePaths(boundFunction.Body(), positionPath);
-    _cleanupScopes.push_back({nullptr, {}});
+    _cleanupScopes.push_back(std::make_shared<CleanupScope>(
+        nullptr, std::vector<llvm::AllocaInst*>{}));
 
     std::size_t index = 0;
     for (llvm::Argument& argument : _currentFunction->args()) {
@@ -480,7 +494,7 @@ bool LlvmCodeGenerator::EmitFunction(
         if (parameter.Type().Kind() == semantic::SemanticTypeKind::String) {
             parameterValue =
                 EmitOwnedString(parameterValue, parameter.Type(), false);
-            _cleanupScopes.back().ownedStrings.push_back(storage);
+            _cleanupScopes.back()->ownedStrings.push_back(storage);
         }
         _builder.CreateStore(parameterValue, storage);
         _variables.emplace(&parameter, storage);
@@ -496,13 +510,25 @@ bool LlvmCodeGenerator::EmitFunction(
             _builder.CreateUnreachable();
         }
     }
+    for (const CleanupRequest& request : _cleanupRequests) {
+        _builder.SetInsertPoint(request.block, request.block->begin());
+        for (auto scope = request.scopes.rbegin();
+             scope != request.scopes.rend(); ++scope) {
+            for (auto storage = (*scope)->ownedStrings.rbegin();
+                 storage != (*scope)->ownedStrings.rend(); ++storage) {
+                EmitStringStorageCleanup(*storage);
+            }
+        }
+    }
+    _cleanupRequests.clear();
     _cleanupScopes.clear();
     _currentFunction = nullptr;
     return true;
 }
 
 bool LlvmCodeGenerator::EmitBlock(const lowering::BoundBlockStatement& block) {
-    _cleanupScopes.push_back({&block, {}});
+    _cleanupScopes.push_back(std::make_shared<CleanupScope>(
+        &block, std::vector<llvm::AllocaInst*>{}));
     for (const std::unique_ptr<lowering::BoundStatement>& statement :
          block.Statements()) {
         if (_builder.GetInsertBlock()->getTerminator() != nullptr &&
@@ -623,7 +649,7 @@ bool LlvmCodeGenerator::EmitStatement(
             _variables.emplace(&declaration.Variable(), storage);
             if (declaration.Variable().Type().Kind() ==
                 semantic::SemanticTypeKind::String) {
-                _cleanupScopes.back().ownedStrings.push_back(storage);
+                _cleanupScopes.back()->ownedStrings.push_back(storage);
             }
             return true;
         }
@@ -679,7 +705,7 @@ bool LlvmCodeGenerator::EmitStatement(
             std::size_t common = 0;
             while (common + 1 < _cleanupScopes.size() &&
                    common < targetPath.size() &&
-                   _cleanupScopes[common + 1].block == targetPath[common]) {
+                   _cleanupScopes[common + 1]->block == targetPath[common]) {
                 ++common;
             }
             EmitCleanupsTo(common + 1);

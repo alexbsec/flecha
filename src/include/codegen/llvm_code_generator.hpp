@@ -34,6 +34,11 @@ class LlvmCodeGenerator final {
         std::vector<llvm::AllocaInst*> ownedStrings;
     };
 
+    struct CleanupRequest final {
+        llvm::BasicBlock* block;
+        std::vector<std::shared_ptr<CleanupScope>> scopes;
+    };
+
     struct LoopTarget final {
         llvm::BasicBlock* block;
         std::size_t retainedScopeCount;
@@ -108,7 +113,8 @@ class LlvmCodeGenerator final {
         _positionScopePaths;
     std::vector<LoopTarget> _proceedTargets;
     std::vector<LoopTarget> _breakTargets;
-    std::vector<CleanupScope> _cleanupScopes;
+    std::vector<std::shared_ptr<CleanupScope>> _cleanupScopes;
+    std::vector<CleanupRequest> _cleanupRequests;
     llvm::Function* _currentFunction = nullptr;
     semantic::SemanticType _currentReturnType{
         semantic::SemanticTypeKind::Void};

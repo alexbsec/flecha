@@ -72,3 +72,15 @@ add_test(
         -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/definite_assignment_test
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_definite_assignment.cmake
 )
+
+add_test(
+    NAME NativeSemanticTests.ControlFlowDefiniteAssignment
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/control_flow_definite_assignment.fl
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/control_flow_assignment_test
+        -DFLECHA_RUNTIME=$<TARGET_FILE:runtime>
+        -DFLECHA_LINKER=${CMAKE_CXX_COMPILER}
+        -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_control_flow_assignment.cmake
+)

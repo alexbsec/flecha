@@ -228,3 +228,30 @@ TEST(LoweringTests, SafelyRepresentsFunctionReferences) {
             *result.program->Functions()[1]->Body().Statements()[0]);
     EXPECT_EQ(statement.Expression().Kind(), BoundNodeKind::FunctionExpression);
 }
+
+TEST(LoweringTests, PreservesDelayedDeclarationsAcrossTerminatingBranches) {
+    LoweredSource result = Lower(
+        "i32 main(bool c) { i32 value; string text; "
+        "if c { return 0; } else { value = 42; text = \"ready\"; } "
+        "stdoutln(text); return value; }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.program, nullptr);
+    const BoundFunction& function = *result.program->Functions()[0];
+    for (std::size_t index = 0; index < 2; ++index) {
+        const auto& declaration =
+            static_cast<const BoundVariableDeclarationStatement&>(
+                *function.Body().Statements()[index]);
+        EXPECT_EQ(declaration.Initializer(), nullptr);
+    }
+    const auto& branch =
+        static_cast<const BoundIfStatement&>(*function.Body().Statements()[2]);
+    ASSERT_NE(branch.ElseBlock(), nullptr);
+    const auto& store = static_cast<const BoundExpressionStatement&>(
+        *branch.ElseBlock()->Statements()[0]);
+    const auto& assignment =
+        static_cast<const BoundAssignmentExpression&>(store.Expression());
+    const auto& declaration =
+        static_cast<const BoundVariableDeclarationStatement&>(
+            *function.Body().Statements()[0]);
+    EXPECT_EQ(&assignment.Target(), &declaration.Variable());
+}

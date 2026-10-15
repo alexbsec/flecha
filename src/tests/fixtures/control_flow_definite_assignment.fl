@@ -1,0 +1,82 @@
+i32 returning(bool early) {
+    i32 answer;
+    string message;
+    if early {
+        return 0;
+    } else {
+        answer = 42;
+        message = "initialized";
+    }
+    stdoutln(message);
+    return answer;
+}
+
+// Each transfer occurs lexically before the slots it must clean up.
+i32 backward_exit(i32 mode) {
+    count := 0;
+    while true {
+        string outer = "outer";
+        while count < 1 {
+            #again
+            if count == 1 {
+                if mode == 0 { return 42; }
+                else if mode == 1 { break; }
+                else if mode == 2 { proceed; }
+                else { jumpto outside; }
+            }
+            count = count + 1;
+            string late;
+            late = "late" + " temporary";
+            jumpto again;
+        }
+        #outside
+        break;
+    }
+    return 42;
+}
+
+i32 nested_jumps() {
+    answer := 0;
+    while true {
+        jumpto inner;
+        string skipped;
+        #outer
+        answer = 42;
+        break;
+        while true {
+            string text;
+            #inner
+            text = "entered through a position";
+            jumpto outer;
+        }
+    }
+    return answer;
+}
+
+i32 also_paths() {
+    i32 answer;
+    counter := 0;
+    while counter < 3 {
+        counter = counter + 1;
+        string local;
+        local = "body";
+        if counter == 1 { proceed; }
+        else { answer = 42; }
+    } also counter > 1 {
+        string local = "also";
+        if answer != 42 { return 1; }
+        if counter == 2 { proceed; }
+        break;
+    }
+    return 42;
+}
+
+i32 main() {
+    if backward_exit(0) != 42 { return 1; }
+    if backward_exit(1) != 42 { return 2; }
+    if backward_exit(2) != 42 { return 3; }
+    if backward_exit(3) != 42 { return 4; }
+    if nested_jumps() != 42 { return 5; }
+    if also_paths() != 42 { return 6; }
+    return returning(false);
+}

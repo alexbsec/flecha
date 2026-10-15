@@ -388,3 +388,51 @@ TEST(NativeCompilerTests, ReportsLinkerFailuresAsStructuredDiagnostics) {
     EXPECT_EQ(compiler.LastDiagnostic()->code, DiagnosticCode::LinkerFailed);
     EXPECT_FALSE(std::filesystem::exists(executablePath));
 }
+
+TEST(LlvmCodeGeneratorTests,
+     EmitsDelayedScalarsAndNullInitializedStringStorage) {
+    GeneratedSource result = Generate(
+        "i32 main(bool c) { i32 value; string text; "
+        "if c { return 0; } else { value = 42; text = \"ready\"; } "
+        "stdoutln(text); return value; }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("%value = alloca i32"), std::string::npos);
+    EXPECT_NE(ir.find("zeroinitializer, ptr %text"), std::string::npos);
+    EXPECT_EQ(ir.find("store i32 0, ptr %value"), std::string::npos);
+}
+
+TEST(LlvmCodeGeneratorTests, CleansLaterStringSlotsAtEarlierBackwardJumpExits) {
+    GeneratedSource result = Generate(
+        "i32 main() { count := 0; while count < 2 { #again "
+        "if count == 1 { return 42; } count = count + 1; "
+        "string late = \"owned\"; jumpto again; } return 0; }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const llvm::Function* function = result.module->getFunction("main");
+    ASSERT_NE(function, nullptr);
+    bool foundReturn = false;
+    for (const llvm::BasicBlock& block : *function) {
+        const auto* terminator =
+            llvm::dyn_cast<llvm::ReturnInst>(block.getTerminator());
+        if (terminator == nullptr) continue;
+        const auto* value =
+            llvm::dyn_cast<llvm::ConstantInt>(terminator->getReturnValue());
+        if (value == nullptr || value->getSExtValue() != 42) continue;
+        foundReturn = true;
+        bool cleansLate = false;
+        for (const llvm::Instruction& instruction : block) {
+            const auto* store = llvm::dyn_cast<llvm::StoreInst>(&instruction);
+            if (store != nullptr &&
+                store->getPointerOperand()->getName() == "late") {
+                cleansLate = llvm::isa<llvm::ConstantAggregateZero>(
+                    store->getValueOperand());
+            }
+        }
+        EXPECT_TRUE(cleansLate);
+    }
+    EXPECT_TRUE(foundReturn);
+}
