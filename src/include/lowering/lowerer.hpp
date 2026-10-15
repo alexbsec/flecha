@@ -1,0 +1,43 @@
+#ifndef FLECHA_LOWERING_LOWERER_HPP
+#define FLECHA_LOWERING_LOWERER_HPP
+
+#include <memory>
+#include <vector>
+
+#include "bound_ir.hpp"
+#include "core/ast.hpp"
+#include "diagnostics/diagnostic_bag.hpp"
+#include "semantic/semantic_model.hpp"
+
+namespace flecha::lowering {
+
+class Lowerer final {
+   public:
+    [[nodiscard]] std::unique_ptr<BoundProgram> Lower(
+        const core::CompilationUnit& unit,
+        const semantic::SemanticModel& semanticModel,
+        const diagnostics::DiagnosticBag& diagnostics);
+
+   private:
+    std::unique_ptr<BoundFunction> LowerFunction(
+        const core::FunctionDeclaration& function);
+    std::unique_ptr<BoundBlockStatement> LowerBlock(
+        const core::BlockStatement& block);
+    std::vector<std::unique_ptr<BoundStatement>> LowerStatements(
+        const core::BlockStatement& block);
+    std::unique_ptr<BoundStatement> LowerStatement(
+        const core::Statement& statement);
+    std::unique_ptr<BoundStatement> LowerIf(
+        const core::IfStatement& statement);
+    std::unique_ptr<BoundIfStatement> LowerBranch(
+        const core::ConditionalBranch& branch,
+        std::unique_ptr<BoundBlockStatement> elseBlock);
+    std::unique_ptr<BoundExpression> LowerExpression(
+        const core::Expression& expression);
+
+    const semantic::SemanticModel* _semanticModel = nullptr;
+};
+
+}  // namespace flecha::lowering
+
+#endif  // FLECHA_LOWERING_LOWERER_HPP
