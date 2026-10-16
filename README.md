@@ -12,7 +12,7 @@ The compiler is implemented in modern C++ and currently includes a tokenizer, pa
 
 ## Highlights
 
-- Statically typed primitives, functions, tuples, structures, arrays, strings, and error values
+- Statically typed primitives, functions, enums, tuples, structures, arrays, strings, and error values
 - Explicit `unsafe` features for raw pointers and allocation
 - Checked references and slices, ownership contracts, and definite-assignment analysis
 - Modules and library imports through `root::` and `lib::` paths
@@ -206,6 +206,7 @@ Makefile                Convenient build, test, and example targets
 - [`docs/checked_references.md`](docs/checked_references.md) — checked reference behavior
 - [`docs/dynamic_arrays.md`](docs/dynamic_arrays.md) and [`docs/fixed_arrays.md`](docs/fixed_arrays.md) — array features
 - [`docs/error_values.md`](docs/error_values.md) — error declarations and propagation
+- [`docs/enums.md`](docs/enums.md) — nominal enums, defaults, discriminants, and member functions
 - [`editors/neovim/README.md`](editors/neovim/README.md) — Neovim installation and usage
 
 The documentation intentionally labels proposals and proof-of-concept functionality. When behavior differs between the specification and the compiler, compiler tests and diagnostics are the most reliable description of current behavior.

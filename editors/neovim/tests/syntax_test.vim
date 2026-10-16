@@ -79,6 +79,7 @@ call assert_equal('flechaType', s:HighlightAt('error MathError', 0))
 call assert_equal('flechaType', s:HighlightAt('error genericError', 0))
 
 call assert_equal('flechaStatement', s:HighlightAt('structure', 0))
+call assert_equal('flechaStatement', s:HighlightAt('enum State', 0))
 call assert_equal('flechaStatement', s:HighlightAt('build', 0))
 call assert_equal('flechaModifier', s:HighlightAt('private', 0))
 call assert_equal('flechaModifier', s:HighlightAt('override', 0))

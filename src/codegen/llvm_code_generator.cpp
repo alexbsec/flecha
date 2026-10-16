@@ -49,6 +49,8 @@ bool LlvmCodeGenerator::Fail(std::string message) {
 
 llvm::Type* LlvmCodeGenerator::MapType(semantic::SemanticType type) {
     switch (type.Kind()) {
+        case semantic::SemanticTypeKind::Enum:
+            return MapType(type.Enum()->backing);
         case semantic::SemanticTypeKind::Structure: {
             const auto found = _structureTypes.find(type.Structure());
             if (found != _structureTypes.end()) return found->second;
@@ -1480,6 +1482,7 @@ llvm::Value* LlvmCodeGenerator::EmitLiteral(
         return _builder.CreateInsertValue(value, length, 1, "stringv");
     }
     if (expression.Type().IsInteger() ||
+        expression.Type().Kind() == semantic::SemanticTypeKind::Enum ||
         expression.Type().Kind() == semantic::SemanticTypeKind::NamedError) {
         return llvm::ConstantInt::get(
             type,
@@ -2084,6 +2087,25 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
     switch (expression.Kind()) {
         case lowering::BoundNodeKind::BuildExpression:
         case lowering::BoundNodeKind::DefaultExpression: {
+            if (expression.Type().Kind() == semantic::SemanticTypeKind::Enum) {
+                const auto value = expression.Type().Enum()->defaultValue;
+                if (!value) {
+                    Fail("missing enum default variant");
+                    return nullptr;
+                }
+                auto* type = MapType(expression.Type());
+                return llvm::ConstantInt::get(type, *value);
+            }
+            if (expression.Kind() ==
+                    lowering::BoundNodeKind::DefaultExpression &&
+                !expression.Type().ContainsStructure() &&
+                !expression.Type().IsTriviallyZeroable()) {
+                auto* storage = CreateTemporaryAlloca(
+                    MapType(expression.Type()), "default.temporary");
+                if (!EmitInto(expression, storage, expression.Type()))
+                    return nullptr;
+                return _builder.CreateLoad(MapType(expression.Type()), storage);
+            }
             if (expression.Type().ContainsStructure()) {
                 auto* storage = CreateOwnedValueTemporary(expression.Type(),
                                                           "build.temporary");
@@ -2401,7 +2423,13 @@ bool LlvmCodeGenerator::EmitDefaultInto(llvm::Value* destination,
                                         semantic::SemanticType type,
                                         bool semanticZero) {
     using Kind = semantic::SemanticTypeKind;
-    if (type.Kind() == Kind::Structure) {
+    if (type.Kind() == Kind::Enum) {
+        if (!type.Enum()->defaultValue)
+            return Fail("missing enum default variant");
+        _builder.CreateStore(
+            llvm::ConstantInt::get(MapType(type), *type.Enum()->defaultValue),
+            destination);
+    } else if (type.Kind() == Kind::Structure) {
         const semantic::FunctionSymbol* constructor =
             semanticZero ? type.Structure()->zero : type.Structure()->init;
         if (!constructor)
@@ -2411,13 +2439,15 @@ bool LlvmCodeGenerator::EmitDefaultInto(llvm::Value* destination,
             return Fail(
                 "default construction requires a zero-argument initializer");
         _builder.CreateCall(_functions.at(constructor), {destination});
-    } else if (type.Kind() == Kind::Array && type.ContainsStructure()) {
+    } else if (type.Kind() == Kind::Array &&
+               (type.ContainsStructure() || !type.IsTriviallyZeroable())) {
         bool success = true;
         EmitArrayElements(destination, type, false, [&](llvm::Value* slot) {
             success &= EmitDefaultInto(slot, *type.Target(), semanticZero);
         });
         return success;
-    } else if (type.Kind() == Kind::Tuple && type.ContainsStructure()) {
+    } else if (type.Kind() == Kind::Tuple &&
+               (type.ContainsStructure() || !type.IsTriviallyZeroable())) {
         for (std::size_t i = 0; i < type.Elements().size(); ++i)
             if (!EmitDefaultInto(
                     _builder.CreateStructGEP(MapType(type), destination, i),
@@ -2569,7 +2599,10 @@ llvm::Value* LlvmCodeGenerator::EmitAllocation(
                       expression.ElementType()))
             return nullptr;
     } else if (expression.ElementType().Kind() ==
-               semantic::SemanticTypeKind::Structure) {
+                   semantic::SemanticTypeKind::Structure ||
+               (expression.ElementType().Kind() ==
+                    semantic::SemanticTypeKind::Enum &&
+                !expression.ElementType().IsTriviallyZeroable())) {
         auto* indexStorage =
             CreateTemporaryAlloca(sizeType, "allocation.zero.index");
         _builder.CreateStore(llvm::ConstantInt::get(sizeType, 0), indexStorage);

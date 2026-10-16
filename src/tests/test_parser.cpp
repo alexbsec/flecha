@@ -1162,6 +1162,40 @@ TEST(ParserErrorTests, RejectsMalformedErrorDeclarationsAndRecovers) {
     }
 }
 
+TEST(ParserEnumTests, ParsesBackingDefaultsAndDiscriminants) {
+    const std::string source =
+        "export enum TokenKind: u16 { default None = 0, Identifier, "
+        "End = 42, }";
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource(source, diagnostics);
+
+    ASSERT_FALSE(diagnostics.HasErrors());
+    ASSERT_EQ(unit->Declarations().size(), 1);
+    const auto& enumeration =
+        static_cast<const EnumDeclaration&>(*unit->Declarations().front());
+    EXPECT_TRUE(enumeration.exported);
+    EXPECT_EQ(enumeration.Name(), "TokenKind");
+    ASSERT_NE(enumeration.BackingType(), nullptr);
+    EXPECT_EQ(enumeration.BackingType()->Type(), PrimitiveType::U16);
+    ASSERT_EQ(enumeration.Variants().size(), 3);
+    EXPECT_TRUE(enumeration.Variants()[0].isDefault);
+    EXPECT_EQ(enumeration.Variants()[0].discriminant, "0");
+    EXPECT_FALSE(enumeration.Variants()[1].isDefault);
+    EXPECT_TRUE(enumeration.Variants()[1].discriminant.empty());
+    EXPECT_EQ(enumeration.Variants()[2].discriminant, "42");
+}
+
+TEST(ParserEnumTests, UsesU32WhenTheBackingTypeIsOmitted) {
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource("enum Direction { North, South, }", diagnostics);
+
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const auto& enumeration =
+        static_cast<const EnumDeclaration&>(*unit->Declarations().front());
+    EXPECT_EQ(enumeration.BackingType(), nullptr);
+    ASSERT_EQ(enumeration.Variants().size(), 2);
+}
+
 TEST(ParserErrorTests, KeepsQualifiedValuesAndRawAddressesAsExpressions) {
     DiagnosticBag diagnostics;
     auto unit = ParseSource(

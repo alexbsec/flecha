@@ -32,9 +32,10 @@ List elements evaluate once each, left to right. A repeat initializer evaluates
 its value exactly once and copies that result, even when its count is zero.
 
 Supported elements are integer/floating-point scalars, booleans, characters,
-raw pointers, and nested arrays of these types. Reference handles, strings,
-views, void, and other non-value element types are rejected, even at length zero.
-Borrowed and owning elements need additional lifetime/destruction rules.
+enums, raw pointers, structures, and nested arrays of these types. Reference
+handles, strings, views, void, and other non-value element types are rejected,
+even at length zero. Borrowed and owning elements need additional
+lifetime/destruction rules.
 
 Native layout arithmetic is checked before lowering. Lengths and storage sizes
 must fit the implementation's conservative limit of `PTRDIFF_MAX / 8` bytes

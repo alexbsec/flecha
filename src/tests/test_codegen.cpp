@@ -91,6 +91,46 @@ TEST(LlvmCodeGeneratorTests, EmitsForwardAndRecursiveCalls) {
     EXPECT_NE(ir.find("call i32 @Factorial"), std::string::npos);
 }
 
+TEST(LlvmCodeGeneratorTests, EmitsEnumDiscriminantsDefaultsAndMethods) {
+    GeneratedSource result = Generate(
+        "enum Status: u8 { default Idle = 3, Running = 7, Done, } "
+        "bool Status::is_running(&const self) { "
+        "return *self == Status.Running; } "
+        "Status Status::done() { return Status.Done; } "
+        "i32 main() { Status status = none; [2]Status values = none; "
+        "if status != none { return 2; } status = Status.Running; "
+        "if status.is_running() and "
+        "values[0] == Status.Idle and Status::done() == Status.Done { "
+        "return 0; } return 1; }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("define i1 @\"Status::is_running\"(ptr"),
+              std::string::npos);
+    EXPECT_NE(ir.find("define i8 @\"Status::done\"()"), std::string::npos);
+    EXPECT_NE(ir.find("store i8 3"), std::string::npos);
+    EXPECT_NE(ir.find("store i8 7"), std::string::npos);
+    EXPECT_NE(ir.find("ret i8 8"), std::string::npos);
+}
+
+TEST(LlvmCodeGeneratorTests, DefaultConstructsRuntimeEnumArrays) {
+    GeneratedSource result = Generate(
+        "enum Status: u8 { default Idle = 3, Running = 7, } "
+        "unsafe i32 main() { values, failure := new<[]Status>(2); "
+        "if failure != none { return 1; } i32 answer = 0; "
+        "if values[0] != Status.Idle or values[1] != Status.Idle { "
+        "answer = 2; } free(values); return answer; }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("allocation.zero.condition"), std::string::npos);
+    EXPECT_NE(ir.find("store i8 3"), std::string::npos);
+}
+
 TEST(LlvmCodeGeneratorTests, EmitsExternCallsWithoutFunctionBodies) {
     GeneratedSource result = Generate(
         "extern unsafe i32 native_add(i32 left, i32 right); "

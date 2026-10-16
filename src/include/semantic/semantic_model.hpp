@@ -41,6 +41,7 @@ class SemanticModel final {
     }
     const auto& GeneratedFunctions() const { return _generatedFunctions; }
     const auto& Structures() const { return _structures; }
+    const auto& Enums() const { return _enums; }
     [[nodiscard]] const Scope& GlobalScope() const { return *_scopes.front(); }
     [[nodiscard]] const std::vector<std::unique_ptr<Symbol>>& Symbols() const {
         return _symbols;
@@ -52,6 +53,7 @@ class SemanticModel final {
    private:
     friend class SemanticAnalyzer;
     std::vector<std::unique_ptr<StructureType>> _structures;
+    std::vector<std::unique_ptr<EnumType>> _enums;
     std::vector<std::unique_ptr<core::FunctionDeclaration>> _generatedFunctions;
     std::unordered_map<const core::MemberAccessExpression*,
                        const StructureField*>

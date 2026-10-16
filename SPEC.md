@@ -164,6 +164,29 @@ Integer sizes are part of their type names. `isize` and `usize` have the native 
 
 Implicit conversion between distinct primitive types should be avoided. In particular, integers, booleans, and pointers remain differently typed even when their representations or zero values coincide.
 
+### 7.1 Enums
+
+Enums are nominal scalar types with an integer backing and qualified variants:
+
+```flecha
+enum State: u8 {
+    Off,
+    default Unknown = 7,
+    On,
+}
+```
+
+The backing defaults to `u32`. Explicit and implicit discriminants must fit the
+backing type and remain unique. At most one variant may be marked `default`;
+that variant is the contextual value of `none`. An enum without a default does
+not accept `none`. Enums are copyable, compare only with the same nominal enum,
+and may be stored in aggregates and accessed through references or pointers.
+
+Enums support out-of-line instance and static member functions using the same
+receiver spelling, privacy, and call syntax as structure methods. `init`,
+`zero`, and `tear` remain compiler-reserved because enum lifecycle is intrinsic.
+See [enums](docs/enums.md) for implemented syntax and restrictions.
+
 ## 8. Universal zero and `none`
 
 Every primitive Flecha type has a defined zero value. `none` is a universal, polymorphic zero literal that can be converted to the zero value of a destination or comparison type.
@@ -178,6 +201,7 @@ Tentative zero values are:
 | `char` | the null character, `'\0'` |
 | Pointer | `null` |
 | Error type | its designated no-error value |
+| Enum with a default variant | its designated default variant |
 | Plain structure | recursively defaulted fields |
 
 Examples:
@@ -661,8 +685,9 @@ Modules declare `module name;`, matching their filename. Import blocks use
 `@imports :: root::path::module :: lib::library::module as alias;`, with a
 multiline form preferred. `root` and `lib` are reserved in import paths.
 Top-level declarations require `export` for access through imports. Exported
-structures bundle non-private member functions; existing field privacy and
-compiler-only tear rules remain unchanged. Directory imports use `root::path::*`
+structures and enums bundle non-private member functions; existing field
+privacy and compiler-only tear rules remain unchanged. Directory imports use
+`root::path::*`
 for immediate module files or `root::path::{first, second}` for selected modules.
 Each imported module retains its namespace. See [modules](docs/modules.md).
 
@@ -792,11 +817,12 @@ These questions should be resolved by prioritizing predictable behavior, a small
 6. Implement tuples, tuple returns, and destructuring.
 7. Implement universal `none`, zero initialization, `==`, and `===`.
 8. Error types and tuple-based error handling are implemented; payloads and propagation sugar remain future work.
-9. Implement pointers, slices, and explicit unsafe blocks.
-10. Introduce a compiler-owned intermediate representation.
-11. Add an LLVM backend and native debug information.
-12. Expand platform support, tooling, and the standard library.
-13. Begin self-hosting once Flecha can express the compiler without special cases.
+9. Nominal scalar enums, defaults, discriminants, and member functions are implemented; exhaustive matching remains future work.
+10. Implement pointers, slices, and explicit unsafe blocks.
+11. Introduce a compiler-owned intermediate representation.
+12. Add an LLVM backend and native debug information.
+13. Expand platform support, tooling, and the standard library.
+14. Begin self-hosting once Flecha can express the compiler without special cases.
 
 ## 21. Guiding principle
 

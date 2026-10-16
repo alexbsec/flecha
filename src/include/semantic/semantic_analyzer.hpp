@@ -39,6 +39,7 @@ class SemanticAnalyzer final {
     SemanticType ResolveType(const core::TypeNode& type);
     SemanticType ResolveTypeSyntax(const core::TypeNode& type);
     void RegisterErrorTypes(const core::CompilationUnit& unit);
+    void RegisterEnums(const core::CompilationUnit& unit);
     SemanticType AnalyzeMemberAccess(
         const core::MemberAccessExpression& expression);
     void RegisterStructures(const core::CompilationUnit& unit);
@@ -58,6 +59,7 @@ class SemanticAnalyzer final {
     void CheckMethodAccess(const FunctionSymbol& function,
                            source::SourceRange range);
     const StructureType* CurrentOwner() const;
+    const EnumType* CurrentEnumOwner() const;
     void RegisterBuiltIns();
     void RegisterFunctions(const core::CompilationUnit& unit);
     void AnalyzeFunction(const core::FunctionDeclaration& function);

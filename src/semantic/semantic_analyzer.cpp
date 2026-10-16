@@ -30,6 +30,7 @@ bool IsArrayElement(SemanticType type) {
     if (type.Kind() == SemanticTypeKind::Array)
         return IsArrayElement(*type.Target());
     return type.IsNumeric() || type.IsErrorValue() ||
+           type.Kind() == SemanticTypeKind::Enum ||
            type.Kind() == SemanticTypeKind::Structure ||
            type.Kind() == SemanticTypeKind::Bool ||
            type.Kind() == SemanticTypeKind::Char ||
@@ -41,6 +42,7 @@ bool IsRuntimeArrayStructureField(SemanticType type) {
         type.Kind() == SemanticTypeKind::Char ||
         type.Kind() == SemanticTypeKind::Pointer)
         return true;
+    if (type.Kind() == SemanticTypeKind::Enum) return type.IsZeroable();
     if (type.Kind() == SemanticTypeKind::Array)
         return IsRuntimeArrayStructureField(*type.Target());
     if (type.Kind() == SemanticTypeKind::Structure) {
@@ -128,6 +130,8 @@ std::optional<std::uint64_t> StorageSize(SemanticType type) {
         return type.Length() * *element;
     }
     switch (type.Kind()) {
+        case SemanticTypeKind::Enum:
+            return StorageSize(type.Enum()->backing);
         case SemanticTypeKind::NamedError:
             return 4;
         case SemanticTypeKind::ErrorValue:
@@ -243,6 +247,7 @@ void MarkDirectConstruction(
 
 bool IsEqualityComparable(SemanticType type) {
     if (type.IsNumeric() || type.IsErrorValue() ||
+        type.Kind() == SemanticTypeKind::Enum ||
         type.Kind() == SemanticTypeKind::Bool ||
         type.Kind() == SemanticTypeKind::Char ||
         type.Kind() == SemanticTypeKind::Pointer ||
@@ -334,6 +339,11 @@ void SemanticAnalyzer::BindImports(const core::CompilationUnit& unit) {
                                *declaration)
                                .Name();
                 else if (declaration->Kind() ==
+                         core::AstNodeKind::EnumDeclaration)
+                    name =
+                        static_cast<const core::EnumDeclaration&>(*declaration)
+                            .Name();
+                else if (declaration->Kind() ==
                          core::AstNodeKind::ErrorDeclaration)
                     name =
                         static_cast<const core::ErrorDeclaration&>(*declaration)
@@ -354,17 +364,26 @@ void SemanticAnalyzer::ValidateExports(const core::CompilationUnit& unit) {
             !declaration->instantiationOrigins.empty())
             specializedFunctions.insert(_model.DeclaredSymbol(*declaration));
     std::unordered_set<const ErrorFamily*> privateErrors;
+    std::unordered_set<const EnumType*> privateEnums;
     for (const auto& declaration : unit.Declarations())
         if (declaration->Kind() == core::AstNodeKind::ErrorDeclaration &&
             !declaration->exported) {
             const auto* symbol = _model.DeclaredSymbol(*declaration);
             if (symbol) privateErrors.insert(&symbol->Type().Family());
         }
+    for (const auto& declaration : unit.Declarations())
+        if (declaration->Kind() == core::AstNodeKind::EnumDeclaration &&
+            !declaration->exported) {
+            const auto* symbol = _model.DeclaredSymbol(*declaration);
+            if (symbol) privateEnums.insert(symbol->Type().Enum());
+        }
     std::function<bool(SemanticType)> visible = [&](SemanticType type) {
         if (type.Kind() == SemanticTypeKind::Structure)
             return type.Structure()->syntax->exported;
         if (type.Kind() == SemanticTypeKind::NamedError)
             return !privateErrors.contains(&type.Family());
+        if (type.Kind() == SemanticTypeKind::Enum)
+            return !privateEnums.contains(type.Enum());
         if (type.Kind() == SemanticTypeKind::Tuple) {
             for (const auto& element : type.Elements())
                 if (!visible(element)) return false;
@@ -384,7 +403,17 @@ void SemanticAnalyzer::ValidateExports(const core::CompilationUnit& unit) {
                 check(field.type, field.syntax->Range());
         for (const auto& [name, method] : structure->methods) {
             if (method->IsPrivate() || name == "tear" ||
-                specializedFunctions.contains(method)) continue;
+                specializedFunctions.contains(method))
+                continue;
+            check(method->ReturnType(), method->DeclarationRange());
+            for (const auto& parameter : method->ParameterTypes())
+                check(parameter, method->DeclarationRange());
+        }
+    }
+    for (const auto& enumeration : _model._enums) {
+        if (!enumeration->syntax->exported) continue;
+        for (const auto& [name, method] : enumeration->methods) {
+            if (method->IsPrivate()) continue;
             check(method->ReturnType(), method->DeclarationRange());
             for (const auto& parameter : method->ParameterTypes())
                 check(parameter, method->DeclarationRange());
@@ -412,6 +441,9 @@ const Symbol* SemanticAnalyzer::AddSymbol(std::unique_ptr<Symbol> symbol,
     if (declaration.Kind() == core::AstNodeKind::StructureDeclaration)
         localName =
             static_cast<const core::StructureDeclaration&>(declaration).Name();
+    else if (declaration.Kind() == core::AstNodeKind::EnumDeclaration)
+        localName =
+            static_cast<const core::EnumDeclaration&>(declaration).Name();
     else if (declaration.Kind() == core::AstNodeKind::ErrorDeclaration)
         localName =
             static_cast<const core::ErrorDeclaration&>(declaration).Name();
@@ -436,6 +468,7 @@ SemanticType SemanticAnalyzer::ResolveTypeSyntax(const core::TypeNode& type) {
         const Symbol* symbol = _currentScope->Lookup(type.Name());
         if (symbol == nullptr ||
             (symbol->Kind() != SymbolKind::ErrorType &&
+             symbol->Kind() != SymbolKind::EnumType &&
              symbol->Kind() != SymbolKind::StructureType)) {
             Report(diagnostics::DiagnosticCode::UnknownType, type.Range(),
                    "unknown type '" + type.Name() + "'");
@@ -523,13 +556,14 @@ void SemanticAnalyzer::ValidateTupleType(SemanticType type,
             ValidateArrayType(element, range);
         else if (!element.IsError() && !element.IsErrorValue() &&
                  !element.IsNumeric() &&
+                 element.Kind() != SemanticTypeKind::Enum &&
                  element.Kind() != SemanticTypeKind::Structure &&
                  element.Kind() != SemanticTypeKind::Bool &&
                  element.Kind() != SemanticTypeKind::Char &&
                  element.Kind() != SemanticTypeKind::Pointer &&
                  element.Kind() != SemanticTypeKind::String)
             Report(diagnostics::DiagnosticCode::InvalidTuple, range,
-                   "tuple elements must be owned values: scalars, error "
+                   "tuple elements must be owned values: scalars, enums, error "
                    "values, raw "
                    "pointers, strings, structures, fixed arrays, or tuples; "
                    "found '" +
@@ -700,6 +734,171 @@ void SemanticAnalyzer::RegisterErrorTypes(const core::CompilationUnit& unit) {
     }
 }
 
+void SemanticAnalyzer::RegisterEnums(const core::CompilationUnit& unit) {
+    const auto width = [](SemanticType type) -> unsigned {
+        switch (type.Kind()) {
+            case SemanticTypeKind::I8:
+            case SemanticTypeKind::U8:
+                return 8;
+            case SemanticTypeKind::I16:
+            case SemanticTypeKind::U16:
+                return 16;
+            case SemanticTypeKind::I32:
+            case SemanticTypeKind::U32:
+                return 32;
+            case SemanticTypeKind::ISize:
+            case SemanticTypeKind::USize:
+                return sizeof(void*) * 8;
+            default:
+                return 64;
+        }
+    };
+    const auto isSigned = [](SemanticType type) {
+        return type.Kind() >= SemanticTypeKind::I8 &&
+               type.Kind() <= SemanticTypeKind::ISize;
+    };
+
+    for (const auto& declaration : unit.Declarations()) {
+        if (declaration->Kind() != core::AstNodeKind::EnumDeclaration) continue;
+        const auto& syntax =
+            static_cast<const core::EnumDeclaration&>(*declaration);
+        SetModule(syntax.moduleId);
+
+        auto enumeration = std::make_unique<EnumType>();
+        enumeration->name = TopName(syntax, syntax.Name());
+        enumeration->syntax = &syntax;
+        if (syntax.BackingType() != nullptr) {
+            enumeration->backing = ResolveType(*syntax.BackingType());
+            if (!enumeration->backing.IsInteger() ||
+                enumeration->backing.IsConst()) {
+                Report(diagnostics::DiagnosticCode::InvalidEnumDeclaration,
+                       syntax.BackingType()->Range(),
+                       "enum backing types must be mutable integer types");
+                enumeration->backing = SemanticType(SemanticTypeKind::U32);
+            }
+        }
+
+        const unsigned bits = width(enumeration->backing);
+        const bool signedBacking = isSigned(enumeration->backing);
+        const std::uint64_t unsignedMaximum =
+            bits == 64 ? std::numeric_limits<std::uint64_t>::max()
+                       : (std::uint64_t{1} << bits) - 1;
+        const std::uint64_t signedMaximum =
+            (std::uint64_t{1} << (bits - 1)) - 1;
+        const std::uint64_t signedMinimumMagnitude = signedMaximum + 1;
+        const std::uint64_t mask = unsignedMaximum;
+
+        std::unordered_set<std::string> names;
+        std::unordered_set<std::uint64_t> values;
+        bool nextAvailable = true;
+        std::int64_t nextSigned = 0;
+        std::uint64_t nextUnsigned = 0;
+        bool hasDefault = false;
+        for (const core::EnumVariant& variant : syntax.Variants()) {
+            if (!names.insert(variant.name).second)
+                Report(diagnostics::DiagnosticCode::DuplicateDeclaration,
+                       variant.range,
+                       "duplicate enum variant '" + variant.name + "'");
+
+            std::uint64_t raw = 0;
+            bool valid = true;
+            if (variant.discriminant.empty()) {
+                if (!nextAvailable) {
+                    Report(diagnostics::DiagnosticCode::InvalidEnumDeclaration,
+                           variant.range,
+                           "implicit enum discriminant exceeds backing type '" +
+                               enumeration->backing.Name() + "'");
+                    valid = false;
+                } else if (signedBacking) {
+                    raw = static_cast<std::uint64_t>(nextSigned) & mask;
+                } else {
+                    raw = nextUnsigned;
+                }
+            } else {
+                const bool negative = variant.discriminant.front() == '-';
+                const std::string_view digits =
+                    negative ? std::string_view(variant.discriminant).substr(1)
+                             : std::string_view(variant.discriminant);
+                std::uint64_t magnitude = 0;
+                const auto parsed = std::from_chars(
+                    digits.data(), digits.data() + digits.size(), magnitude);
+                valid = parsed.ec == std::errc{} &&
+                        parsed.ptr == digits.data() + digits.size();
+                if (!signedBacking && negative) {
+                    valid = false;
+                } else if (signedBacking && negative) {
+                    if (magnitude > signedMinimumMagnitude)
+                        valid = false;
+                    else
+                        raw = (std::uint64_t{0} - magnitude) & mask;
+                } else {
+                    const std::uint64_t maximum =
+                        signedBacking ? signedMaximum : unsignedMaximum;
+                    if (magnitude > maximum)
+                        valid = false;
+                    else
+                        raw = magnitude;
+                }
+                if (!valid)
+                    Report(diagnostics::DiagnosticCode::InvalidEnumDeclaration,
+                           variant.discriminantRange,
+                           "enum discriminant is not representable as '" +
+                               enumeration->backing.Name() + "'");
+            }
+
+            if (valid && !values.insert(raw).second)
+                Report(diagnostics::DiagnosticCode::InvalidEnumDeclaration,
+                       variant.range,
+                       "duplicate enum discriminant value for '" +
+                           variant.name + "'");
+            enumeration->variants.push_back({variant.name, raw, variant.range});
+
+            if (variant.isDefault) {
+                if (hasDefault)
+                    Report(diagnostics::DiagnosticCode::InvalidEnumDeclaration,
+                           variant.range,
+                           "an enum may declare exactly one default variant");
+                else {
+                    enumeration->defaultValue = raw;
+                    hasDefault = true;
+                }
+            }
+
+            if (!valid) {
+                nextAvailable = false;
+            } else if (signedBacking) {
+                std::int64_t current = 0;
+                if (bits == 64 && raw == (std::uint64_t{1} << 63))
+                    current = std::numeric_limits<std::int64_t>::min();
+                else if ((raw & (std::uint64_t{1} << (bits - 1))) != 0)
+                    current = static_cast<std::int64_t>(raw | ~mask);
+                else
+                    current = static_cast<std::int64_t>(raw);
+                if (current == (bits == 64
+                                    ? std::numeric_limits<std::int64_t>::max()
+                                    : static_cast<std::int64_t>(signedMaximum)))
+                    nextAvailable = false;
+                else
+                    nextSigned = current + 1;
+            } else if (raw == unsignedMaximum) {
+                nextAvailable = false;
+            } else {
+                nextUnsigned = raw + 1;
+            }
+        }
+        if (enumeration->variants.empty())
+            Report(diagnostics::DiagnosticCode::InvalidEnumDeclaration,
+                   syntax.Range(), "enum types require at least one variant");
+
+        EnumType* type = enumeration.get();
+        _model._enums.push_back(std::move(enumeration));
+        AddSymbol(std::make_unique<Symbol>(
+                      SymbolKind::EnumType, TopName(syntax, syntax.Name()),
+                      SemanticType(type), syntax.NameRange(), false),
+                  syntax);
+    }
+}
+
 void SemanticAnalyzer::RegisterFunctions(const core::CompilationUnit& unit) {
     for (const auto& declaration : unit.Declarations())
         if (declaration->Kind() == core::AstNodeKind::FunctionDeclaration)
@@ -711,29 +910,40 @@ void SemanticAnalyzer::RegisterFunction(
     const core::FunctionDeclaration& function, bool generated) {
     SetModule(function.moduleId);
     StructureType* owner = nullptr;
+    EnumType* enumOwner = nullptr;
     if (!function.Owner().empty()) {
         const Symbol* type = _currentScope->Lookup(function.Owner());
-        if (!type || type->Kind() != SymbolKind::StructureType) {
+        if (!type || (type->Kind() != SymbolKind::StructureType &&
+                      type->Kind() != SymbolKind::EnumType)) {
             Report(diagnostics::DiagnosticCode::UnknownType,
                    function.NameRange(),
-                   "unknown structure '" + function.Owner() + "'");
-        } else
+                   "unknown structure or enum '" + function.Owner() + "'");
+        } else if (type->Kind() == SymbolKind::StructureType)
             owner = const_cast<StructureType*>(type->Type().Structure());
+        else
+            enumOwner = const_cast<EnumType*>(type->Type().Enum());
     }
     std::vector<SemanticType> parameterTypes;
     bool receiver = false;
     for (const auto& parameter : function.Parameters()) {
         SemanticType type = ResolveType(parameter->Type());
         if (parameter->Name() == "self") {
-            receiver = owner && parameterTypes.empty() &&
+            const bool matchingOwner =
+                (owner && type.Target() &&
+                 type.Target()->Kind() == SemanticTypeKind::Structure &&
+                 type.Target()->Structure() == owner) ||
+                (enumOwner && type.Target() &&
+                 type.Target()->Kind() == SemanticTypeKind::Enum &&
+                 type.Target()->Enum() == enumOwner);
+            receiver = (owner || enumOwner) && parameterTypes.empty() &&
                        (type.Kind() == SemanticTypeKind::Reference ||
                         type.Kind() == SemanticTypeKind::Pointer) &&
-                       type.Target()->Structure() == owner;
+                       matchingOwner;
             if (!receiver)
-                Report(diagnostics::DiagnosticCode::InvalidStructure,
+                Report(diagnostics::DiagnosticCode::InvalidMember,
                        parameter->Range(),
                        "self must be the first parameter and borrow or point "
-                       "to the owning structure");
+                       "to the owning structure or enum");
         }
         parameterTypes.push_back(type);
     }
@@ -811,9 +1021,10 @@ void SemanticAnalyzer::RegisterFunction(
                function.NameRange(),
                "override is required exactly when replacing init, zero, or "
                "tear");
-    if (function.HasModifier(core::FunctionModifier::Private) && !owner)
-        Report(diagnostics::DiagnosticCode::InvalidStructure,
-               function.NameRange(), "private requires a structure method");
+    if (function.HasModifier(core::FunctionModifier::Private) && !owner &&
+        !enumOwner)
+        Report(diagnostics::DiagnosticCode::InvalidMember, function.NameRange(),
+               "private requires a structure or enum method");
     if (owner && function.Name() == "init" &&
         (receiver || returnType.WithoutConst() != SemanticType(owner)))
         Report(diagnostics::DiagnosticCode::InvalidLifecycle, function.Range(),
@@ -836,20 +1047,31 @@ void SemanticAnalyzer::RegisterFunction(
          parameterTypes[0].Target()->IsConst()))
         Report(diagnostics::DiagnosticCode::InvalidLifecycle, function.Range(),
                "tear must return void and take only &self");
-    if (owner && function.exported)
-        Report(diagnostics::DiagnosticCode::InvalidStructure, function.Range(),
-               "export the structure, not individual member functions");
+    if (enumOwner && (function.Name() == "init" || function.Name() == "zero" ||
+                      function.Name() == "tear"))
+        Report(diagnostics::DiagnosticCode::InvalidLifecycle, function.Range(),
+               "enum lifecycle is compiler-defined; init, zero, and tear are "
+               "reserved");
+    if ((owner || enumOwner) && function.exported)
+        Report(diagnostics::DiagnosticCode::InvalidMember, function.Range(),
+               "export the owning type, not individual member functions");
     if (owner && owner->syntax->moduleId != function.moduleId)
         Report(diagnostics::DiagnosticCode::PrivateAccess, function.Range(),
                "methods must be defined in their structure's module");
+    if (enumOwner && enumOwner->syntax->moduleId != function.moduleId)
+        Report(diagnostics::DiagnosticCode::PrivateAccess, function.Range(),
+               "methods must be defined in their enum's module");
     const std::string name = owner ? owner->name + "::" + function.Name()
-                                   : TopName(function, function.Name());
+                             : enumOwner
+                                 ? enumOwner->name + "::" + function.Name()
+                                 : TopName(function, function.Name());
     const auto* symbol = static_cast<const FunctionSymbol*>(AddSymbol(
         std::make_unique<FunctionSymbol>(
             name, returnType, std::move(parameterTypes), function.NameRange(),
             BuiltInFunction::None, function.IsUnsafe(), owner,
             function.HasModifier(core::FunctionModifier::Private), receiver,
-            function.IsExtern(), function.IsExtern() ? function.Name() : ""),
+            function.IsExtern(), function.IsExtern() ? function.Name() : "",
+            enumOwner),
         function));
     if (symbol && function.HasModifier(core::FunctionModifier::Extern))
         _forbiddenZeroEffects.insert(symbol);
@@ -869,6 +1091,18 @@ void SemanticAnalyzer::RegisterFunction(
                 Report(diagnostics::DiagnosticCode::DuplicateDeclaration,
                        function.NameRange(),
                        "method conflicts with field '" + field.name + "'");
+    }
+    if (enumOwner && symbol) {
+        if (!enumOwner->methods.emplace(function.Name(), symbol).second)
+            Report(diagnostics::DiagnosticCode::DuplicateDeclaration,
+                   function.NameRange(),
+                   "duplicate enum method '" + function.Name() + "'");
+        for (const EnumVariant& variant : enumOwner->variants)
+            if (variant.name == function.Name())
+                Report(diagnostics::DiagnosticCode::DuplicateDeclaration,
+                       function.NameRange(),
+                       "method conflicts with enum variant '" + variant.name +
+                           "'");
     }
 }
 
@@ -917,6 +1151,10 @@ SemanticModel SemanticAnalyzer::Analyze(core::CompilationUnit& unit) {
                     name = static_cast<const core::StructureDeclaration&>(
                                *declaration)
                                .Name();
+                if (declaration->Kind() == core::AstNodeKind::EnumDeclaration)
+                    name =
+                        static_cast<const core::EnumDeclaration&>(*declaration)
+                            .Name();
                 if (declaration->Kind() == core::AstNodeKind::ErrorDeclaration)
                     name =
                         static_cast<const core::ErrorDeclaration&>(*declaration)
@@ -934,6 +1172,7 @@ SemanticModel SemanticAnalyzer::Analyze(core::CompilationUnit& unit) {
                 (void)_model._scopes.front()->DeclareAs(alias, *symbol);
     };
     RegisterErrorTypes(unit);
+    RegisterEnums(unit);
     RegisterStructures(unit);
     bindGenericAliases();
     BindImports(unit);
@@ -1673,7 +1912,9 @@ SemanticType SemanticAnalyzer::AnalyzeLiteral(
         case TokenType::Null:
             return SemanticType(SemanticTypeKind::Null);
         case TokenType::None:
-            if (expected.ContainsStructure() && expected.IsZeroable()) {
+            if ((expected.ContainsStructure() ||
+                 expected.Kind() == SemanticTypeKind::Enum) &&
+                expected.IsZeroable()) {
                 if (expected.IsImmovable()) RequireUnsafe(expression.Range());
                 WarnForNontrivialDefault(expected, expression.Range());
                 RecordZeroDependency(expected);
@@ -1837,7 +2078,8 @@ SemanticType SemanticAnalyzer::AnalyzeName(
             diagnostics::DiagnosticCode::InvalidStructure, expression.Range(),
             "an unfinished build value cannot escape or receive method calls");
     if (symbol->Kind() == SymbolKind::ErrorType ||
-        symbol->Kind() == SymbolKind::StructureType) {
+        symbol->Kind() == SymbolKind::StructureType ||
+        symbol->Kind() == SymbolKind::EnumType) {
         Report(diagnostics::DiagnosticCode::InvalidOperand, expression.Range(),
                "type '" + expression.Name() + "' is not a value");
         return SemanticType::Error();
@@ -1853,6 +2095,25 @@ SemanticType SemanticAnalyzer::AnalyzeMemberAccess(
         symbol = _currentScope->Lookup(
             static_cast<const core::NameExpression&>(expression.Receiver())
                 .Name());
+    if (symbol && symbol->Kind() == SymbolKind::EnumType) {
+        if (expression.Access() != TokenType::Dot)
+            Report(diagnostics::DiagnosticCode::InvalidMember,
+                   expression.Range(), "enum variants use '.'");
+        const auto& enumeration = *symbol->Type().Enum();
+        const auto variant = std::find_if(
+            enumeration.variants.begin(), enumeration.variants.end(),
+            [&](const EnumVariant& candidate) {
+                return candidate.name == expression.Member();
+            });
+        if (variant == enumeration.variants.end()) {
+            Report(diagnostics::DiagnosticCode::InvalidMember,
+                   expression.MemberRange(),
+                   "enum '" + symbol->Name() + "' has no variant '" +
+                       expression.Member() + "'");
+            return SemanticType::Error();
+        }
+        return symbol->Type();
+    }
     if (!symbol || symbol->Kind() != SymbolKind::ErrorType) {
         const bool previousAllow = _allowBuildSelf;
         const core::Expression* base = &expression.Receiver();
@@ -2150,6 +2411,7 @@ SemanticType SemanticAnalyzer::AnalyzeUnary(
         if (target.IsError() ||
             !(target.IsNumeric() || target.IsErrorValue() ||
               target.Kind() == SemanticTypeKind::Structure ||
+              target.Kind() == SemanticTypeKind::Enum ||
               target.Kind() == SemanticTypeKind::Bool ||
               target.Kind() == SemanticTypeKind::Char ||
               target.Kind() == SemanticTypeKind::Pointer ||
@@ -2230,15 +2492,24 @@ SemanticType SemanticAnalyzer::AnalyzeBinary(
         expression.Left().Kind() == core::AstNodeKind::LiteralExpression)
         left = AnalyzeExpression(expression.Left(), right);
     if (valueEquality && left.Kind() == SemanticTypeKind::None &&
-        right.ContainsStructure())
+        (right.ContainsStructure() || right.Kind() == SemanticTypeKind::Enum))
         left = AnalyzeExpression(expression.Left(), right);
     if (valueEquality && right.Kind() == SemanticTypeKind::None &&
-        left.ContainsStructure())
+        (left.ContainsStructure() || left.Kind() == SemanticTypeKind::Enum))
         right = AnalyzeExpression(expression.Right(), left);
     const bool leftStructure = left.Kind() == SemanticTypeKind::Structure;
     const bool rightStructure = right.Kind() == SemanticTypeKind::Structure;
     const bool leftNone = left.Kind() == SemanticTypeKind::None;
     const bool rightNone = right.Kind() == SemanticTypeKind::None;
+    const bool leftEnum = left.Kind() == SemanticTypeKind::Enum;
+    const bool rightEnum = right.Kind() == SemanticTypeKind::Enum;
+    if (strictEquality && ((leftEnum && rightNone) || (leftNone && rightEnum)))
+        return SemanticType(SemanticTypeKind::Bool);
+    if (((valueEquality || strictEquality) && leftEnum && rightEnum &&
+         left == right) ||
+        (valueEquality && ((leftEnum && rightNone && left.IsZeroable()) ||
+                           (leftNone && rightEnum && right.IsZeroable()))))
+        return SemanticType(SemanticTypeKind::Bool);
     if (strictEquality &&
         ((leftStructure && rightNone) || (leftNone && rightStructure)))
         return SemanticType(SemanticTypeKind::Bool);
@@ -2473,11 +2744,13 @@ SemanticType SemanticAnalyzer::AnalyzeAllocationCall(
             if (dynamic && !(element.IsNumeric() ||
                              element.Kind() == SemanticTypeKind::Bool ||
                              element.Kind() == SemanticTypeKind::Char ||
+                             (element.Kind() == SemanticTypeKind::Enum &&
+                              element.IsZeroable()) ||
                              (element.Kind() == SemanticTypeKind::Structure &&
                               IsRuntimeArrayStructureField(element))))
                 Report(diagnostics::DiagnosticCode::InvalidAllocation,
                        expression.TypeArgument()->Range(),
-                       "runtime arrays require numeric, bool, char, or "
+                       "runtime arrays require numeric, bool, char, enum, or "
                        "trivially copyable default-constructible structure "
                        "elements with supported fields");
             if (dynamic && element.Kind() == SemanticTypeKind::Structure &&
@@ -2549,7 +2822,8 @@ SemanticType SemanticAnalyzer::AnalyzeAllocationCall(
 SemanticType SemanticAnalyzer::AnalyzeCall(
     const core::CallExpression& expression) {
     if (expression.Callee().Kind() == core::AstNodeKind::NameExpression &&
-        static_cast<const core::NameExpression&>(expression.Callee()).Name() == "take" &&
+        static_cast<const core::NameExpression&>(expression.Callee()).Name() ==
+            "take" &&
         !_currentScope->Lookup("take")) {
         if (_inZero)
             Report(diagnostics::DiagnosticCode::InvalidLifecycle,
@@ -2607,7 +2881,8 @@ SemanticType SemanticAnalyzer::AnalyzeCall(
         auto specialized = std::make_unique<FunctionSymbol>(
             callee.Name(), type, std::vector<SemanticType>{type},
             callee.Range(), BuiltInFunction::Take, true);
-        _model._types.insert_or_assign(&callee, SemanticType(SemanticTypeKind::Function));
+        _model._types.insert_or_assign(
+            &callee, SemanticType(SemanticTypeKind::Function));
         _model._bindings[&callee] = specialized.get();
         _model._symbols.push_back(std::move(specialized));
         return type;
@@ -2714,9 +2989,11 @@ SemanticType SemanticAnalyzer::AnalyzeMemberCall(
         return AnalyzeStructureCall(expression, SemanticType::Error());
     const SemanticType receiver = AnalyzeExpression(expression.Receiver());
     if (receiver.Kind() == SemanticTypeKind::Structure ||
+        receiver.Kind() == SemanticTypeKind::Enum ||
         ((receiver.Kind() == SemanticTypeKind::Pointer ||
           receiver.Kind() == SemanticTypeKind::Reference) &&
-         receiver.Target()->Kind() == SemanticTypeKind::Structure))
+         (receiver.Target()->Kind() == SemanticTypeKind::Structure ||
+          receiver.Target()->Kind() == SemanticTypeKind::Enum)))
         return AnalyzeStructureCall(expression, receiver);
     if (expression.Access() != TokenType::Dot)
         Report(diagnostics::DiagnosticCode::InvalidMember, expression.Range(),
@@ -2916,6 +3193,10 @@ const StructureType* SemanticAnalyzer::CurrentOwner() const {
     return _currentFunction ? _currentFunction->Owner() : nullptr;
 }
 
+const EnumType* SemanticAnalyzer::CurrentEnumOwner() const {
+    return _currentFunction ? _currentFunction->EnumOwner() : nullptr;
+}
+
 void SemanticAnalyzer::RegisterStructures(const core::CompilationUnit& unit) {
     for (const auto& declaration : unit.Declarations()) {
         if (declaration->Kind() != core::AstNodeKind::StructureDeclaration)
@@ -2981,6 +3262,7 @@ void SemanticAnalyzer::ResolveStructureFields() {
             return true;
         }
         return type.IsNumeric() || type.IsErrorValue() ||
+               type.Kind() == SemanticTypeKind::Enum ||
                type.Kind() == SemanticTypeKind::Bool ||
                type.Kind() == SemanticTypeKind::Char ||
                type.Kind() == SemanticTypeKind::String || type.IsError();
@@ -3051,6 +3333,12 @@ void SemanticAnalyzer::GenerateInitializers() {
         [&](SemanticType type) -> bool {
         if (type.Kind() == SemanticTypeKind::Array)
             return canGenerateZero(*type.Target());
+        if (type.Kind() == SemanticTypeKind::Tuple) {
+            for (const auto& element : type.Elements())
+                if (!canGenerateZero(element)) return false;
+            return true;
+        }
+        if (type.Kind() == SemanticTypeKind::Enum) return type.IsZeroable();
         if (type.Kind() != SemanticTypeKind::Structure)
             return type.IsNumeric() || type.Kind() == SemanticTypeKind::Bool ||
                    type.Kind() == SemanticTypeKind::Char ||
@@ -3103,7 +3391,9 @@ void SemanticAnalyzer::CheckMethodAccess(const FunctionSymbol& function,
     if (function.Name().ends_with("::tear"))
         Report(diagnostics::DiagnosticCode::InvalidLifecycle, range,
                "tear is compiler-only and cannot be called directly");
-    if (function.IsPrivate() && CurrentOwner() != function.Owner())
+    if (function.IsPrivate() &&
+        ((function.Owner() && CurrentOwner() != function.Owner()) ||
+         (function.EnumOwner() && CurrentEnumOwner() != function.EnumOwner())))
         Report(diagnostics::DiagnosticCode::PrivateAccess, range,
                "method '" + function.Name() + "' is private");
     if (function.IsUnsafe() || function.ReturnType().IsImmovable())
@@ -3114,8 +3404,8 @@ void SemanticAnalyzer::CheckCopy(const core::Expression& expression,
                                  SemanticType type) {
     const core::Expression* source = &expression;
     while (source->Kind() == core::AstNodeKind::ParenthesizedExpression)
-        source = &static_cast<const core::ParenthesizedExpression&>(*source)
-                      .Inner();
+        source =
+            &static_cast<const core::ParenthesizedExpression&>(*source).Inner();
     const bool semanticDefault = IsNoneLiteral(*source);
     if (_currentFunction && CopyMayAllocate(type) &&
         source->Kind() != core::AstNodeKind::BuildExpression &&
@@ -3183,6 +3473,11 @@ SemanticType SemanticAnalyzer::AnalyzeBuild(
                 break;
             }
     std::function<void(SemanticType)> checkDefault = [&](SemanticType field) {
+        if (field.Kind() == SemanticTypeKind::Enum && !field.IsZeroable())
+            Report(diagnostics::DiagnosticCode::InvalidStructure,
+                   expression.Range(),
+                   "field of enum type '" + field.Name() +
+                       "' has no default variant");
         if (field.Kind() == SemanticTypeKind::Structure) {
             const FunctionSymbol* method =
                 zeroBuild ? field.Structure()->zero : field.Structure()->init;
@@ -3232,6 +3527,7 @@ SemanticType SemanticAnalyzer::AnalyzeStructureCall(
     const core::MemberCallExpression& expression, SemanticType receiver) {
     const bool isStatic = expression.Access() == TokenType::Scope;
     const StructureType* owner = nullptr;
+    const EnumType* enumOwner = nullptr;
     if (isStatic) {
         if (expression.Receiver().Kind() == core::AstNodeKind::NameExpression) {
             const Symbol* type = _currentScope->Lookup(
@@ -3239,25 +3535,37 @@ SemanticType SemanticAnalyzer::AnalyzeStructureCall(
                     .Name());
             if (type && type->Kind() == SymbolKind::StructureType)
                 owner = type->Type().Structure();
+            if (type && type->Kind() == SymbolKind::EnumType)
+                enumOwner = type->Type().Enum();
         }
     } else {
-        if (receiver.Kind() == SemanticTypeKind::Structure) {
+        if (receiver.Kind() == SemanticTypeKind::Structure ||
+            receiver.Kind() == SemanticTypeKind::Enum) {
             if (expression.Access() != TokenType::Dot)
                 Report(diagnostics::DiagnosticCode::InvalidMember,
-                       expression.Range(), "structure values use '.'");
-            owner = receiver.Structure();
+                       expression.Range(), "value receivers use '.'");
+            if (receiver.Kind() == SemanticTypeKind::Structure)
+                owner = receiver.Structure();
+            else
+                enumOwner = receiver.Enum();
         } else if (receiver.Kind() == SemanticTypeKind::Pointer ||
                    receiver.Kind() == SemanticTypeKind::Reference) {
             if (expression.Access() != TokenType::Arrow)
                 Report(diagnostics::DiagnosticCode::InvalidMember,
                        expression.Range(),
                        "pointer and reference receivers use '->'");
-            owner = receiver.Target()->Structure();
+            if (receiver.Target()->Kind() == SemanticTypeKind::Structure)
+                owner = receiver.Target()->Structure();
+            else if (receiver.Target()->Kind() == SemanticTypeKind::Enum)
+                enumOwner = receiver.Target()->Enum();
             if (receiver.Kind() == SemanticTypeKind::Pointer)
                 RequireUnsafe(expression.Range());
         }
     }
-    if (!owner || !owner->methods.contains(expression.Member())) {
+    const auto* methods = owner       ? &owner->methods
+                          : enumOwner ? &enumOwner->methods
+                                      : nullptr;
+    if (!methods || !methods->contains(expression.Member())) {
         if (owner && expression.Member() == "tear") {
             Report(diagnostics::DiagnosticCode::InvalidLifecycle,
                    expression.MemberRange(),
@@ -3266,16 +3574,16 @@ SemanticType SemanticAnalyzer::AnalyzeStructureCall(
         }
         Report(diagnostics::DiagnosticCode::InvalidMember,
                expression.MemberRange(),
-               "unknown structure method '" + expression.Member() + "'");
+               "unknown method '" + expression.Member() + "'");
         return SemanticType::Error();
     }
-    const FunctionSymbol* function = owner->methods.at(expression.Member());
+    const FunctionSymbol* function = methods->at(expression.Member());
     _model._methods[&expression] = function;
     if (_currentFunction) _functionCalls[_currentFunction].insert(function);
     CheckMethodAccess(*function, expression.MemberRange());
-    if (function == owner->zero)
+    if (owner && function == owner->zero)
         WarnForNontrivialDefault(SemanticType(owner), expression.Range());
-    if (_inZero && function == owner->zero)
+    if (owner && _inZero && function == owner->zero)
         RecordZeroDependency(SemanticType(owner));
     if (isStatic == function->HasReceiver())
         Report(diagnostics::DiagnosticCode::InvalidMember, expression.Range(),
@@ -3284,13 +3592,14 @@ SemanticType SemanticAnalyzer::AnalyzeStructureCall(
     const std::size_t offset = function->HasReceiver() ? 1 : 0;
     if (offset && !isStatic) {
         const SemanticType expected = function->ParameterTypes()[0];
-        SemanticType target = receiver.Kind() == SemanticTypeKind::Structure
+        SemanticType target = receiver.Kind() == SemanticTypeKind::Structure ||
+                                      receiver.Kind() == SemanticTypeKind::Enum
                                   ? PlaceType(expression.Receiver())
                                   : *receiver.Target();
         if (target.IsError())
             Report(diagnostics::DiagnosticCode::InvalidReference,
                    expression.Receiver().Range(),
-                   "method receiver requires addressable structure storage");
+                   "method receiver requires addressable storage");
         if (target.IsConst() && !expected.Target()->IsConst())
             Report(diagnostics::DiagnosticCode::SymbolNotWritable,
                    expression.Range(),

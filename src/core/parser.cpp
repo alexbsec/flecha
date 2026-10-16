@@ -586,6 +586,56 @@ std::unique_ptr<ErrorDeclaration> Parser::ParseErrorDeclaration() {
         std::move(variants));
 }
 
+std::unique_ptr<EnumDeclaration> Parser::ParseEnumDeclaration() {
+    const source::SourceLocation start = Advance().range.start;
+    const Token* name = Consume(TokenType::Identifier, "enum type name");
+    if (name == nullptr) return nullptr;
+
+    std::unique_ptr<TypeNode> backingType;
+    if (Match(TokenType::Colon)) {
+        backingType = ParseType();
+        if (backingType == nullptr) return nullptr;
+    }
+    if (Consume(TokenType::LCurly, "'{' after enum type name") == nullptr)
+        return nullptr;
+
+    std::vector<EnumVariant> variants;
+    while (!Check(TokenType::RCurly) && !IsAtEnd()) {
+        bool isDefault = false;
+        if (Check(TokenType::Identifier) && Current().value == "default" &&
+            Peek(1).type == TokenType::Identifier) {
+            Advance();
+            isDefault = true;
+        }
+        const Token* variant =
+            Consume(TokenType::Identifier, "enum variant name");
+        if (variant == nullptr) return nullptr;
+
+        std::string discriminant;
+        source::SourceRange discriminantRange;
+        if (Match(TokenType::Assign)) {
+            const Token* minus = nullptr;
+            if (Check(TokenType::Sub)) minus = &Advance();
+            const Token* value =
+                Consume(TokenType::NumberLiteral, "integer discriminant");
+            if (value == nullptr) return nullptr;
+            discriminant = minus ? "-" + value->value : value->value;
+            discriminantRange =
+                minus ? source::SourceRange{minus->range.start,
+                                            value->range.end}
+                      : value->range;
+        }
+        variants.push_back({variant->value, variant->range, isDefault,
+                            std::move(discriminant), discriminantRange});
+        if (!Match(TokenType::Comma)) break;
+    }
+    const Token* close = Consume(TokenType::RCurly, "'}' after enum variants");
+    if (close == nullptr) return nullptr;
+    return std::make_unique<EnumDeclaration>(
+        source::SourceRange{start, close->range.end}, name->value, name->range,
+        std::move(backingType), std::move(variants));
+}
+
 std::unique_ptr<StructureDeclaration> Parser::ParseStructureDeclaration() {
     const auto tokenStart = _position;
     const auto start = Advance().range.start;
@@ -665,6 +715,7 @@ std::unique_ptr<Declaration> Parser::ParseDeclaration() {
         return declaration;
     }
     if (Check(TokenType::Structure)) return ParseStructureDeclaration();
+    if (Check(TokenType::Enum)) return ParseEnumDeclaration();
     if (Check(TokenType::Error) && Peek(1).type == TokenType::Identifier &&
         Peek(2).type == TokenType::LCurly)
         return ParseErrorDeclaration();

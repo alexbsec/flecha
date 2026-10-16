@@ -19,6 +19,7 @@ enum class AstNodeKind {
     CompilationUnit,
     FunctionDeclaration,
     ErrorDeclaration,
+    EnumDeclaration,
     StructureDeclaration,
     StructureField,
     BuildExpression,
@@ -264,6 +265,45 @@ class TypeNode final : public AstNode {
     std::vector<std::unique_ptr<TypeNode>> _elements;
     bool _isConst;
     source::SourceRange _qualifierRange;
+};
+
+struct EnumVariant final {
+    std::string name;
+    source::SourceRange range;
+    bool isDefault = false;
+    std::string discriminant;
+    source::SourceRange discriminantRange;
+};
+
+class EnumDeclaration final : public Declaration {
+   public:
+    EnumDeclaration(source::SourceRange range, std::string name,
+                    source::SourceRange nameRange,
+                    std::unique_ptr<TypeNode> backingType,
+                    std::vector<EnumVariant> variants)
+        : Declaration(range),
+          _name(std::move(name)),
+          _nameRange(nameRange),
+          _backingType(std::move(backingType)),
+          _variants(std::move(variants)) {}
+
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::EnumDeclaration;
+    }
+    [[nodiscard]] const std::string& Name() const { return _name; }
+    [[nodiscard]] source::SourceRange NameRange() const { return _nameRange; }
+    [[nodiscard]] const TypeNode* BackingType() const {
+        return _backingType.get();
+    }
+    [[nodiscard]] const std::vector<EnumVariant>& Variants() const {
+        return _variants;
+    }
+
+   private:
+    std::string _name;
+    source::SourceRange _nameRange;
+    std::unique_ptr<TypeNode> _backingType;
+    std::vector<EnumVariant> _variants;
 };
 
 class StructureField final : public AstNode {
