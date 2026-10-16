@@ -1,0 +1,121 @@
+module main;
+
+@imports
+    :: lib::std::containers::array
+    :: lib::std::containers::errors;
+
+i32 main() {
+    {
+        a := array::Array<i32>::init();
+        if a.len() != 0 || a.capacity() != 0 {
+            return 1;
+        }
+
+        missing, empty := a.pop();
+        if empty != errors::ArrayError.Empty {
+            return 2;
+        }
+
+        absent, bounds := a.get(0);
+        if bounds != errors::ArrayError.IndexOutOfBounds {
+            return 3;
+        }
+
+        if a.set(0, 42) != errors::ArrayError.IndexOutOfBounds {
+            return 4;
+        }
+
+        if a.reserve(4) != none {
+            return 5;
+        }
+
+        i32 i = 0;
+        while i < 4 {
+            if a.push(i) != none {
+                return 6;
+            }
+
+            i++;
+        }
+
+        // The harness fails the second allocation: push must preserve everything.
+        if a.push(99) != AllocationError.OutOfMemory {
+            return 7;
+        }
+
+        if a.len() != 4 || a.capacity() != 4 {
+            return 8;
+        }
+
+        last, readError := a.get(3);
+        if readError != none || last != 3 {
+            return 9;
+        }
+
+        if a.reserve(8) != none {
+            return 10;
+        }
+
+        while i < 1000 {
+            if a.push(i) != none {
+                return 11;
+            }
+
+            i++;
+        }
+
+        if a.len() != 1000 {
+            return 12;
+        }
+
+        usize index = 0;
+        while index < a.len() {
+            value, err := a.get(index);
+            if err != none || value != (index as i32) {
+                return 13;
+            }
+
+            index++;
+        }
+
+        usize huge = (0 as usize) - 1;
+        usize before = a.capacity();
+        if a.reserve(huge) != AllocationError.OutOfMemory {
+            return 14;
+        }
+
+        if a.len() != 1000 || a.capacity() != before {
+            return 15;
+        }
+
+        if a.set(999, 42) != none {
+            return 16;
+        }
+
+        value, err := a.pop();
+        if err != none || value != 42 || a.len() != 999 {
+            return 17;
+        }
+
+        a.clear();
+        if a.len() != 0 || a.capacity() != before {
+            return 18;
+        }
+
+        if a.push(42) != none {
+            return 19;
+        }
+
+        other := array::Array<i32>::init();
+        if other.push(7) != none {
+            return 20;
+        }
+
+        result, failed := a.get(0);
+        if failed != none {
+            return 21;
+        }
+
+        return result;
+    }
+}

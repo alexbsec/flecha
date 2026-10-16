@@ -583,7 +583,7 @@ Flecha should not require a garbage collector. Stack allocation is the ordinary 
 Runtime-sized scalar and supported trivially copyable structure storage uses
 `new<[]T>(count)` and checked unsafe `pointer[index]` access. See
 [dynamic arrays](docs/dynamic_arrays.md) for the implemented limits and the
-Flecha `RawArray<T>` library.
+Flecha `RawArray<T>` library and its safe `Array<T>` wrapper.
 On failure, new returns null and `AllocationError.OutOfMemory` without evaluating
 the initializer. Free runs typed teardown and accepts null. See
 [raw allocation](docs/raw_allocation.md) for the unsafe contract and current limits.

@@ -1,4 +1,6 @@
 module std;
 
 @imports
-    :: root::containers::raw_array;
+    :: root::containers::raw_array
+    :: root::containers::array
+    :: root::containers::errors;

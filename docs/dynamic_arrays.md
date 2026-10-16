@@ -72,7 +72,7 @@ can declare a local `std` dependency in `longbow.toml`, then import:
 @imports :: lib::std::containers::raw_array;
 ```
 
-Construct `raw_array::RawArray<i32>::init()` in an unsafe context, substituting
+Construct `raw_array::RawArray<i32>::init()` in a safe context, substituting
 any supported scalar or structure type for `i32`. Structure elements must meet
 the runtime-array restrictions above. Pointer, string, reference, owning, and
 destructible elements are not supported.
@@ -110,3 +110,33 @@ types, including empty results, growth, bounds, mutation, and capacity reuse.
 `StandardLibraryTests.RawArrayStructures` exercises the same generic API with a
 custom-defaulted `Token` structure, including growth, empty/error defaults,
 field-wise equality, and cleanup.
+
+## Safe `Array<T>`
+
+`std/src/containers/array.fl` wraps a private `RawArray<T>` and provides the same
+methods through a safe public interface. Construction and all method calls work
+outside unsafe blocks. Raw storage operations remain inside the implementation.
+Both containers use the shared `errors::ArrayError` from
+`std/src/containers/errors.fl`; `AllocationError` remains built-in.
+
+```flecha
+@imports
+    :: lib::std::containers::array
+    :: lib::std::containers::errors;
+```
+
+Construct with `array::Array<i32>::init()`. `Array<T>` has the same element
+restrictions as `RawArray<T>` and returns elements by value, without exposing
+backing pointers or element references. Bounds errors check the used length.
+Growth failure preserves length, capacity, and existing contents.
+
+`RawArray` now has a safe initializer and a safe `tear` containing internal
+unsafe cleanup. The wrapper's generated lifecycle initializes and destroys its
+inner field automatically; it does not free the buffer separately. Both types
+remain noncopyable, and existing values cannot be implicitly moved or replaced.
+The language's unsafe-tear immovability rule is unchanged.
+
+`StandardLibraryTests.SafeArray.*` runs growth/failure, scalar, structure, and
+scope-cleanup checks through safe callers with allocation tracking.
+`CompilerDiagnostics.SafeArray` checks privacy, copying, implicit movement,
+conflicting borrows, and unsupported element operations.

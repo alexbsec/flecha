@@ -183,6 +183,7 @@ tracks allocation obligations, not byte usage or peak heap size; automatic
 strings and structure values continue to use their existing cleanup rules.
 General safe heap owners remain future work. The first concrete dynamic collection
 is [`RawArray<T>`](dynamic_arrays.md), implemented in Flecha using these raw contracts.
+The same document describes `Array<T>`, its safe public wrapper.
 
 ## Diagnostics and verification
 
