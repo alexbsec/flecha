@@ -1,4 +1,4 @@
-foreach(variable IN ITEMS FLECHA_COMPILER LONGBOW SOURCE_ROOT OUTPUT_ROOT)
+foreach(variable IN ITEMS FLECHA_COMPILER LONGBOW OUTPUT_ROOT)
     if(NOT DEFINED ${variable})
         message(FATAL_ERROR "${variable} is required")
     endif()
@@ -20,13 +20,52 @@ if(NOT versionResult EQUAL 0 OR
     message(FATAL_ERROR
         "compiler version probe failed: ${versionOutput}${versionError}")
 endif()
+string(REGEX REPLACE "^flecha " "" expectedVersion "${versionOutput}")
+
+execute_process(
+    COMMAND "${LONGBOW}" --version
+    RESULT_VARIABLE longbowVersionResult
+    OUTPUT_VARIABLE longbowVersionOutput
+    ERROR_VARIABLE longbowVersionError
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT longbowVersionResult EQUAL 0 OR
+   NOT longbowVersionOutput STREQUAL "longbow ${expectedVersion}")
+    message(FATAL_ERROR
+        "Longbow version probe failed: ${longbowVersionOutput}${longbowVersionError}")
+endif()
 
 file(REMOVE_RECURSE "${OUTPUT_ROOT}")
 file(MAKE_DIRECTORY "${OUTPUT_ROOT}")
+set(smokeSource "${OUTPUT_ROOT}/native-smoke.fl")
+file(WRITE "${smokeSource}"
+    "i32 add(i32 left, i32 right) { return left + right; }\n"
+    "i32 main() { return add(20, 22); }\n")
+
+execute_process(
+    COMMAND "${FLECHA_COMPILER}" check "${smokeSource}"
+    RESULT_VARIABLE checkResult
+    ERROR_VARIABLE checkError
+)
+if(NOT checkResult EQUAL 0)
+    message(FATAL_ERROR "compiler check failed: ${checkError}")
+endif()
+
+set(objectOutput "${OUTPUT_ROOT}/native-smoke.o")
+execute_process(
+    COMMAND "${FLECHA_COMPILER}" --emit-object "${smokeSource}"
+        -o "${objectOutput}"
+    RESULT_VARIABLE objectResult
+    ERROR_VARIABLE objectError
+)
+if(NOT objectResult EQUAL 0 OR NOT EXISTS "${objectOutput}")
+    message(FATAL_ERROR "object emission failed: ${objectError}")
+endif()
+
 set(nativeOutput "${OUTPUT_ROOT}/native-smoke${EXECUTABLE_SUFFIX}")
 execute_process(
     COMMAND "${FLECHA_COMPILER}" build
-        "${SOURCE_ROOT}/examples/llvm_poc.fl" -o "${nativeOutput}"
+        "${smokeSource}" -o "${nativeOutput}"
     RESULT_VARIABLE compileResult
     ERROR_VARIABLE compileError
 )
@@ -49,6 +88,28 @@ execute_process(
 if(NOT createResult EQUAL 0)
     message(FATAL_ERROR
         "Longbow project creation failed: ${createOutput}${createError}")
+endif()
+execute_process(
+    COMMAND "${LONGBOW}" check
+    WORKING_DIRECTORY "${OUTPUT_ROOT}/hello"
+    RESULT_VARIABLE longbowCheckResult
+    OUTPUT_VARIABLE longbowCheckOutput
+    ERROR_VARIABLE longbowCheckError
+)
+if(NOT longbowCheckResult EQUAL 0)
+    message(FATAL_ERROR
+        "Longbow check failed: ${longbowCheckOutput}${longbowCheckError}")
+endif()
+execute_process(
+    COMMAND "${LONGBOW}" build
+    WORKING_DIRECTORY "${OUTPUT_ROOT}/hello"
+    RESULT_VARIABLE longbowBuildResult
+    OUTPUT_VARIABLE longbowBuildOutput
+    ERROR_VARIABLE longbowBuildError
+)
+if(NOT longbowBuildResult EQUAL 0)
+    message(FATAL_ERROR
+        "Longbow build failed: ${longbowBuildOutput}${longbowBuildError}")
 endif()
 execute_process(
     COMMAND "${LONGBOW}" run
