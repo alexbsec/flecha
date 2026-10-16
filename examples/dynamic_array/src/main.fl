@@ -1,20 +1,27 @@
 module main;
 
 @imports
-    :: lib::std::containers::array_i32;
+    :: lib::std::containers::raw_array;
 
 i32 main() {
     unsafe {
-        numbers := array_i32::I32Array::init();
+        numbers := raw_array::RawArray<i32>::init();
+
         i32 i = 0;
         while i < 100 {
             err := numbers.push(i);
-            if err != none { return 1; }
+            if err != none {
+                return 1;
+            }
             i++;
         }
+
         value, err := numbers.get(42);
-        if err != none { return 2; }
-        stdout("Array length: ");
+        if err != none {
+            return 2;
+        }
+
+        stdout("RawArray length: ");
         stdoutln(numbers.len());
         stdout("Element 42: ");
         stdoutln(value);

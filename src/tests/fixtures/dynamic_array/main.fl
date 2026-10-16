@@ -1,25 +1,25 @@
 module main;
 
-@imports :: lib::std::containers::array;
+@imports :: lib::std::containers::raw_array;
 
 i32 main() {
     unsafe {
-        a := array::Array<i32>::init();
+        a := raw_array::RawArray<i32>::init();
         if a.len() != 0 || a.capacity() != 0 {
             return 1;
         }
 
         missing, empty := a.pop();
-        if empty != array::ArrayError.Empty {
+        if empty != raw_array::ArrayError.Empty {
             return 2;
         }
 
         absent, bounds := a.get(0);
-        if bounds != array::ArrayError.IndexOutOfBounds {
+        if bounds != raw_array::ArrayError.IndexOutOfBounds {
             return 3;
         }
 
-        if a.set(0, 42) != array::ArrayError.IndexOutOfBounds {
+        if a.set(0, 42) != raw_array::ArrayError.IndexOutOfBounds {
             return 4;
         }
 
@@ -104,7 +104,7 @@ i32 main() {
             return 19;
         }
 
-        other := array::Array<i32>::init();
+        other := raw_array::RawArray<i32>::init();
         if other.push(7) != none {
             return 20;
         }

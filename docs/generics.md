@@ -80,7 +80,7 @@ then process those declarations. Generic templates themselves emit no code.
 
 There is no argument inference, default type argument, variadic parameter pack,
 constant generic parameter, user specialization override, or separate compiled
-generic interface yet. This change establishes compiler support. The current
-standard library `I32Array` remains unchanged; replacing it with `Array<T>` is
-the next library step, with element restrictions enforced by its operations and
-Flecha's storage/copy rules.
+generic interface yet. The standard library provides [`RawArray<T>`](dynamic_arrays.md),
+implemented in Flecha. Its runtime storage currently supports numeric, boolean,
+and character elements; pointers and structures are not yet supported. Element
+restrictions are enforced when the relevant generic operations are instantiated.

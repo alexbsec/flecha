@@ -19,7 +19,7 @@ void empty() {}
 
 This applies to functions, structures, conditionals, loops, unsafe blocks,
 `build` expressions, error declarations, and every other brace-delimited body.
-For example, `return build Array<T> {};` is allowed because its body is empty.
+For example, `return build RawArray<T> {};` is allowed because its body is empty.
 
 Structure declarations retain their required trailing semicolon:
 

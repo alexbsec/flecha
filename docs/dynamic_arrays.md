@@ -10,7 +10,9 @@ supported by this first runtime-array form.
 ```flecha
 unsafe {
     buffer, err := new<[]i32>(100);
-    if err != none { return 1; }
+    if err != none {
+        return 1;
+    }
     defer free(buffer);
     buffer[42] = 42;
 }
@@ -57,19 +59,24 @@ after the call. General field-effect summaries are not yet implemented.
 Construction and destruction rules remain unchanged: `tear` is compiler-invoked,
 and an unsafe tear makes a structure immovable and noncopyable.
 
-## Standard-library I32Array
+## Standard-library `RawArray<T>`
 
-The implementation is Flecha source in `std/src/containers/array_i32.fl`. A project
+The implementation is Flecha source in `std/src/containers/raw_array.fl`. A project
 can declare a local `std` dependency in `longbow.toml`, then import:
 
 ```flecha
-@imports :: lib::std::containers::array_i32;
+@imports :: lib::std::containers::raw_array;
 ```
 
-Construct `array_i32::I32Array::init()` in an unsafe context. This is a concrete
-`i32` container, not a generic `Array<T>`. It maintains a used length and an
-allocated capacity, starts empty, grows from four slots by doubling, and releases
-its buffer through `tear`.
+Construct `raw_array::RawArray<i32>::init()` in an unsafe context, substituting
+any supported scalar type for `i32`. `RawArray<T>` is generic, but currently only
+numeric, boolean, and character elements are supported by its runtime storage.
+Pointers, structures, strings, and reference elements are not supported.
+
+The name reflects its unsafe API and raw allocated storage. It is not a safe
+dynamic-array abstraction. It maintains a used length and an allocated capacity,
+starts empty, grows from four slots by doubling, and releases its buffer through
+`tear`.
 
 | Method | Result and behavior |
 | --- | --- |
@@ -77,8 +84,8 @@ its buffer through `tear`.
 | `capacity()` | Allocated element count, `usize` |
 | `reserve(capacity)` | `error`; increases capacity if needed |
 | `push(value)` | `error`; appends, growing if necessary |
-| `pop()` | `(i32, error)`; removes the last value or returns `ArrayError.Empty` |
-| `get(index)` | `(i32, error)`; returns a value or `ArrayError.IndexOutOfBounds` |
+| `pop()` | `(T, error)`; removes the last value or returns `ArrayError.Empty` |
+| `get(index)` | `(T, error)`; returns a value or `ArrayError.IndexOutOfBounds` |
 | `set(index, value)` | `error`; replaces an existing element or reports bounds |
 | `clear()` | Empties the used prefix while retaining capacity |
 
@@ -90,6 +97,9 @@ before extracting the old buffer, so allocation failure preserves length,
 capacity, and contents. Overflow is reported as `AllocationError.OutOfMemory`.
 
 See `examples/dynamic_array` for a Longbow project that grows to 100 integers,
-prints element 42, and exits with status 42. `StandardLibraryTests.DynamicArrayI32`
+prints element 42, and exits with status 42. `StandardLibraryTests.RawArray`
 checks 1,000 elements, injected growth failure, overflow, bounds, mutation,
 clearing, independent arrays, and exact cleanup of all buffers.
+
+`StandardLibraryTests.RawArrayScalarTypes` exercises all 14 supported scalar
+types, including empty results, growth, bounds, mutation, and capacity reuse.

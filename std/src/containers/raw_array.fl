@@ -1,33 +1,33 @@
-module array;
+module raw_array;
 
 export error ArrayError {
     Empty,
     IndexOutOfBounds
 }
 
-export structure Array<T> {
+export structure RawArray<T> {
     private own *T storage;
     private usize length;
     private usize allocated;
 };
 
-unsafe Array<T> Array<T>::init() override {
-    return build Array<T> {};
+unsafe RawArray<T> RawArray<T>::init() override {
+    return build RawArray<T> {};
 }
 
-unsafe void Array<T>::tear(&self) override {
+unsafe void RawArray<T>::tear(&self) override {
     free(self->storage);
 }
 
-usize Array<T>::len(&const self) {
+usize RawArray<T>::len(&const self) {
     return self->length;
 }
 
-usize Array<T>::capacity(&const self) {
+usize RawArray<T>::capacity(&const self) {
     return self->allocated;
 }
 
-unsafe error Array<T>::reserve(&self, usize capacity) {
+unsafe error RawArray<T>::reserve(&self, usize capacity) {
     if capacity <= self->allocated {
         return none;
     }
@@ -52,7 +52,7 @@ unsafe error Array<T>::reserve(&self, usize capacity) {
     return none;
 }
 
-unsafe error Array<T>::push(&self, T value) {
+unsafe error RawArray<T>::push(&self, T value) {
     if self->length != self->allocated {
         self->storage[self->length] = value;
         self->length++;
@@ -77,7 +77,7 @@ unsafe error Array<T>::push(&self, T value) {
     return none;
 }
 
-unsafe (T, error) Array<T>::get(&const self, usize index) {
+unsafe (T, error) RawArray<T>::get(&const self, usize index) {
     if index >= self->length {
         return (none, ArrayError.IndexOutOfBounds);
     }
@@ -85,7 +85,7 @@ unsafe (T, error) Array<T>::get(&const self, usize index) {
     return (self->storage[index], none);
 }
 
-unsafe error Array<T>::set(&self, usize index, T value) {
+unsafe error RawArray<T>::set(&self, usize index, T value) {
     if index >= self->length {
         return ArrayError.IndexOutOfBounds;
     }
@@ -94,7 +94,7 @@ unsafe error Array<T>::set(&self, usize index, T value) {
     return none;
 }
 
-unsafe (T, error) Array<T>::pop(&self) {
+unsafe (T, error) RawArray<T>::pop(&self) {
     if self->length == 0 {
         return (none, ArrayError.Empty);
     }
@@ -104,6 +104,6 @@ unsafe (T, error) Array<T>::pop(&self) {
     return (self->storage[*len], none);
 }
 
-void Array<T>::clear(&self) {
+void RawArray<T>::clear(&self) {
     self->length = 0;
 }

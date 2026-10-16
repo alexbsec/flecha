@@ -267,7 +267,7 @@ add_test(NAME NativeSemanticTests.RuntimeArrays
         -DFLECHA_LINK_OPTIONS=-Wl,--wrap=flecha_runtime_v1_alloc_array
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_unsafe_pointers.cmake)
 
-add_test(NAME StandardLibraryTests.Array
+add_test(NAME StandardLibraryTests.RawArray
     COMMAND ${CMAKE_COMMAND}
         -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
         -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dynamic_array/main.fl
@@ -303,7 +303,7 @@ add_test(NAME CompilerDiagnostics.Generics
         -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/generic_diagnostics
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_generic_diagnostics.cmake)
 
-add_test(NAME StandardLibraryTests.ArrayScalarTypes
+add_test(NAME StandardLibraryTests.RawArrayScalarTypes
     COMMAND ${CMAKE_COMMAND}
         -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
         -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dynamic_array/scalars.fl
