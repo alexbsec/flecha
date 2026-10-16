@@ -16,11 +16,23 @@ foreach(executable IN ITEMS "${compiler}" "${longbow}")
     endif()
 endforeach()
 
+set(runtimeDependencyFilters)
+if(WIN32)
+    # Windows system DLLs can have optional or edition-specific dependencies
+    # that are intentionally absent. Stop dependency traversal at the Windows
+    # system directories so the verifier only audits redistributable DLLs.
+    list(APPEND runtimeDependencyFilters
+        POST_EXCLUDE_REGEXES
+        "[/\\\\][Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\]([Ss][Yy][Ss][Tt][Ee][Mm]32|[Ss][Yy][Ss][Ww][Oo][Ww]64)[/\\\\]"
+    )
+endif()
+
 file(GET_RUNTIME_DEPENDENCIES
     EXECUTABLES "${compiler}" "${longbow}"
     RESOLVED_DEPENDENCIES_VAR resolvedDependencies
     UNRESOLVED_DEPENDENCIES_VAR unresolvedDependencies
     CONFLICTING_DEPENDENCIES_PREFIX dependencyConflicts
+    ${runtimeDependencyFilters}
 )
 
 if(unresolvedDependencies)
