@@ -1711,6 +1711,13 @@ SemanticType SemanticAnalyzer::AnalyzeUnary(
                 : SemanticType::Error());
     }
     if (operand.IsError()) return operand;
+    if (expression.IsReferenceDeref() &&
+        operand.Kind() != SemanticTypeKind::Reference) {
+        Report(diagnostics::DiagnosticCode::InvalidReference,
+               expression.Range(),
+               "deref() requires a checked reference receiver");
+        return SemanticType::Error();
+    }
     if (operation == TokenType::Increment) {
         const SemanticType place = PlaceType(expression.Operand());
         if (place.IsError()) {

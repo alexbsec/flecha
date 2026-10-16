@@ -1403,6 +1403,15 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
             source::SourceLocation end = member->range.end;
             std::vector<std::unique_ptr<Expression>> arguments =
                 ParseArgumentList(end);
+            // Reference member spelling shares the dereference AST, including
+            // its lvalue, borrowing, and code-generation behavior.
+            if (access == TokenType::Arrow && member->value == "deref" &&
+                typeArguments.empty() && arguments.empty()) {
+                expression = std::make_unique<UnaryExpression>(
+                    source::SourceRange{expression->Range().start, end},
+                    TokenType::Mul, std::move(expression), true);
+                continue;
+            }
             expression = std::make_unique<MemberCallExpression>(
                 source::SourceRange{expression->Range().start, end},
                 std::move(expression), member->value, member->range,

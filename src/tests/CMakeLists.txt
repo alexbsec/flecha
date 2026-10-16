@@ -267,7 +267,7 @@ add_test(NAME NativeSemanticTests.RuntimeArrays
         -DFLECHA_LINK_OPTIONS=-Wl,--wrap=flecha_runtime_v1_alloc_array
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_unsafe_pointers.cmake)
 
-add_test(NAME StandardLibraryTests.DynamicArrayI32
+add_test(NAME StandardLibraryTests.Array
     COMMAND ${CMAKE_COMMAND}
         -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
         -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dynamic_array/main.fl
@@ -302,3 +302,27 @@ add_test(NAME CompilerDiagnostics.Generics
         -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
         -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/generic_diagnostics
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_generic_diagnostics.cmake)
+
+add_test(NAME StandardLibraryTests.ArrayScalarTypes
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dynamic_array/scalars.fl
+        -DFLECHA_STD=${PROJECT_SOURCE_DIR}/std/src
+        -DFLECHA_HARNESS=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dynamic_array/harness.cpp
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/array_scalar_types_test
+        -DFLECHA_RUNTIME=$<TARGET_FILE:runtime>
+        -DFLECHA_LINKER=${CMAKE_CXX_COMPILER}
+        -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
+        -DFLECHA_ARRAY_FAIL_CALL=0
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_dynamic_array.cmake)
+
+add_test(NAME NativeSemanticTests.NoneComparisons
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/none_comparisons_api.fl
+        -DFLECHA_HARNESS=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/none_comparisons_harness.cpp
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/none_comparisons_test
+        -DFLECHA_RUNTIME=$<TARGET_FILE:runtime>
+        -DFLECHA_LINKER=${CMAKE_CXX_COMPILER}
+        -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_unsafe_pointers.cmake)

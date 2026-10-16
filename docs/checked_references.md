@@ -1,6 +1,6 @@
 # Checked stack references
 
-Checked references are implemented for initialized scalar, fixed-array, and raw-pointer
+Checked references are implemented for initialized scalar, structure, fixed-array, and raw-pointer
 storage. They borrow storage without allocating, owning, or extending its
 lifetime. See [the runnable example](../examples/checked_references.fl).
 
@@ -16,6 +16,22 @@ u8 double_local() {
 `&value` creates a reference in safe or unsafe code. `*ref` reads its target;
 `*ref = value` writes a mutable target. `ref = &other` rebinds a compatible handle,
 without writing the old target. Parentheses preserve these meanings.
+
+`ref->deref()` is another spelling of `*ref` for checked references. It refers to
+exactly the same storage: it can be read, assigned, incremented, or reborrowed.
+It takes no arguments or type arguments and preserves const and borrow rules.
+This built-in spelling requires a checked reference; raw pointers continue to
+use `*pointer` in an unsafe context.
+
+```flecha
+i32 example_member_deref() {
+    i32 value = 40;
+    ref := &value;
+    ref->deref() = ref->deref() + 2;
+    return ref->deref();
+}
+```
+
 
 ## Qualifiers and handle movement
 
@@ -79,6 +95,29 @@ returned, even when a caller could in principle prove them valid. It does not
 use condition/value correlation to prove paths impossible. Temporary borrows
 may remain live through their entire expression. Rebinding or moving the handle
 used to address a pending indirect assignment is rejected.
+
+## Disjoint structure fields
+
+Borrows track the field path within their owner. Distinct sibling fields can be
+accessed or borrowed independently, including nested fields and fields accessed
+through a reference receiver. A field borrow still conflicts with overlapping
+access to that field, an enclosing structure, or the whole owner. Method calls
+that borrow the whole receiver must respect those overlapping field borrows.
+Moving or rebinding a parent reference remains forbidden while its child borrow
+is live, even when another field is available.
+
+For example, these two field accesses are disjoint:
+
+```flecha
+len := &self->length;
+*len = *len - 1;
+return (self->storage[*len], none);
+```
+
+The field paths are retained through reborrows, control-flow joins, loops, call
+arguments, and deferred captures. Array and slice elements remain conservative:
+borrowing an element protects its containing array, including any fields of
+other elements. A sibling field outside that array can still be accessed.
 
 ## References to arrays
 

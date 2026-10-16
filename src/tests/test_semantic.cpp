@@ -3617,3 +3617,141 @@ TEST(SemanticGenericTests, TypeArgumentsRespectLocalShadowing) {
         void main() { i32 Box = 0; use<Box>(); }
     )").diagnostics.HasErrors());
 }
+
+TEST(SemanticReferenceTests, AllowsDisjointStructureFieldBorrows) {
+    auto result = Analyze(R"(
+        structure Pair { i32 x; i32 y; };
+        structure Nested { Pair pair; i32 other; };
+        void set_both(&i32 x, &i32 y) { *x = 20; *y = 22; }
+        i32 Pair::sum(&self) {
+            x := &self->x;
+            self->y = 22;
+            *x = 20;
+            return self->y + *x;
+        }
+        i32 test() {
+            value := Nested::init();
+            x := &value.pair.x;
+            y := &value.pair.y;
+            *x = 20;
+            *y = 22;
+            value.other = 1;
+            set_both(x, y);
+            return *x + *y + value.other;
+        }
+    )");
+    for (const auto& diagnostic : result.diagnostics.Diagnostics())
+        ADD_FAILURE() << diagnostic.message;
+}
+
+TEST(SemanticReferenceTests, FieldBorrowsRejectOverlappingAndWholeStructureAccess) {
+    const std::string prefix = R"(
+        structure Pair { i32 x; i32 y; };
+        structure Outer { Pair pair; i32 other; };
+        void touch(&Pair value) {}
+        void inspect(&const Pair value) {}
+        void use(&i32 a, &i32 b) {}
+    )";
+    for (const auto& body : {
+        "r := &value.pair.x; value.pair.x = 2; return *r;",
+        "r := &value.pair.x; copy := value.pair; return *r + copy.x;",
+        "r := &value.pair.x; value.pair = Pair::init(); return *r;",
+        "r := &value.pair.x; value = Outer::init(); return *r;",
+        "r := &value.pair; value.pair.y = 2; return r->x;",
+        "r := &value.pair.x; touch(&value.pair); return *r;",
+        "r := &value.pair.x; inspect(&value.pair); return *r;",
+        "use(&value.pair.x, &value.pair.x); return 0;",
+        "parent := &value.pair; child := &parent->x; moved := parent; return *child;",
+        "parent := &value.pair; child := &parent->x; parent = &value.pair; return *child;"
+    }) {
+        SCOPED_TRACE(body);
+        auto result = Analyze(prefix + "i32 test() { value := Outer::init(); " + body + " }");
+        EXPECT_NE(FindDiagnostic(result, DiagnosticCode::BorrowConflict), nullptr);
+    }
+}
+
+TEST(SemanticReferenceTests, FieldBorrowsTrackReborrowsJoinsAndLoops) {
+    const std::string prefix = "structure Triple { i32 x; i32 y; i32 z; }; ";
+    auto valid = Analyze(prefix + R"(
+        i32 test(bool condition) {
+            value := Triple::init();
+            parent := &value;
+            child := &parent->x;
+            if condition { child = &parent->y; }
+            while condition {
+                parent->z = 42;
+                *child = *child + 1;
+                break;
+            }
+            parent->z = 42;
+            return parent->z + *child;
+        }
+    )");
+    for (const auto& diagnostic : valid.diagnostics.Diagnostics())
+        ADD_FAILURE() << diagnostic.message;
+    auto invalid = Analyze(prefix + R"(
+        i32 test(bool condition) {
+            value := Triple::init();
+            child := &value.x;
+            if condition { child = &value.y; }
+            value.x = 42;
+            return *child;
+        }
+    )");
+    EXPECT_NE(FindDiagnostic(invalid, DiagnosticCode::BorrowConflict), nullptr);
+}
+
+TEST(SemanticReferenceTests, FieldBorrowsPreserveWholeArrayConflicts) {
+    const std::string prefix = "structure Pair { i32 x; i32 y; }; structure Buffer { [2]Pair values; usize length; }; ";
+    auto valid = Analyze(prefix + R"(
+        i32 test() {
+            buffer := Buffer::init();
+            element := &buffer.values[0].x;
+            buffer.length = 2;
+            return *element + (buffer.length as i32);
+        }
+    )");
+    EXPECT_FALSE(valid.diagnostics.HasErrors());
+    for (const auto& access : {"buffer.values[1].x = 2;", "buffer.values[1].y = 2;", "buffer.values = [Pair::init(), Pair::init()];"}) {
+        auto invalid = Analyze(prefix + "i32 test() { buffer := Buffer::init(); element := &buffer.values[0].x; " + access + " return *element; }");
+        EXPECT_NE(FindDiagnostic(invalid, DiagnosticCode::BorrowConflict), nullptr);
+    }
+}
+
+TEST(SemanticReferenceTests, DeferredFieldBorrowsProtectOnlyTheirField) {
+    const std::string prefix = "structure Pair { i32 x; i32 y; }; void touch(&i32 n) { *n = 42; } ";
+    EXPECT_FALSE(Analyze(prefix + "void test() { value := Pair::init(); defer touch(&value.x); value.y = 22; }").diagnostics.HasErrors());
+    auto invalid = Analyze(prefix + "void test() { value := Pair::init(); defer touch(&value.x); value.x = 22; }");
+    EXPECT_NE(FindDiagnostic(invalid, DiagnosticCode::BorrowConflict), nullptr);
+}
+
+TEST(SemanticReferenceTests, DerefMemberSharesDereferenceLvalueAndBorrowRules) {
+    auto valid = Analyze(R"(
+        structure Pair { i32 x; i32 y; };
+        i32 test() {
+            pair := Pair::init();
+            parent := &pair;
+            x := &parent->deref().x;
+            x->deref() = 20;
+            x->deref()++;
+            parent->y = 21;
+            child := &x->deref();
+            return child->deref() + parent->y;
+        }
+        T read<T>(&const T r) { return r->deref(); }
+        i32 generic() { i32 x = 42; return read<i32>(&x); }
+    )");
+    for (const auto& diagnostic : valid.diagnostics.Diagnostics())
+        ADD_FAILURE() << diagnostic.message;
+    for (const auto& source : {
+        "void test() { i32 x = 1; &const i32 r = &x; r->deref() = 2; }",
+        "i32 test() { i32 x = 1; r := &x; child := &r->deref(); r->deref() = 2; return child->deref(); }",
+        "i32 test() { i32 x = 1; r := &x; moved := r; return r->deref(); }",
+        "unsafe i32 test(*i32 p) { return p->deref(); }",
+        "i32 test() { i32 x = 1; return x->deref(); }",
+        "i32 test() { i32 x = 1; r := &x; return r->deref(1); }"
+    }) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+}

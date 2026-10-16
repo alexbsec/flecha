@@ -910,20 +910,24 @@ class CastExpression final : public Expression {
 class UnaryExpression final : public Expression {
    public:
     UnaryExpression(source::SourceRange range, TokenType operatorType,
-                    std::unique_ptr<Expression> operand)
+                    std::unique_ptr<Expression> operand,
+                    bool referenceDeref = false)
         : Expression(range),
           _operatorType(operatorType),
-          _operand(std::move(operand)) {}
+          _operand(std::move(operand)),
+          _referenceDeref(referenceDeref) {}
 
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::UnaryExpression;
     }
     [[nodiscard]] TokenType OperatorType() const { return _operatorType; }
     [[nodiscard]] const Expression& Operand() const { return *_operand; }
+    [[nodiscard]] bool IsReferenceDeref() const { return _referenceDeref; }
 
    private:
     TokenType _operatorType;
     std::unique_ptr<Expression> _operand;
+    bool _referenceDeref;
 };
 
 class BinaryExpression final : public Expression {
