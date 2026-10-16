@@ -33,6 +33,14 @@ bool IsUnsigned(semantic::SemanticType type) {
     }
 }
 
+llvm::Instruction* TerminatorOrNull(llvm::BasicBlock* block) {
+#if LLVM_VERSION_MAJOR >= 23
+    return block->getTerminatorOrNull();
+#else
+    return block->getTerminator();
+#endif
+}
+
 }  // namespace
 
 LlvmCodeGenerator::LlvmCodeGenerator() : _builder(_context) {}
@@ -1066,7 +1074,7 @@ bool LlvmCodeGenerator::EmitFunction(
     }
 
     if (!EmitBlock(boundFunction.Body())) return false;
-    if (_builder.GetInsertBlock()->getTerminator() == nullptr) {
+    if (TerminatorOrNull(_builder.GetInsertBlock()) == nullptr) {
         if (boundFunction.Symbol().ReturnType().Kind() ==
             semantic::SemanticTypeKind::Void) {
             EmitCleanupsTo(0);
@@ -1091,7 +1099,7 @@ bool LlvmCodeGenerator::EmitFunction(
             // before emitting cleanup loops. It may initialize a jump target.
             continuation = request.block->splitBasicBlock(
                 request.block->begin(), "cleanup.continue");
-            request.block->getTerminator()->eraseFromParent();
+            TerminatorOrNull(request.block)->eraseFromParent();
             _builder.SetInsertPoint(request.block);
         } else {
             _builder.SetInsertPoint(request.block, request.block->begin());
@@ -1117,7 +1125,7 @@ bool LlvmCodeGenerator::EmitBlock(const lowering::BoundBlockStatement& block) {
     InitializeDeferredScope(*_cleanupScopes.back());
     for (const std::unique_ptr<lowering::BoundStatement>& statement :
          block.Statements()) {
-        if (_builder.GetInsertBlock()->getTerminator() != nullptr &&
+        if (TerminatorOrNull(_builder.GetInsertBlock()) != nullptr &&
             statement->Kind() != lowering::BoundNodeKind::PositionStatement) {
             llvm::BasicBlock* unreachableBlock = llvm::BasicBlock::Create(
                 _context, "unreachable", _currentFunction);
@@ -1128,7 +1136,7 @@ bool LlvmCodeGenerator::EmitBlock(const lowering::BoundBlockStatement& block) {
             return false;
         }
     }
-    if (_builder.GetInsertBlock()->getTerminator() == nullptr) {
+    if (TerminatorOrNull(_builder.GetInsertBlock()) == nullptr) {
         EmitCleanupsTo(_cleanupScopes.size() - 1);
     }
     _cleanupScopes.pop_back();
@@ -1406,14 +1414,14 @@ bool LlvmCodeGenerator::EmitIf(const lowering::BoundIfStatement& statement) {
 
     _builder.SetInsertPoint(thenBlock);
     if (!EmitBlock(statement.ThenBlock())) return false;
-    if (_builder.GetInsertBlock()->getTerminator() == nullptr) {
+    if (TerminatorOrNull(_builder.GetInsertBlock()) == nullptr) {
         _builder.CreateBr(mergeBlock);
     }
 
     if (elseBlock != nullptr) {
         _builder.SetInsertPoint(elseBlock);
         if (!EmitBlock(*statement.ElseBlock())) return false;
-        if (_builder.GetInsertBlock()->getTerminator() == nullptr) {
+        if (TerminatorOrNull(_builder.GetInsertBlock()) == nullptr) {
             _builder.CreateBr(mergeBlock);
         }
     }
@@ -1448,7 +1456,7 @@ bool LlvmCodeGenerator::EmitWhile(
     if (!EmitBlock(statement.Body())) return false;
     _proceedTargets.pop_back();
     _breakTargets.pop_back();
-    if (_builder.GetInsertBlock()->getTerminator() == nullptr) {
+    if (TerminatorOrNull(_builder.GetInsertBlock()) == nullptr) {
         _builder.CreateBr(updateBlock);
     }
     if (statement.Update() != nullptr) {
@@ -1465,7 +1473,7 @@ bool LlvmCodeGenerator::EmitPosition(
     const lowering::BoundPositionStatement& statement) {
     llvm::BasicBlock* target = _positions.at(statement.Name());
     llvm::BasicBlock* current = _builder.GetInsertBlock();
-    if (current != target && current->getTerminator() == nullptr) {
+    if (current != target && TerminatorOrNull(current) == nullptr) {
         _builder.CreateBr(target);
     }
     _builder.SetInsertPoint(target);
@@ -2416,7 +2424,7 @@ llvm::Value* LlvmCodeGenerator::EmitMatch(
                              expression.Type())) {
             return nullptr;
         }
-        if (_builder.GetInsertBlock()->getTerminator() == nullptr)
+        if (TerminatorOrNull(_builder.GetInsertBlock()) == nullptr)
             _builder.CreateBr(merge);
     }
 

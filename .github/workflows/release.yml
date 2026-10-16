@@ -61,7 +61,7 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-clang
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-llvm
@@ -90,8 +90,8 @@ jobs:
           }
           "$prefix\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
           "LLVM_DIR=$cmakePrefix/lib/cmake/llvm" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "FLECHA_C_COMPILER=$cmakePrefix/bin/gcc.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
-          "FLECHA_CXX_COMPILER=$cmakePrefix/bin/g++.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "FLECHA_C_COMPILER=$cmakePrefix/bin/clang.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "FLECHA_CXX_COMPILER=$cmakePrefix/bin/clang++.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Configure release build
         shell: bash
