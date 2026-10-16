@@ -2785,7 +2785,12 @@ std::unique_ptr<llvm::Module> LlvmCodeGenerator::Generate(
     }
     const std::string verificationError = VerifyModule(*_module);
     if (!verificationError.empty()) {
-        Fail("LLVM module verification failed: " + verificationError);
+        std::string generatedModule;
+        llvm::raw_string_ostream output(generatedModule);
+        _module->print(output, nullptr);
+        output.flush();
+        Fail("LLVM module verification failed: " + verificationError +
+             "generated module:\n" + generatedModule);
         return nullptr;
     }
     return std::move(_module);
