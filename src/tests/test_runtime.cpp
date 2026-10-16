@@ -24,6 +24,10 @@ TEST(RuntimeStringViewTests, AcceptsValidSubstringBounds) {
         flecha_runtime_v1_string_view_check_substr(6, 6, 0));
 }
 
+TEST(RuntimeStringViewTests, AcceptsNullStorageForEmptyOutput) {
+    EXPECT_NO_FATAL_FAILURE(flecha_runtime_v1_stdout_string_view(nullptr, 0));
+}
+
 TEST(RuntimeStringViewTests, RejectsInvalidBounds) {
     const char text[] = "flecha";
     EXPECT_DEATH((void)flecha_runtime_v1_string_view_at(text, 6, 6),

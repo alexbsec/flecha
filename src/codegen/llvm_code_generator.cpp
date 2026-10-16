@@ -166,13 +166,7 @@ llvm::Value* LlvmCodeGenerator::EmitOwnedString(
     if (temporary) {
         output = CreateOwnedStringTemporary("string.result");
     } else {
-        llvm::IRBuilder<> entryBuilder(_context);
-        llvm::BasicBlock& entry = _currentFunction->getEntryBlock();
-        entryBuilder.SetInsertPoint(&entry, entry.begin());
-        output =
-            entryBuilder.CreateAlloca(resultType, nullptr, "string.transfer");
-        entryBuilder.CreateStore(llvm::Constant::getNullValue(resultType),
-                                 output);
+        output = CreateEntryStorage(resultType, "string.transfer", true);
     }
     EmitStringStorageCleanup(output);
     const auto takeResult = [&](const char* name) -> llvm::Value* {
@@ -290,13 +284,8 @@ void LlvmCodeGenerator::EmitStringStorageCleanup(llvm::AllocaInst* storage) {
 
 llvm::AllocaInst* LlvmCodeGenerator::CreateOwnedStringTemporary(
     std::string_view name) {
-    llvm::IRBuilder<> entryBuilder(_context);
-    llvm::BasicBlock& entry = _currentFunction->getEntryBlock();
-    entryBuilder.SetInsertPoint(&entry, entry.begin());
     llvm::StructType* type = StringType();
-    llvm::AllocaInst* storage =
-        entryBuilder.CreateAlloca(type, nullptr, std::string(name));
-    entryBuilder.CreateStore(llvm::Constant::getNullValue(type), storage);
+    llvm::AllocaInst* storage = CreateEntryStorage(type, name, true);
     _cleanupScopes.back()->ownedValues.push_back(
         {storage, semantic::SemanticType(semantic::SemanticTypeKind::String)});
     return storage;
@@ -420,12 +409,7 @@ llvm::AllocaInst* LlvmCodeGenerator::CreateOwnedValueTemporary(
     semantic::SemanticType type, std::string_view name) {
     if (type.Kind() == semantic::SemanticTypeKind::String)
         return CreateOwnedStringTemporary(name);
-    llvm::IRBuilder<> entryBuilder(&_currentFunction->getEntryBlock(),
-                                   _currentFunction->getEntryBlock().begin());
-    llvm::AllocaInst* storage =
-        entryBuilder.CreateAlloca(MapType(type), nullptr, std::string(name));
-    entryBuilder.CreateStore(llvm::Constant::getNullValue(MapType(type)),
-                             storage);
+    llvm::AllocaInst* storage = CreateEntryStorage(MapType(type), name, true);
     if (type.ContainsStructure()) LifetimeFlag(storage);
     _cleanupScopes.back()->ownedValues.push_back({storage, type});
     return storage;
@@ -998,14 +982,36 @@ llvm::AllocaInst* LlvmCodeGenerator::CreateEntryAlloca(
     const semantic::VariableSymbol& variable) {
     llvm::Type* type = MapType(variable.Type());
     if (type == nullptr) return nullptr;
+    return CreateEntryStorage(type, variable.Name(),
+                              variable.Type().OwnsStorage());
+}
+
+llvm::AllocaInst* LlvmCodeGenerator::CreateEntryStorage(llvm::Type* type,
+                                                        std::string_view name,
+                                                        bool initialize) {
+    llvm::BasicBlock* activeBlock = _builder.GetInsertBlock();
+    llvm::Instruction* insertionAnchor = nullptr;
+    if (activeBlock != nullptr &&
+        _builder.GetInsertPoint() != activeBlock->end()) {
+        insertionAnchor = &*_builder.GetInsertPoint();
+    }
+
     llvm::IRBuilder<> entryBuilder(_context);
     llvm::BasicBlock& entry = _currentFunction->getEntryBlock();
     entryBuilder.SetInsertPoint(&entry, entry.begin());
     llvm::AllocaInst* storage =
-        entryBuilder.CreateAlloca(type, nullptr, variable.Name());
-    if (variable.Type().OwnsStorage()) {
+        entryBuilder.CreateAlloca(type, nullptr, std::string(name));
+    if (initialize) {
         entryBuilder.CreateStore(llvm::Constant::getNullValue(type), storage);
     }
+
+    // Prepending to an empty block can invalidate a builder's saved end
+    // iterator (notably with LLVM 23). Re-establish the active insertion point
+    // after every entry-block mutation.
+    if (insertionAnchor != nullptr)
+        _builder.SetInsertPoint(insertionAnchor);
+    else if (activeBlock != nullptr)
+        _builder.SetInsertPoint(activeBlock);
     return storage;
 }
 
@@ -1894,9 +1900,7 @@ llvm::Value* LlvmCodeGenerator::EmitStringViewEquality(llvm::Value* left,
 
 llvm::AllocaInst* LlvmCodeGenerator::CreateTemporaryAlloca(
     llvm::Type* type, std::string_view name) {
-    llvm::IRBuilder<> entry(&_currentFunction->getEntryBlock(),
-                            _currentFunction->getEntryBlock().begin());
-    return entry.CreateAlloca(type, nullptr, name);
+    return CreateEntryStorage(type, name, false);
 }
 
 llvm::Value* LlvmCodeGenerator::EmitArray(
@@ -2432,11 +2436,8 @@ llvm::Value* LlvmCodeGenerator::EmitMatch(
 llvm::AllocaInst* LlvmCodeGenerator::LifetimeFlag(llvm::Value* storage) {
     const auto found = _lifetimeFlags.find(storage);
     if (found != _lifetimeFlags.end()) return found->second;
-    llvm::IRBuilder<> entry(&_currentFunction->getEntryBlock(),
-                            _currentFunction->getEntryBlock().begin());
-    auto* flag = entry.CreateAlloca(llvm::Type::getInt1Ty(_context), nullptr,
-                                    "structure.live");
-    entry.CreateStore(llvm::ConstantInt::getFalse(_context), flag);
+    auto* flag = CreateEntryStorage(llvm::Type::getInt1Ty(_context),
+                                    "structure.live", true);
     _lifetimeFlags[storage] = flag;
     return flag;
 }

@@ -79,6 +79,9 @@ class LlvmCodeGenerator final {
                                      const std::vector<llvm::Value*>& arguments,
                                      std::string_view name = {});
     bool DeclareFunctions(const lowering::BoundProgram& program);
+    [[nodiscard]] llvm::AllocaInst* CreateEntryStorage(llvm::Type* type,
+                                                       std::string_view name,
+                                                       bool initialize);
     bool EmitFunction(const lowering::BoundFunction& function);
     bool EmitBlock(const lowering::BoundBlockStatement& block);
     bool EmitStatement(const lowering::BoundStatement& statement);

@@ -8,6 +8,7 @@
 extern "C" {
 
 void flecha_runtime_v1_stdout_string_view(const char* data, size_t length) {
+    if (length == 0) return;
     (void)std::fwrite(data, 1, length, stdout);
 }
 
