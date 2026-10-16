@@ -60,14 +60,15 @@ There is no constructor-exception or partial-construction protocol.
 
 ## Supported values
 
-Allocatable types are sized owned values: scalars, errors, raw pointers, owning
-strings, structures, supported fixed arrays, and tuples. Const-qualified values
-are allowed and produce pointers with read-only targets. References, slices,
-`stringv`, void, and otherwise unsupported compound types are rejected.
+Allocatable types are sized owned values: scalars, enums, errors, raw pointers,
+owning strings, structures, supported fixed arrays, and tuples. Const-qualified
+values are allowed and produce pointers with read-only targets. References,
+slices, `stringv`, void, and otherwise unsupported compound types are rejected.
 
 `new<T>(none)` performs defined default initialization where T supports
-`none`. Structures use their generated or overridden `T::zero()`; a structure
-without valid default construction is rejected. Raw pointer elements are
+`none`. Enums use their declared default variant. Structures use their generated
+or overridden `T::zero()`; a structure without valid default construction is
+rejected. Raw pointer elements are
 initialized to null by `none`; they do not allocate their targets.
 
 Existing copy rules apply to an initializer naming an existing value: owning

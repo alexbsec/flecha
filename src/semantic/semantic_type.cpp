@@ -38,6 +38,7 @@ bool SemanticType::ContainsStructure() const {
 }
 
 bool SemanticType::IsZeroable() const {
+    if (_kind == SemanticTypeKind::Enum) return _enum->defaultValue.has_value();
     if (_kind == SemanticTypeKind::Structure)
         return _structure->validLayout && _structure->zero;
     if (_kind == SemanticTypeKind::Array) return Target()->IsZeroable();
@@ -52,6 +53,8 @@ bool SemanticType::IsZeroable() const {
 }
 
 bool SemanticType::IsTriviallyZeroable() const {
+    if (_kind == SemanticTypeKind::Enum)
+        return _enum->defaultValue.has_value() && *_enum->defaultValue == 0;
     if (_kind == SemanticTypeKind::Structure) {
         if (!_structure->zero || !_structure->zeroIsGenerated) return false;
         for (const auto& field : _structure->fields)
@@ -111,7 +114,7 @@ bool SemanticType::OwnsStorage() const {
 bool SemanticType::operator==(const SemanticType& other) const {
     return _kind == other._kind && _isConst == other._isConst &&
            _family == other._family && _structure == other._structure &&
-           _length == other._length &&
+           _enum == other._enum && _length == other._length &&
            ((_elements == nullptr && other._elements == nullptr) ||
             (_elements != nullptr && other._elements != nullptr &&
              *_elements == *other._elements)) &&
@@ -148,6 +151,8 @@ SemanticType SemanticType::FromSyntax(const core::TypeNode& type) {
 std::string SemanticType::Name() const {
     if (_isConst) return "const " + WithoutConst().Name();
     switch (_kind) {
+        case SemanticTypeKind::Enum:
+            return _enum->name;
         case SemanticTypeKind::Structure:
             return _structure->name;
         case SemanticTypeKind::ErrorValue:
@@ -310,6 +315,22 @@ bool IsAssignable(SemanticType destination, SemanticType source) {
     if (source.Kind() == SemanticTypeKind::None &&
         destination.ContainsStructure())
         return destination.IsZeroable();
+    if (source.Kind() == SemanticTypeKind::None &&
+        destination.Kind() == SemanticTypeKind::Enum)
+        return destination.IsZeroable();
+    if (source.Kind() == SemanticTypeKind::None) {
+        const auto enumsDefaultable = [](const auto& self,
+                                         SemanticType type) -> bool {
+            if (type.Kind() == SemanticTypeKind::Enum) return type.IsZeroable();
+            if (type.Kind() == SemanticTypeKind::Array)
+                return self(self, *type.Target());
+            if (type.Kind() == SemanticTypeKind::Tuple)
+                for (const auto& element : type.Elements())
+                    if (!self(self, element)) return false;
+            return true;
+        };
+        if (!enumsDefaultable(enumsDefaultable, destination)) return false;
+    }
     return source.Kind() == SemanticTypeKind::None &&
            destination.Kind() != SemanticTypeKind::Void &&
            destination.Kind() != SemanticTypeKind::Function &&

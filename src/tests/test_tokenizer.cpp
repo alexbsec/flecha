@@ -92,6 +92,14 @@ TEST(TokenizerTests, RecognizesAlsoKeyword) {
     EXPECT_EQ(tokens[1].type, TokenType::Identifier);
 }
 
+TEST(TokenizerTests, RecognizesEnumKeyword) {
+    std::vector<Token> tokens = Tokenize("enum State");
+
+    ASSERT_EQ(tokens.size(), 3);
+    EXPECT_EQ(tokens[0].type, TokenType::Enum);
+    EXPECT_EQ(tokens[1].type, TokenType::Identifier);
+}
+
 TEST(TokenizerTests, RecognizesIdentifiers) {
     std::vector<Token> tokens = Tokenize("variable1 _v_ar2");
     ASSERT_EQ(tokens.size(), 3);  // 2 identifiers + EOF

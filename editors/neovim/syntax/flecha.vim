@@ -13,7 +13,7 @@ syntax keyword flechaType f32 f64 bool char void string stringv error Allocation
 syntax keyword flechaModifier unsafe export extern inline comptime own lend const constptr constref volatile private override
 syntax keyword flechaConditional if else also
 syntax keyword flechaRepeat while for loop range
-syntax keyword flechaStatement return yield proceed break defer module structure build
+syntax keyword flechaStatement return yield proceed break defer module enum structure build
 syntax keyword flechaJump jumpto nextgroup=flechaJumpTarget skipwhite
 syntax keyword flechaCast as
 syntax keyword flechaBoolean true false

@@ -51,6 +51,11 @@ void Walk(const AstNode& input, const Callback& callback) {
             list(n.Fields());
             break;
         }
+        case AstNodeKind::EnumDeclaration: {
+            NODE(EnumDeclaration);
+            optional(n.BackingType());
+            break;
+        }
         case AstNodeKind::StructureField: {
             NODE(StructureField);
             visit(n.Type());
@@ -230,6 +235,8 @@ std::string Name(const Declaration& declaration) {
         return static_cast<const FunctionDeclaration&>(declaration).Name();
     if (declaration.Kind() == AstNodeKind::StructureDeclaration)
         return static_cast<const StructureDeclaration&>(declaration).Name();
+    if (declaration.Kind() == AstNodeKind::EnumDeclaration)
+        return static_cast<const EnumDeclaration&>(declaration).Name();
     return static_cast<const ErrorDeclaration&>(declaration).Name();
 }
 bool Template(const Declaration& d) {
@@ -247,7 +254,7 @@ std::string Key(const Arguments& arguments) {
     return key;
 }
 struct Instance {
-    const StructureDeclaration* origin;
+    const Declaration* origin;
     Declaration* concrete;
     Arguments arguments;
 };
@@ -292,29 +299,39 @@ class Expander {
             const auto found =
                 declarations.find({method->moduleId, method->Owner()});
             if (found == declarations.end() ||
-                found->second->Kind() != AstNodeKind::StructureDeclaration) {
+                (found->second->Kind() != AstNodeKind::StructureDeclaration &&
+                 found->second->Kind() != AstNodeKind::EnumDeclaration)) {
                 if (Template(*method))
                     Error(method->Range(),
                           "unknown method owner '" + method->Owner() + "'");
                 continue;
             }
-            const auto* owner =
-                static_cast<const StructureDeclaration*>(found->second);
+            const auto* owner = found->second;
             const auto [previous, inserted] = methodNames.emplace(
                 std::make_pair(owner, method->Name()), method);
             if (!inserted && (Template(*method) || Template(*previous->second)))
                 Error(method->Range(),
                       "duplicate method declaration '" + method->Name() + "'");
-            if (Template(*method))
-                for (const auto& field : owner->Fields())
+            if (Template(*method) &&
+                owner->Kind() == AstNodeKind::StructureDeclaration)
+                for (const auto& field :
+                     static_cast<const StructureDeclaration*>(owner)->Fields())
                     if (field->Name() == method->Name())
                         Error(method->Range(),
                               "generic method conflicts with field '" +
                                   method->Name() + "'");
+            if (Template(*method) &&
+                owner->Kind() == AstNodeKind::EnumDeclaration)
+                for (const auto& variant :
+                     static_cast<const EnumDeclaration*>(owner)->Variants())
+                    if (variant.name == method->Name())
+                        Error(method->Range(),
+                              "generic method conflicts with enum variant '" +
+                                  method->Name() + "'");
             if (method->ownerParameters != owner->genericParameters)
                 Error(method->Range(),
-                      "method owner must repeat its structure's type parameter "
-                      "names");
+                      "method owner must repeat its owning type's type "
+                      "parameter names");
             std::set<std::string> parameters(method->ownerParameters.begin(),
                                              method->ownerParameters.end());
             for (const auto& p : method->genericParameters)
@@ -352,7 +369,7 @@ class Expander {
         for (const auto& [owner, ownerMethods] : genericMethods)
             if (owner->genericParameters.empty())
                 instances.push_back(
-                    {owner, const_cast<StructureDeclaration*>(owner), {}});
+                    {owner, const_cast<Declaration*>(owner), {}});
         for (std::size_t index = 0;
              index < unit.Declarations().size() && !failedBudget; ++index) {
             current = unit.Declarations()[index].get();
@@ -692,8 +709,7 @@ class Expander {
         if (!concrete) return nullptr;
         cache[key] = concrete;
         if (origin.Kind() == AstNodeKind::StructureDeclaration) {
-            Instance instance{static_cast<const StructureDeclaration*>(&origin),
-                              concrete, arguments};
+            Instance instance{&origin, concrete, arguments};
             instances.push_back(instance);
             for (const auto* method : genericMethods[instance.origin])
                 if (method->genericParameters.empty())
@@ -755,7 +771,7 @@ class Expander {
         }
         return origin;
     }
-    const StructureDeclaration* Nominal(TypeView view) {
+    const Declaration* Nominal(TypeView view) {
         if (!view.syntax) return nullptr;
         if (view.extraPointers ||
             view.syntax->TypeForm() == TypeKind::Reference ||
@@ -769,18 +785,22 @@ class Expander {
         const auto* declaration =
             Lookup(type.Name(), view.module, type.Range());
         return declaration &&
-                       declaration->Kind() == AstNodeKind::StructureDeclaration
-                   ? static_cast<const StructureDeclaration*>(declaration)
+                       (declaration->Kind() ==
+                            AstNodeKind::StructureDeclaration ||
+                        declaration->Kind() == AstNodeKind::EnumDeclaration)
+                   ? declaration
                    : nullptr;
     }
-    const StructureDeclaration* Receiver(const MemberCallExpression& call) {
+    const Declaration* Receiver(const MemberCallExpression& call) {
         if (call.Access() == TokenType::Scope &&
             call.Receiver().Kind() == AstNodeKind::NameExpression) {
             const auto* declaration = ResolveName(const_cast<NameExpression&>(
                 static_cast<const NameExpression&>(call.Receiver())));
-            return declaration && declaration->Kind() ==
-                                      AstNodeKind::StructureDeclaration
-                       ? static_cast<const StructureDeclaration*>(declaration)
+            return declaration &&
+                           (declaration->Kind() ==
+                                AstNodeKind::StructureDeclaration ||
+                            declaration->Kind() == AstNodeKind::EnumDeclaration)
+                       ? declaration
                        : nullptr;
         }
         return Nominal(ExpressionType(call.Receiver()));
@@ -963,7 +983,8 @@ class Expander {
                 if (found != concreteMethods.end())
                     return {&found->second->ReturnType(),
                             found->second->moduleId};
-                if (call.Member() == "init") {
+                if (call.Member() == "init" &&
+                    owner->Kind() == AstNodeKind::StructureDeclaration) {
                     if (!ownerTypes.contains(owner))
                         ownerTypes[owner] = std::make_unique<TypeNode>(
                             owner->Range(), Alias(*owner));
@@ -975,10 +996,14 @@ class Expander {
                 const auto& member =
                     static_cast<const MemberAccessExpression&>(expression);
                 const auto* owner = Nominal(ExpressionType(member.Receiver()));
-                if (!owner) return {};
-                for (const auto& field : owner->Fields())
+                if (!owner || owner->Kind() !=
+                                  AstNodeKind::StructureDeclaration)
+                    return {};
+                const auto* structure =
+                    static_cast<const StructureDeclaration*>(owner);
+                for (const auto& field : structure->Fields())
                     if (field->Name() == member.Member())
-                        return {&field->Type(), owner->moduleId};
+                        return {&field->Type(), structure->moduleId};
                 return {};
             }
             default:
@@ -1145,8 +1170,7 @@ class Expander {
     std::map<std::pair<std::string, std::string>, const Declaration*>
         declarations;
     std::vector<const FunctionDeclaration*> methods;
-    std::map<const StructureDeclaration*,
-             std::vector<const FunctionDeclaration*>>
+    std::map<const Declaration*, std::vector<const FunctionDeclaration*>>
         genericMethods;
     std::map<const Declaration*, std::string> aliases;
     std::map<std::pair<const Declaration*, std::string>, Declaration*> cache;

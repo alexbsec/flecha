@@ -39,6 +39,7 @@ enum class SemanticTypeKind {
     Error,
     ErrorValue,
     NamedError,
+    Enum,
     Structure,
 };
 
@@ -48,6 +49,7 @@ struct ErrorFamily final {
 };
 
 struct StructureType;
+struct EnumType;
 
 class SemanticType final {
    public:
@@ -82,6 +84,11 @@ class SemanticType final {
           _isConst(isConst),
           _structure(structure) {}
     const StructureType* Structure() const { return _structure; }
+    explicit SemanticType(const EnumType* enumeration, bool isConst = false)
+        : _kind(SemanticTypeKind::Enum),
+          _isConst(isConst),
+          _enum(enumeration) {}
+    const EnumType* Enum() const { return _enum; }
     bool ContainsStructure() const;
     bool IsZeroable() const;
     bool IsTriviallyZeroable() const;
@@ -132,6 +139,7 @@ class SemanticType final {
     bool _isConst;
     std::shared_ptr<const ErrorFamily> _family;
     const StructureType* _structure = nullptr;
+    const EnumType* _enum = nullptr;
     std::uint64_t _length = 0;
     std::shared_ptr<const SemanticType> _target;
     std::shared_ptr<const std::vector<SemanticType>> _elements;

@@ -44,6 +44,7 @@ class Parser {
     std::vector<std::string> ParseGenericParameters();
     std::unique_ptr<StructureDeclaration> ParseStructureDeclaration();
     std::unique_ptr<ErrorDeclaration> ParseErrorDeclaration();
+    std::unique_ptr<EnumDeclaration> ParseEnumDeclaration();
     std::unique_ptr<Declaration> ParseDeclaration();
     std::unique_ptr<FunctionDeclaration> ParseFunctionDeclaration();
     std::unique_ptr<TypeNode> ParseType(bool allowOwn = false,

@@ -48,6 +48,7 @@ void TupleBindings() { (i32 count, bool ready) = TupleResult(); }
 void BareTupleBindings() { i32 quotient, remainder = (3, 2); }
 
 error MathError { DivisionByZero, Overflow }
+enum State: u8 { default Unknown, On, Off }
 error genericError = MathError.Overflow;
 
 structure Box { private i32 x; };

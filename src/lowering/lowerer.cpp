@@ -332,6 +332,13 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
             const auto& member =
                 static_cast<const core::MemberAccessExpression&>(expression);
             if (_semanticModel->FieldFor(member)) return LowerPlace(expression);
+            if (type.Kind() == semantic::SemanticTypeKind::Enum) {
+                for (const auto& variant : type.Enum()->variants)
+                    if (variant.name == member.Member())
+                        return std::make_unique<BoundLiteralExpression>(
+                            expression.Range(), type,
+                            std::to_string(variant.value));
+            }
             const auto& variants = type.Family().variants;
             std::size_t code = 1;
             for (const auto& variant : variants) {
@@ -344,8 +351,20 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
         case core::AstNodeKind::LiteralExpression: {
             const core::LiteralExpression& literal =
                 static_cast<const core::LiteralExpression&>(expression);
+            const auto containsEnum =
+                [](const auto& self, semantic::SemanticType candidate) -> bool {
+                if (candidate.Kind() == semantic::SemanticTypeKind::Enum)
+                    return true;
+                if (candidate.Kind() == semantic::SemanticTypeKind::Array)
+                    return self(self, *candidate.Target());
+                if (candidate.Kind() == semantic::SemanticTypeKind::Tuple)
+                    for (const auto& element : candidate.Elements())
+                        if (self(self, element)) return true;
+                return false;
+            };
             if (literal.LiteralType() == TokenType::None &&
-                expected.ContainsStructure()) {
+                (expected.ContainsStructure() ||
+                 containsEnum(containsEnum, expected))) {
                 return std::make_unique<BoundDefaultExpression>(
                     expression.Range(), expected.WithoutConst(), true);
             }
@@ -419,6 +438,7 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                 if ((valueEquality &&
                      (other.IsNumeric() || other.IsErrorValue() ||
                       other.ContainsStructure() ||
+                      kind == semantic::SemanticTypeKind::Enum ||
                       kind == semantic::SemanticTypeKind::Bool ||
                       kind == semantic::SemanticTypeKind::Char)) ||
                     kind == semantic::SemanticTypeKind::Pointer ||
@@ -480,7 +500,9 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                 std::vector<std::unique_ptr<BoundExpression>> arguments;
                 if (method->HasReceiver()) {
                     if (_semanticModel->TypeOf(member.Receiver()).Kind() ==
-                        semantic::SemanticTypeKind::Structure)
+                            semantic::SemanticTypeKind::Structure ||
+                        _semanticModel->TypeOf(member.Receiver()).Kind() ==
+                            semantic::SemanticTypeKind::Enum)
                         arguments.push_back(
                             std::make_unique<BoundAddressExpression>(
                                 member.Receiver().Range(),

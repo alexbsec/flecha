@@ -1,6 +1,7 @@
 #ifndef FLECHA_SEMANTIC_SYMBOL_HPP
 #define FLECHA_SEMANTIC_SYMBOL_HPP
 
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -16,6 +17,7 @@ enum class SymbolKind {
     Parameter,
     LocalVariable,
     ErrorType,
+    EnumType,
     StructureType
 };
 
@@ -68,7 +70,8 @@ class FunctionSymbol final : public Symbol {
                    BuiltInFunction builtIn = BuiltInFunction::None,
                    bool isUnsafe = false, const StructureType* owner = nullptr,
                    bool isPrivate = false, bool hasReceiver = false,
-                   bool isExtern = false, std::string linkName = {})
+                   bool isExtern = false, std::string linkName = {},
+                   const EnumType* enumOwner = nullptr)
         : Symbol(SymbolKind::Function, std::move(name),
                  SemanticType(SemanticTypeKind::Function), declarationRange,
                  false),
@@ -77,6 +80,7 @@ class FunctionSymbol final : public Symbol {
           _builtIn(builtIn),
           _isUnsafe(isUnsafe),
           _owner(owner),
+          _enumOwner(enumOwner),
           _isPrivate(isPrivate),
           _hasReceiver(hasReceiver),
           _isExtern(isExtern),
@@ -88,6 +92,8 @@ class FunctionSymbol final : public Symbol {
     }
     [[nodiscard]] bool IsUnsafe() const { return _isUnsafe; }
     const StructureType* Owner() const { return _owner; }
+    const EnumType* EnumOwner() const { return _enumOwner; }
+    bool HasOwner() const { return _owner != nullptr || _enumOwner != nullptr; }
     bool IsPrivate() const { return _isPrivate; }
     bool HasReceiver() const { return _hasReceiver; }
     bool IsExtern() const { return _isExtern; }
@@ -100,10 +106,26 @@ class FunctionSymbol final : public Symbol {
     BuiltInFunction _builtIn;
     bool _isUnsafe;
     const StructureType* _owner;
+    const EnumType* _enumOwner;
     bool _isPrivate;
     bool _hasReceiver;
     bool _isExtern;
     std::string _linkName;
+};
+
+struct EnumVariant final {
+    std::string name;
+    std::uint64_t value = 0;
+    source::SourceRange range;
+};
+
+struct EnumType final {
+    std::string name;
+    const core::EnumDeclaration* syntax = nullptr;
+    SemanticType backing = SemanticType(SemanticTypeKind::U32);
+    std::vector<EnumVariant> variants;
+    std::optional<std::uint64_t> defaultValue;
+    std::unordered_map<std::string, const FunctionSymbol*> methods;
 };
 
 struct StructureField final {

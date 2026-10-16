@@ -67,6 +67,7 @@ enum class TokenType {
 
     // Keywords
     Module,
+    Enum,
     Structure,
     Private,
     Override,

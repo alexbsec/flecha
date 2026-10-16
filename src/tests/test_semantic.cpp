@@ -2431,6 +2431,92 @@ TEST(SemanticErrorTests, ReportsInvalidFamiliesNamesAndVariantsAtTheirRanges) {
                      .diagnostics.HasErrors());
 }
 
+TEST(SemanticEnumTests, ResolvesNominalValuesDefaultsAndMemberFunctions) {
+    Analysis result = Analyze(
+        "enum Status: u8 { default Idle = 3, Running = 7, Done, } "
+        "bool Status::is_running(&const self) { "
+        "return *self == Status.Running; } "
+        "Status Status::done() { return Status.Done; } "
+        "void use() { Status status = none; status = Status.Running; "
+        "[2]Status values = none; (Status, Status) pair = none; "
+        "if status.is_running() and Status::done() == Status.Done and "
+        "values[0] == Status.Idle {} } ");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_EQ(result.model.Enums().size(), 1);
+    const auto& enumeration = *result.model.Enums().front();
+    EXPECT_EQ(enumeration.name, "Status");
+    EXPECT_EQ(enumeration.backing.Kind(), SemanticTypeKind::U8);
+    ASSERT_EQ(enumeration.variants.size(), 3);
+    EXPECT_EQ(enumeration.variants[0].value, 3);
+    EXPECT_EQ(enumeration.variants[1].value, 7);
+    EXPECT_EQ(enumeration.variants[2].value, 8);
+    ASSERT_TRUE(enumeration.defaultValue.has_value());
+    EXPECT_EQ(*enumeration.defaultValue, 3);
+    EXPECT_TRUE(enumeration.methods.contains("is_running"));
+    EXPECT_TRUE(enumeration.methods.at("is_running")->HasReceiver());
+    EXPECT_TRUE(enumeration.methods.contains("done"));
+    EXPECT_FALSE(enumeration.methods.at("done")->HasReceiver());
+}
+
+TEST(SemanticEnumTests, RequiresDefaultsForNoneAndKeepsEnumsNominal) {
+    Analysis missingDefault = Analyze(
+        "enum First { A, } enum Second { A, } "
+        "void f() { First first = none; First other = Second.A; }");
+    EXPECT_NE(FindDiagnostic(missingDefault, DiagnosticCode::IncompatibleType),
+              nullptr);
+
+    Analysis defaulted = Analyze(
+        "enum First { default A, } enum Second { default A, } "
+        "void f() { First first = none; First other = Second.A; }");
+    EXPECT_NE(FindDiagnostic(defaulted, DiagnosticCode::IncompatibleType),
+              nullptr);
+}
+
+TEST(SemanticEnumTests, RejectsInvalidDeclarationsAndReservedLifecycleNames) {
+    for (const std::string& source : {
+             "enum Empty {}",
+             "enum Bad: bool { Value, }",
+             "enum Bad: u8 { Value = 256, }",
+             "enum Bad: i8 { Value = -129, }",
+             "enum Bad { First = 1, Second = 1, }",
+             "enum Bad { default First, default Second, }",
+         }) {
+        SCOPED_TRACE(source);
+        EXPECT_NE(FindDiagnostic(Analyze(source),
+                                 DiagnosticCode::InvalidEnumDeclaration),
+                  nullptr);
+    }
+    EXPECT_NE(FindDiagnostic(Analyze("enum Bad { First, First, }"),
+                             DiagnosticCode::DuplicateDeclaration),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze("enum Bad { Value, } "
+                                     "Bad Bad::zero() { return Bad.Value; }"),
+                             DiagnosticCode::InvalidLifecycle),
+              nullptr);
+}
+
+TEST(SemanticEnumTests, EnforcesPrivateMemberAccess) {
+    Analysis result = Analyze(
+        "enum State { On, Off, } "
+        "private bool State::is_on(&const self) { return *self == State.On; } "
+        "bool State::visible(&const self) { return self->is_on(); } "
+        "void f() { State state = State.On; state.is_on(); }");
+
+    EXPECT_NE(FindDiagnostic(result, DiagnosticCode::PrivateAccess), nullptr);
+}
+
+TEST(SemanticEnumTests, SupportsGenericMemberFunctions) {
+    Analysis result = Analyze(
+        "enum State { Off, default Unknown, On, } "
+        "T State::choose<T>(&const self, T on, T off) { "
+        "if *self == State.On { return on; } return off; } "
+        "i32 f() { State state = State.On; "
+        "return state.choose<i32>(42, 0); }");
+
+    EXPECT_FALSE(result.diagnostics.HasErrors());
+}
+
 TEST(SemanticErrorTests, IntegratesDefiniteAssignmentQualifiersAndBorrowing) {
     const std::string prefix = "error Fault { Bad } ";
     EXPECT_NE(

@@ -3,11 +3,11 @@
 Runtime-sized storage uses `new<[]T>(count)` in an unsafe context. `count` has type
 `usize` and is evaluated exactly once, before attempting allocation. The result is
 `(*T, error)`, matching the existing pointer/error convention. Numeric, boolean,
-and character elements are supported. Runtime arrays also accept copyable,
-default-constructible structures whose recursively stored fields are numbers,
-booleans, characters, raw pointers, fixed arrays, or other supported
-structures. Every slot is default-constructed after allocation succeeds;
-custom `zero()` overrides therefore run once per slot. Strings, pointer
+character, and defaultable enum elements are supported. Runtime arrays also
+accept copyable, default-constructible structures whose recursively stored
+fields are numbers, booleans, characters, enums, raw pointers, fixed arrays, or
+other supported structures. Every slot is default-constructed after allocation
+succeeds; custom `zero()` overrides therefore run once per slot. Strings, pointer
 elements, destructible/noncopyable structures, and partially initialized
 storage are not supported by this runtime-array form.
 
