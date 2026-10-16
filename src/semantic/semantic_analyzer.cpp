@@ -1289,6 +1289,16 @@ void SemanticAnalyzer::AnalyzeFunction(
     }
     AnalyzeBlock(function.Body(), false);
     const ControlFlowGraph graph = BuildControlFlowGraph(function, _model);
+    if (_currentFunction &&
+        _currentFunction->ReturnType().Kind() != SemanticTypeKind::Void &&
+        !_currentFunction->ReturnType().IsError() &&
+        CanReachFunctionExit(graph)) {
+        Report(diagnostics::DiagnosticCode::InvalidReturnType,
+               function.NameRange(),
+               "not all control paths in function '" + function.Name() +
+                   "' return '" + _currentFunction->ReturnType().Name() +
+                   "'");
+    }
     AnalyzeDefiniteAssignment(function, _model, _diagnostics, graph);
     bool hasNewErrors = false;
     for (std::size_t index = diagnosticsBefore;

@@ -734,6 +734,31 @@ TEST(SemanticDiagnosticTests, ChecksOperatorsConditionsReturnsAndVoidLocals) {
               nullptr);
 }
 
+TEST(SemanticDiagnosticTests, RequiresReturnsOnEveryReachableValuePath) {
+    Analysis missing = Analyze(
+        "i32 empty() {} "
+        "i32 partial(bool condition) { if condition { return 1; } }");
+    ASSERT_EQ(missing.diagnostics.Diagnostics().size(), 2);
+    for (const Diagnostic& diagnostic : missing.diagnostics.Diagnostics()) {
+        EXPECT_EQ(diagnostic.code, DiagnosticCode::InvalidReturnType);
+        EXPECT_NE(diagnostic.message.find("not all control paths"),
+                  std::string::npos);
+    }
+
+    Analysis complete = Analyze(
+        "i32 direct() { return 1; } "
+        "i32 branches(bool condition) { if condition { return 1; } "
+        "else { return 2; } } "
+        "i32 diverges() { loop ;; {} } "
+        "i32 loop_return() { loop ;; { return 3; } } "
+        "void no_value_required() {}");
+    EXPECT_FALSE(complete.diagnostics.HasErrors());
+
+    Analysis brokenLoop = Analyze("i32 broken() { loop ;; { break; } }");
+    EXPECT_NE(FindDiagnostic(brokenLoop, DiagnosticCode::InvalidReturnType),
+              nullptr);
+}
+
 TEST(SemanticDiagnosticTests, RejectsAssignmentToFunctionSymbol) {
     Analysis analysis = Analyze(
         "i32 value() { return 1; } i32 main() { value = 2; return 0; }");

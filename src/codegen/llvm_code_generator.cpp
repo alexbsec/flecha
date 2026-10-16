@@ -497,9 +497,12 @@ void LlvmCodeGenerator::InitializeDeferredScope(const CleanupScope& scope) {
 #if LLVM_VERSION_MAJOR >= 20
     llvm::Function* save = llvm::Intrinsic::getOrInsertDeclaration(
         _module.get(), llvm::Intrinsic::stacksave, {pointer});
-#else
+#elif LLVM_VERSION_MAJOR >= 18
     llvm::Function* save = llvm::Intrinsic::getDeclaration(
         _module.get(), llvm::Intrinsic::stacksave, {pointer});
+#else
+    llvm::Function* save = llvm::Intrinsic::getDeclaration(
+        _module.get(), llvm::Intrinsic::stacksave);
 #endif
     _builder.CreateStore(_builder.CreateCall(save), scope.stackMark);
 }
@@ -652,9 +655,12 @@ bool LlvmCodeGenerator::EmitDeferredCalls(const CleanupScope& scope) {
 #if LLVM_VERSION_MAJOR >= 20
     llvm::Function* restore = llvm::Intrinsic::getOrInsertDeclaration(
         _module.get(), llvm::Intrinsic::stackrestore, {pointer});
-#else
+#elif LLVM_VERSION_MAJOR >= 18
     llvm::Function* restore = llvm::Intrinsic::getDeclaration(
         _module.get(), llvm::Intrinsic::stackrestore, {pointer});
+#else
+    llvm::Function* restore = llvm::Intrinsic::getDeclaration(
+        _module.get(), llvm::Intrinsic::stackrestore);
 #endif
     _builder.CreateCall(restore,
                         {_builder.CreateLoad(pointer, scope.stackMark)});

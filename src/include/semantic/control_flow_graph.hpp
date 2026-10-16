@@ -45,8 +45,10 @@ struct ControlFlowGraph final {
         scopeParents;
     std::unordered_set<const Symbol*> deferredCaptures;
     NodeId entry = 0;
+    NodeId exit = 0;
 };
 [[nodiscard]] ControlFlowGraph BuildControlFlowGraph(
     const core::FunctionDeclaration& function, const SemanticModel& model);
+[[nodiscard]] bool CanReachFunctionExit(const ControlFlowGraph& graph);
 }  // namespace flecha::semantic
 #endif

@@ -8,6 +8,7 @@ class GraphBuilder final {
     explicit GraphBuilder(const SemanticModel& model) : _model(model) {}
     ControlFlowGraph Build(const core::FunctionDeclaration& function) {
         const NodeId exit = AddNode({});
+        _graph.exit = exit;
         const NodeId body = BuildBlock(function.Body(), exit);
         _graph.entry = AddNode({body});
         for (const auto& [jump, position] : _jumps) {
@@ -458,5 +459,34 @@ class GraphBuilder final {
 ControlFlowGraph BuildControlFlowGraph(
     const core::FunctionDeclaration& function, const SemanticModel& model) {
     return GraphBuilder(model).Build(function);
+}
+
+bool CanReachFunctionExit(const ControlFlowGraph& graph) {
+    std::vector<NodeId> pending{graph.entry};
+    std::unordered_set<NodeId> visited;
+    while (!pending.empty()) {
+        const NodeId id = pending.back();
+        pending.pop_back();
+        if (!visited.insert(id).second) continue;
+        if (id == graph.exit) return true;
+
+        const FlowNode& node = graph.nodes[id];
+        if (node.condition != nullptr && node.successors.size() == 2 &&
+            node.condition->Kind() == core::AstNodeKind::LiteralExpression) {
+            const auto& literal =
+                static_cast<const core::LiteralExpression&>(*node.condition);
+            if (literal.LiteralType() == TokenType::True) {
+                pending.push_back(node.successors[0]);
+                continue;
+            }
+            if (literal.LiteralType() == TokenType::False) {
+                pending.push_back(node.successors[1]);
+                continue;
+            }
+        }
+        pending.insert(pending.end(), node.successors.begin(),
+                       node.successors.end());
+    }
+    return false;
 }
 }  // namespace flecha::semantic
