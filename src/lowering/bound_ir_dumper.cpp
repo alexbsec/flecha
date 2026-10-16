@@ -269,6 +269,24 @@ class Dumper final {
                 _stream << ")";
                 break;
             }
+            case BoundNodeKind::MatchExpression: {
+                const auto& match =
+                    static_cast<const BoundMatchExpression&>(expression);
+                _stream << "(match ";
+                WriteExpression(match.Matched());
+                for (const auto& arm : match.Arms()) {
+                    _stream << " (";
+                    if (arm.discriminant.has_value())
+                        _stream << *arm.discriminant;
+                    else
+                        _stream << "_";
+                    _stream << " => ";
+                    WriteExpression(*arm.value);
+                    _stream << ")";
+                }
+                _stream << ")";
+                break;
+            }
             case BoundNodeKind::ArrayElementExpression: {
                 const auto& index =
                     static_cast<const BoundArrayElementExpression&>(expression);

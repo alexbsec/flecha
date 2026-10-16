@@ -29,6 +29,8 @@ class SemanticAnalyzer final {
     bool IsReferencePlace(const core::Expression& expression) const;
     SemanticType AnalyzeArray(const core::ArrayExpression& expression,
                               SemanticType expected);
+    SemanticType AnalyzeMatch(const core::MatchExpression& expression,
+                              SemanticType expected);
     void AnalyzeDestructure(const core::DestructureStatement& statement);
     SemanticType AnalyzeTuple(const core::TupleExpression& expression,
                               SemanticType expected);

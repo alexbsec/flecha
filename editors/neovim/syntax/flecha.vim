@@ -11,7 +11,7 @@ syntax keyword flechaType u8 u16 u32 u64 usize
 syntax keyword flechaType f32 f64 bool char void string stringv error AllocationError
 
 syntax keyword flechaModifier unsafe export extern inline comptime own lend const constptr constref volatile private override
-syntax keyword flechaConditional if else also
+syntax keyword flechaConditional if else also match
 syntax keyword flechaRepeat while for loop range
 syntax keyword flechaStatement return yield proceed break defer module enum structure build
 syntax keyword flechaJump jumpto nextgroup=flechaJumpTarget skipwhite
@@ -21,7 +21,7 @@ syntax keyword flechaConstant none null
 syntax keyword flechaSelf self
 syntax keyword flechaWordOperator and or
 
-syntax match flechaOperator /::\|->\|:=\|===\|!==\|==\|!=\|<=\|>=\|&&\|||\|[&=+*\/%^!<>-]/
+syntax match flechaOperator /::\|->\|=>\|:=\|===\|!==\|==\|!=\|<=\|>=\|&&\|||\|[&=+*\/%^!<>-]/
 syntax match flechaRawAddress /\%(&\s*\)\@<=raw\>/
 syntax match flechaFunction /\<[A-Za-z_][A-Za-z0-9_]*\>\ze\s*(/
 syntax match flechaAllocation /\<new\>\ze\s*</

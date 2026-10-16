@@ -168,6 +168,14 @@ class BorrowChecker final {
                          .Elements())
                     CollectUses(*element, uses);
                 break;
+            case Kind::MatchExpression: {
+                const auto& match =
+                    static_cast<const core::MatchExpression&>(expression);
+                CollectUses(match.Value(), uses);
+                for (const auto& arm : match.Arms())
+                    CollectUses(arm->Value(), uses);
+                break;
+            }
             case Kind::NameExpression: {
                 const Symbol* symbol = Named(expression);
                 if (IsBorrowed(symbol)) uses.insert(symbol);
@@ -565,6 +573,26 @@ class BorrowChecker final {
                          .Elements())
                     (void)Evaluate(*element);
                 return {};
+            case Kind::MatchExpression: {
+                const auto& match =
+                    static_cast<const core::MatchExpression&>(expression);
+                (void)Evaluate(match.Value());
+                const State before = *_state;
+                State merged;
+                bool first = true;
+                for (const auto& arm : match.Arms()) {
+                    *_state = before;
+                    (void)Evaluate(arm->Value());
+                    if (first) {
+                        merged = *_state;
+                        first = false;
+                    } else {
+                        Merge(merged, *_state);
+                    }
+                }
+                if (!first) *_state = std::move(merged);
+                return {};
+            }
             case Kind::ParenthesizedExpression:
                 return Evaluate(Unwrap(expression));
             case Kind::NameExpression: {

@@ -75,10 +75,9 @@ class LlvmCodeGenerator final {
     ExternIntegerExtension(semantic::SemanticType type) const;
     void ApplyExternAttributes(const semantic::FunctionSymbol& symbol,
                                llvm::Function& function);
-    llvm::CallInst* EmitFunctionCall(
-        const semantic::FunctionSymbol& symbol,
-        const std::vector<llvm::Value*>& arguments,
-        std::string_view name = {});
+    llvm::CallInst* EmitFunctionCall(const semantic::FunctionSymbol& symbol,
+                                     const std::vector<llvm::Value*>& arguments,
+                                     std::string_view name = {});
     bool DeclareFunctions(const lowering::BoundProgram& program);
     bool EmitFunction(const lowering::BoundFunction& function);
     bool EmitBlock(const lowering::BoundBlockStatement& block);
@@ -94,6 +93,8 @@ class LlvmCodeGenerator final {
         const lowering::BoundSliceExpression& expression);
     [[nodiscard]] llvm::Value* EmitArray(
         const lowering::BoundArrayExpression& expression);
+    [[nodiscard]] llvm::Value* EmitMatch(
+        const lowering::BoundMatchExpression& expression);
     [[nodiscard]] llvm::Value* EmitArrayStorage(
         const lowering::BoundExpression& expression);
     [[nodiscard]] llvm::Value* EmitAddress(

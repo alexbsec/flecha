@@ -115,6 +115,52 @@ TEST(LlvmCodeGeneratorTests, EmitsEnumDiscriminantsDefaultsAndMethods) {
     EXPECT_NE(ir.find("ret i8 8"), std::string::npos);
 }
 
+TEST(LlvmCodeGeneratorTests, EmitsVerifiedEnumMatchSwitches) {
+    GeneratedSource result = Generate(R"(
+        enum TokenKind: u8 { Identifier = 2, Number = 7, End = 9, }
+        i32 classify(TokenKind kind) {
+            return match kind {
+                TokenKind.Identifier => 10,
+                TokenKind.Number => 20,
+                TokenKind.End => 42,
+            };
+        }
+        i32 main() { return classify(TokenKind.End); }
+    )");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("switch i8"), std::string::npos);
+    EXPECT_NE(ir.find("i8 2, label %match.arm"), std::string::npos);
+    EXPECT_NE(ir.find("i8 7, label %match.arm"), std::string::npos);
+    EXPECT_NE(ir.find("i8 9, label %match.arm"), std::string::npos);
+    EXPECT_NE(ir.find("match.invalid"), std::string::npos);
+}
+
+TEST(LlvmCodeGeneratorTests, EvaluatesMatchInputsOnceAndUsesWildcardDefault) {
+    GeneratedSource result = Generate(R"(
+        enum TokenKind: u8 { Identifier, End, }
+        TokenKind next() { return TokenKind.End; }
+        i32 main() {
+            return match next() {
+                TokenKind.Identifier => 1,
+                _ => 42,
+            };
+        }
+    )");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
+    const std::string ir = ModuleText(*result.module);
+    const std::size_t call = ir.find("call i8 @next()");
+    ASSERT_NE(call, std::string::npos);
+    EXPECT_EQ(ir.find("call i8 @next()", call + 1), std::string::npos);
+    EXPECT_EQ(ir.find("match.invalid"), std::string::npos);
+}
+
 TEST(LlvmCodeGeneratorTests, DefaultConstructsRuntimeEnumArrays) {
     GeneratedSource result = Generate(
         "enum Status: u8 { default Idle = 3, Running = 7, } "
@@ -177,8 +223,7 @@ TEST(LlvmCodeGeneratorTests, UsesTargetCAbiIntegerExtensionAttributes) {
         aarch64Generator.Generate(*result.boundProgram, "extern_aarch64_abi");
     ASSERT_NE(aarch64Module, nullptr) << aarch64Generator.Error();
     const std::string aarch64Ir = ModuleText(*aarch64Module);
-    EXPECT_NE(aarch64Ir.find("declare i8 @native_i8(i8)"),
-              std::string::npos);
+    EXPECT_NE(aarch64Ir.find("declare i8 @native_i8(i8)"), std::string::npos);
     EXPECT_NE(aarch64Ir.find("declare i16 @native_u16(i16)"),
               std::string::npos);
 }
@@ -428,6 +473,39 @@ TEST(NativeCompilerTests, RunsForwardAndRecursiveCalls) {
 
     std::filesystem::remove(executablePath);
     std::filesystem::remove(objectPath);
+}
+
+TEST(NativeCompilerTests, RunsEnumMatchesInMemberFunctions) {
+    GeneratedSource result = Generate(R"(
+        enum TokenKind: u8 { Identifier = 2, Number = 7, End = 9, }
+        i32 TokenKind::score(&const self) {
+            return match *self {
+                TokenKind.Identifier => 10,
+                TokenKind.Number => 20,
+                TokenKind.End => 42,
+            };
+        }
+        i32 main() {
+            TokenKind kind = TokenKind.End;
+            return kind.score();
+        }
+    )");
+    ASSERT_NE(result.boundProgram, nullptr);
+
+    const std::filesystem::path executablePath =
+        std::filesystem::temp_directory_path() / "flecha_native_match_test";
+    std::filesystem::remove(executablePath);
+
+    NativeCompiler compiler;
+    ASSERT_TRUE(compiler.Ready()) << compiler.Error();
+    ASSERT_TRUE(compiler.BuildExecutable(*result.boundProgram, "native_match",
+                                         executablePath.string()))
+        << compiler.Error();
+    const std::string executablePathText = executablePath.string();
+    const llvm::StringRef arguments[] = {executablePathText};
+    EXPECT_EQ(llvm::sys::ExecuteAndWait(executablePathText, arguments), 42);
+
+    std::filesystem::remove(executablePath);
 }
 
 TEST(NativeCompilerTests, ObjectEmissionDoesNotRequireRuntimeLibrary) {

@@ -100,6 +100,16 @@ TEST(TokenizerTests, RecognizesEnumKeyword) {
     EXPECT_EQ(tokens[1].type, TokenType::Identifier);
 }
 
+TEST(TokenizerTests, RecognizesMatchKeywordAndFatArrow) {
+    std::vector<Token> tokens = Tokenize("match kind { _ => 0 }");
+
+    ASSERT_EQ(tokens.size(), 8);
+    EXPECT_EQ(tokens[0].type, TokenType::Match);
+    EXPECT_EQ(tokens[3].type, TokenType::Identifier);
+    EXPECT_EQ(tokens[4].type, TokenType::FatArrow);
+    EXPECT_EQ(tokens[4].value, "=>");
+}
+
 TEST(TokenizerTests, RecognizesIdentifiers) {
     std::vector<Token> tokens = Tokenize("variable1 _v_ar2");
     ASSERT_EQ(tokens.size(), 3);  // 2 identifiers + EOF

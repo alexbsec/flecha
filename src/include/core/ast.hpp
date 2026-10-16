@@ -43,6 +43,8 @@ enum class AstNodeKind {
     DestructureStatement,
     DestructureBinding,
     ArrayExpression,
+    MatchExpression,
+    MatchArm,
     LiteralExpression,
     NameExpression,
     ParenthesizedExpression,
@@ -845,6 +847,55 @@ class ArrayExpression final : public Expression {
     std::vector<std::unique_ptr<Expression>> _elements;
     bool _repeat;
     std::uint64_t _length;
+};
+
+class MatchArm final : public AstNode {
+   public:
+    MatchArm(source::SourceRange range, bool wildcard, std::string enumName,
+             std::string variant, source::SourceRange patternRange,
+             std::unique_ptr<Expression> value)
+        : AstNode(range),
+          _wildcard(wildcard),
+          _enumName(std::move(enumName)),
+          _variant(std::move(variant)),
+          _patternRange(patternRange),
+          _value(std::move(value)) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::MatchArm;
+    }
+    [[nodiscard]] bool IsWildcard() const { return _wildcard; }
+    [[nodiscard]] const std::string& EnumName() const { return _enumName; }
+    [[nodiscard]] const std::string& Variant() const { return _variant; }
+    [[nodiscard]] source::SourceRange PatternRange() const {
+        return _patternRange;
+    }
+    [[nodiscard]] const Expression& Value() const { return *_value; }
+
+   private:
+    bool _wildcard;
+    std::string _enumName;
+    std::string _variant;
+    source::SourceRange _patternRange;
+    std::unique_ptr<Expression> _value;
+};
+
+class MatchExpression final : public Expression {
+   public:
+    MatchExpression(source::SourceRange range,
+                    std::unique_ptr<Expression> value,
+                    std::vector<std::unique_ptr<MatchArm>> arms)
+        : Expression(range), _value(std::move(value)), _arms(std::move(arms)) {}
+    [[nodiscard]] AstNodeKind Kind() const override {
+        return AstNodeKind::MatchExpression;
+    }
+    [[nodiscard]] const Expression& Value() const { return *_value; }
+    [[nodiscard]] const std::vector<std::unique_ptr<MatchArm>>& Arms() const {
+        return _arms;
+    }
+
+   private:
+    std::unique_ptr<Expression> _value;
+    std::vector<std::unique_ptr<MatchArm>> _arms;
 };
 
 // Range syntax is normalized into an array snapshot, a private usize cursor,

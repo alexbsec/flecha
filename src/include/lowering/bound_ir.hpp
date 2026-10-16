@@ -2,6 +2,7 @@
 #define FLECHA_LOWERING_BOUND_IR_HPP
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -30,6 +31,7 @@ enum class BoundNodeKind {
     TupleExpression,
     DestructureStatement,
     ArrayExpression,
+    MatchExpression,
     SliceExpression,
     ArrayElementExpression,
     ArrayLengthExpression,
@@ -208,6 +210,32 @@ class BoundArrayExpression final : public BoundExpression {
    private:
     std::vector<std::unique_ptr<BoundExpression>> _elements;
     bool _repeat;
+};
+
+struct BoundMatchArm final {
+    std::optional<std::uint64_t> discriminant;
+    std::unique_ptr<BoundExpression> value;
+};
+
+class BoundMatchExpression final : public BoundExpression {
+   public:
+    BoundMatchExpression(source::SourceRange range, semantic::SemanticType type,
+                         std::unique_ptr<BoundExpression> matched,
+                         std::vector<BoundMatchArm> arms)
+        : BoundExpression(range, type),
+          _matched(std::move(matched)),
+          _arms(std::move(arms)) {}
+    [[nodiscard]] BoundNodeKind Kind() const override {
+        return BoundNodeKind::MatchExpression;
+    }
+    [[nodiscard]] const BoundExpression& Matched() const { return *_matched; }
+    [[nodiscard]] const std::vector<BoundMatchArm>& Arms() const {
+        return _arms;
+    }
+
+   private:
+    std::unique_ptr<BoundExpression> _matched;
+    std::vector<BoundMatchArm> _arms;
 };
 
 class BoundArrayElementExpression final : public BoundPlaceExpression {

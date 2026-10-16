@@ -27,6 +27,7 @@ enum class TokenType {
 
     // Operators
     Assign,
+    FatArrow,
     DeclareAssign,
     Add,
     Increment,
@@ -81,6 +82,7 @@ enum class TokenType {
     Defer,
     Yield,
     If,
+    Match,
     Else,
     Also,
     While,

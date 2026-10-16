@@ -187,6 +187,27 @@ receiver spelling, privacy, and call syntax as structure methods. `init`,
 `zero`, and `tear` remain compiler-reserved because enum lifecycle is intrinsic.
 See [enums](docs/enums.md) for implemented syntax and restrictions.
 
+### 7.2 Enum matching
+
+`match` is an expression over a nominal enum value. Arms use `=>`; patterns are
+qualified enum variants or `_`:
+
+```flecha
+i32 status_code(State state) {
+    return match state {
+        State.Off => 0,
+        State.Unknown => 1,
+        State.On => 2,
+    };
+}
+```
+
+Every variant must appear exactly once unless a final wildcard arm covers the
+remaining variants. Patterns from another enum, unknown variants, duplicates,
+and arms following `_` are errors. Every arm is an expression and must produce
+a compatible result type. The matched value is evaluated once and only the
+selected arm is evaluated. See [enum matching](docs/match.md).
+
 ## 8. Universal zero and `none`
 
 Every primitive Flecha type has a defined zero value. `none` is a universal, polymorphic zero literal that can be converted to the zero value of a destination or comparison type.
@@ -791,7 +812,7 @@ The following decisions are intentionally not finalized:
 - additional declaration forms, including whether to introduce `var`;
 - string literal representation and encoding;
 - slice syntax and array-to-slice conversion;
-- union and enum syntax;
+- union syntax;
 - ownership, borrowing, and deterministic cleanup;
 - allocator interfaces;
 - arithmetic overflow behavior;
@@ -817,7 +838,7 @@ These questions should be resolved by prioritizing predictable behavior, a small
 6. Implement tuples, tuple returns, and destructuring.
 7. Implement universal `none`, zero initialization, `==`, and `===`.
 8. Error types and tuple-based error handling are implemented; payloads and propagation sugar remain future work.
-9. Nominal scalar enums, defaults, discriminants, and member functions are implemented; exhaustive matching remains future work.
+9. Nominal scalar enums, defaults, discriminants, member functions, and exhaustive matching are implemented.
 10. Implement pointers, slices, and explicit unsafe blocks.
 11. Introduce a compiler-owned intermediate representation.
 12. Add an LLVM backend and native debug information.
