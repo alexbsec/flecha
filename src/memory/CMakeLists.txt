@@ -1,2 +1,2 @@
-add_library(memory STATIC memory.cpp)
-target_link_libraries(memory PRIVATE flecha_project_options)
+add_library(memory INTERFACE)
+target_link_libraries(memory INTERFACE flecha_project_options)

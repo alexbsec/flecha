@@ -55,8 +55,8 @@ llvm::Type* LlvmCodeGenerator::MapType(semantic::SemanticType type) {
         case semantic::SemanticTypeKind::Structure: {
             const auto found = _structureTypes.find(type.Structure());
             if (found != _structureTypes.end()) return found->second;
-            auto* result =
-                llvm::StructType::create(_context, "flecha." + type.Name());
+            auto* result = llvm::StructType::create(
+                _context, "flecha." + type.Structure()->name);
             _structureTypes[type.Structure()] = result;
             std::vector<llvm::Type*> fields;
             for (const auto& field : type.Structure()->fields)

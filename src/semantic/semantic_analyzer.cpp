@@ -3310,6 +3310,7 @@ void SemanticAnalyzer::RegisterStructures(const core::CompilationUnit& unit) {
         SetModule(syntax.moduleId);
         auto structure = std::make_unique<StructureType>();
         structure->name = TopName(syntax, syntax.Name());
+        structure->displayName = syntax.specializationName;
         structure->syntax = &syntax;
         AddSymbol(std::make_unique<Symbol>(
                       SymbolKind::StructureType, TopName(syntax, syntax.Name()),

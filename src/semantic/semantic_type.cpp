@@ -154,7 +154,8 @@ std::string SemanticType::Name() const {
         case SemanticTypeKind::Enum:
             return _enum->name;
         case SemanticTypeKind::Structure:
-            return _structure->name;
+            return _structure->displayName.empty() ? _structure->name
+                                                   : _structure->displayName;
         case SemanticTypeKind::ErrorValue:
             return "error";
         case SemanticTypeKind::NamedError:

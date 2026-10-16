@@ -136,6 +136,7 @@ struct StructureField final {
 
 struct StructureType final {
     std::string name;
+    std::string displayName;
     const core::StructureDeclaration* syntax = nullptr;
     std::vector<StructureField> fields;
     std::unordered_map<std::string, const FunctionSymbol*> methods;

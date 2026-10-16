@@ -1,2 +1,2 @@
-add_library(utils STATIC utils.cpp)
-target_link_libraries(utils PRIVATE flecha_project_options)
+add_library(utils INTERFACE)
+target_link_libraries(utils INTERFACE flecha_project_options)

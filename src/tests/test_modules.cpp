@@ -81,6 +81,18 @@ TEST_F(ModuleTests, ExportedStructuresBundleMethodsButRespectPrivacy) {
           "box::Box::init(); return b.n; }");
     EXPECT_NE(Check().find("private"), std::string::npos);
 }
+TEST_F(ModuleTests, GenericDiagnosticsUseSourceTypeNames) {
+    Write("array.fl",
+          "module array; export structure Array<T> { T value; }; "
+          "void Array<T>::set(&self, usize index, T value) {}");
+    Write("main.fl",
+          "module main; @imports :: root::array; void main() { "
+          "values := array::Array<i32>::init(); values.set(values); }");
+    const std::string errors = Check();
+    EXPECT_NE(errors.find("expected 'usize', found 'Array<i32>'"),
+              std::string::npos);
+    EXPECT_EQ(errors.find("$specialization"), std::string::npos);
+}
 TEST_F(ModuleTests, PrivateDeclarationsAndTransitiveImportsDoNotLeak) {
     Write("hidden.fl",
           "module hidden; i32 secret() { return 42; } structure Secret { i32 "
