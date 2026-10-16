@@ -18,6 +18,11 @@ Inferred destructuring is `pointer, err := new<u8>(42);`. The result is a tuple
 pointer. The existing mixed form `(pointer, error err) = new<u8>(42);` also works
 when pointer has already been declared.
 
+Runtime-sized scalar buffers are also available as `new<[]T>(count)`, returning
+`(*T, error)`. The count is evaluated before allocation, and all elements start
+at zero. See [dynamic arrays](dynamic_arrays.md) for indexing, supported types,
+and the first Flecha standard-library container.
+
 ## Allocation and evaluation
 
 The compiler computes T's native size and alignment. The runtime allocates
@@ -176,7 +181,8 @@ unknown external/field-derived pointers and stack-address lifetimes do not gain
 a safety guarantee. Free with unverified provenance is rejected. The analysis
 tracks allocation obligations, not byte usage or peak heap size; automatic
 strings and structure values continue to use their existing cleanup rules.
-Safe heap owners and dynamic collections are separate features.
+General safe heap owners remain future work. The first concrete dynamic collection
+is [I32Array](dynamic_arrays.md), implemented in Flecha using these raw contracts.
 
 ## Diagnostics and verification
 

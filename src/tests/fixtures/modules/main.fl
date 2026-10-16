@@ -1,0 +1,20 @@
+module main;
+@imports
+    :: root::parser::math::{factorial}
+    :: root::other::factorial as second
+    :: lib::std::*;
+i32 main() {
+    containers::Box box = containers::Box::init(30);
+    if containers::status() != containers::ContainerError.Empty { return 1; }
+    unsafe {
+        value, err := containers::allocate();
+        if err != none { return 2; }
+        if *value != 42 { free(value); return 3; }
+        containers::consume(value);
+        stored, failed := containers::allocate();
+        if failed != none { return 4; }
+        owner := containers::Owner::init(stored);
+        if owner.get() != 42 { return 5; }
+    }
+    return box.get() + factorial::factorial(2) + second::factorial(0);
+}

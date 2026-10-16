@@ -3,6 +3,7 @@ add_executable(test_flecha
     test_codegen.cpp
     test_diagnostics.cpp
     test_lowering.cpp
+    test_modules.cpp
     test_main.cpp
     test_parser.cpp
     test_runtime.cpp
@@ -240,3 +241,40 @@ add_test(
         -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/rejected_memory.o
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_memory_diagnostics.cmake
 )
+
+add_test(NAME NativeSemanticTests.Modules
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/modules
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/modules_test
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_modules.cmake)
+
+add_test(NAME LongbowTests.Projects
+    COMMAND ${CMAKE_COMMAND}
+        -DLONGBOW=$<TARGET_FILE:longbow>
+        -DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/longbow_projects
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_longbow.cmake)
+
+add_test(NAME NativeSemanticTests.RuntimeArrays
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/runtime_array_api.fl
+        -DFLECHA_HARNESS=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/runtime_array_harness.cpp
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/runtime_array_test
+        -DFLECHA_RUNTIME=$<TARGET_FILE:runtime>
+        -DFLECHA_LINKER=${CMAKE_CXX_COMPILER}
+        -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
+        -DFLECHA_LINK_OPTIONS=-Wl,--wrap=flecha_runtime_v1_alloc_array
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_unsafe_pointers.cmake)
+
+add_test(NAME StandardLibraryTests.DynamicArrayI32
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dynamic_array/main.fl
+        -DFLECHA_STD=${PROJECT_SOURCE_DIR}/std/src
+        -DFLECHA_HARNESS=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dynamic_array/harness.cpp
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/dynamic_array_test
+        -DFLECHA_RUNTIME=$<TARGET_FILE:runtime>
+        -DFLECHA_LINKER=${CMAKE_CXX_COMPILER}
+        -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_dynamic_array.cmake)

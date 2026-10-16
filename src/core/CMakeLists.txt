@@ -1,4 +1,5 @@
 add_library(core STATIC
+    module_loader.cpp
     parser.cpp
     tokenizer.cpp
     core.cpp

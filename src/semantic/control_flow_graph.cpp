@@ -397,12 +397,19 @@ class GraphBuilder final {
             case core::AstNodeKind::CallExpression: {
                 const auto& call =
                     static_cast<const core::CallExpression&>(expression);
+                const bool dynamic =
+                    call.TypeArgument() &&
+                    call.TypeArgument()->TypeForm() == core::TypeKind::Slice;
                 const NodeId failure = next;
+                if (dynamic) {
+                    next = AddNode({next, failure});
+                    _graph.nodes[next].allocation = &call;
+                }
                 for (auto argument = call.Arguments().rbegin();
                      argument != call.Arguments().rend(); ++argument) {
                     next = BuildExpression(**argument, next);
                 }
-                if (call.TypeArgument()) {
+                if (call.TypeArgument() && !dynamic) {
                     next = AddNode({next, failure});
                     _graph.nodes[next].allocation = &call;
                 }

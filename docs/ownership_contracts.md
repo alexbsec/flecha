@@ -69,11 +69,12 @@ the structure. Fresh construction still goes directly into its final storage.
 
 The initial field implementation supports initialization in `build` and access
 through the structure's `self` methods. Omitted owning fields start null, as other
-raw-pointer fields do. Methods other than `tear` receive only lent access to their
-owning fields. Taking an address of an owning field, replacing a live field,
-extracting ownership outside `tear`, declaration initializers, and direct access
-through other receivers are rejected. These restrictions keep field ownership
-encapsulated until field replacement and extraction have explicit state tracking.
+raw-pointer fields do. Methods other than `tear` ordinarily receive lent access to their
+owning fields. The explicit unsafe `take(self->field)` operation now transfers
+ownership out and sets the field to null, allowing a replacement to be assigned.
+Taking an address of an owning field, replacing a live field, declaration
+initializers, and direct access through other receivers are rejected. Extraction
+invalidates earlier aliases and requires the extracted owner to be discharged. See [dynamic arrays](dynamic_arrays.md) for replacement rules.
 
 ## Checking boundaries
 
@@ -92,5 +93,6 @@ fail before object emission rather than silently losing tracking.
 This does not introduce external-function support, safe heap references, general
 moves, or complete memory-safety verification. Unverified external raw-pointer
 validity, aliasing, nullability, and stack lifetimes remain unsafe obligations.
-Dynamic arrays remain the next storage foundation; these contracts do not yet
-provide variable-sized allocation, initialized-length tracking, or growth rules.
+Runtime-sized zeroed scalar allocation and an `i32` dynamic array are now
+implemented; see [dynamic arrays](dynamic_arrays.md). Partially initialized
+storage and generic element moves remain future work.

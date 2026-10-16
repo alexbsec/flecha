@@ -26,3 +26,7 @@ add_dependencies(llvm_codegen runtime)
 target_compile_definitions(llvm_codegen PRIVATE
     FLECHA_RUNTIME_LIBRARY_PATH="$<TARGET_FILE:runtime>"
 )
+
+if(FLECHA_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    target_compile_definitions(llvm_codegen PRIVATE FLECHA_SANITIZED_RUNTIME=1)
+endif()

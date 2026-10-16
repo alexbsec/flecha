@@ -63,8 +63,10 @@ enum class TokenType {
     Colon,
     SemiColon,
     Hash,
+    At,
 
     // Keywords
+    Module,
     Structure,
     Private,
     Override,

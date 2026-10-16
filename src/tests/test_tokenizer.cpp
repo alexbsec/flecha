@@ -323,7 +323,7 @@ TEST(TokenizerTests, RecordsExactHalfOpenSourceRanges) {
 
 TEST(TokenizerTests, DiagnosticRangesIdentifyInvalidSource) {
     DiagnosticBag diagnostics;
-    std::vector<Token> tokens = Tokenize("i32 @ value", &diagnostics);
+    std::vector<Token> tokens = Tokenize("i32 ` value", &diagnostics);
 
     ASSERT_EQ(diagnostics.Diagnostics().size(), 1);
     const Diagnostic& diagnostic = diagnostics.Diagnostics()[0];
@@ -374,4 +374,13 @@ TEST(TokenizerTests, RecognizesOwnershipContractsAsKeywords) {
     EXPECT_EQ(tokens[1].type, TokenType::Lend);
     EXPECT_EQ(tokens[2].type, TokenType::Identifier);
     EXPECT_EQ(tokens[3].type, TokenType::Identifier);
+}
+
+TEST(TokenizerTests, RecognizesModuleAndImportDirectiveTokens) {
+    const auto tokens = Tokenize("module example; @imports :: root::math;");
+    ASSERT_EQ(tokens.size(), 11);
+    EXPECT_EQ(tokens[0].type, TokenType::Module);
+    EXPECT_EQ(tokens[3].type, TokenType::At);
+    EXPECT_EQ(tokens[4].type, TokenType::Identifier);
+    EXPECT_EQ(tokens[5].type, TokenType::Scope);
 }

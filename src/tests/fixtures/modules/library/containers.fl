@@ -1,0 +1,17 @@
+module containers;
+export structure Box { private i32 value; };
+Box Box::init(i32 value) override {
+    return build Box { self.value = value; };
+}
+i32 Box::get(&const self) { return self->value; }
+private void Box::reset(&self) { self->value = 0; }
+export error ContainerError { Empty }
+export ContainerError status() { return ContainerError.Empty; }
+export unsafe (own *i32, error) allocate() { return new<i32>(42); }
+export unsafe void consume(own *i32 value) { free(value); }
+export structure Owner { own *i32 pointer; };
+unsafe Owner Owner::init(own *i32 pointer) override {
+    return build Owner { self.pointer = pointer; };
+}
+unsafe void Owner::tear(&self) override { free(self->pointer); }
+unsafe i32 Owner::get(&const self) { return *self->pointer; }

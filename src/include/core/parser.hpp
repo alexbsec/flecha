@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string_view>
 #include <vector>
 
@@ -17,9 +18,16 @@ class Parser {
    public:
     Parser(std::vector<Token> tokens, diagnostics::DiagnosticBag& diagnostics);
 
+    void ParseHeader();
+    const std::vector<Import>& Imports() const { return _imports; }
+    void SetImports(std::vector<Import> imports);
     [[nodiscard]] std::unique_ptr<CompilationUnit> Parse();
 
    private:
+    bool _headerParsed = false;
+    std::string _moduleName;
+    std::vector<Import> _imports;
+    std::set<std::string> _importAliases;
     [[nodiscard]] const Token& Current() const;
     [[nodiscard]] const Token& Peek(std::size_t offset) const;
     [[nodiscard]] bool IsAtEnd() const;

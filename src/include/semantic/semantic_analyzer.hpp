@@ -18,6 +18,13 @@ class SemanticAnalyzer final {
     [[nodiscard]] SemanticModel Analyze(const core::CompilationUnit& unit);
 
    private:
+    void SetModule(const std::string& id);
+    void BindImports(const core::CompilationUnit& unit);
+    void ValidateExports(const core::CompilationUnit& unit);
+    std::string TopName(const core::Declaration& declaration,
+                        const std::string& name) const;
+    std::unordered_map<std::string, Scope*> _moduleScopes;
+    std::unordered_set<std::string> _entryModules;
     bool IsSafePlace(const core::Expression& expression) const;
     bool IsReferencePlace(const core::Expression& expression) const;
     SemanticType AnalyzeArray(const core::ArrayExpression& expression,

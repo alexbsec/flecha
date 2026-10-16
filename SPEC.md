@@ -568,6 +568,9 @@ fields, construction limits, examples, and diagnostics.
 ## 14. Memory and runtime model
 
 Flecha should not require a garbage collector. Stack allocation is the ordinary default. The implemented explicit raw allocation API is `new<T>(value)` returning `(*T, error)`, paired with unsafe `free(ptr)`. It uses the system allocation service; custom allocators remain future work.
+Runtime-sized scalar storage uses `new<[]T>(count)` and checked unsafe
+`pointer[index]` access. See [dynamic arrays](docs/dynamic_arrays.md) for the
+implemented limits and the Flecha `I32Array` library.
 On failure, new returns null and `AllocationError.OutOfMemory` without evaluating
 the initializer. Free runs typed teardown and accepts null. See
 [raw allocation](docs/raw_allocation.md) for the unsafe contract and current limits.
@@ -639,7 +642,23 @@ The first backend may emit portable C so the frontend and language semantics can
 
 The compiler should eventually be self-hosted in Flecha, but self-hosting is not an initial milestone.
 
-## 17. Tooling
+## 17. Modules and tooling
+
+Modules declare `module name;`, matching their filename. Import blocks use
+`@imports :: root::path::module :: lib::library::module as alias;`, with a
+multiline form preferred. `root` and `lib` are reserved in import paths.
+Top-level declarations require `export` for access through imports. Exported
+structures bundle non-private member functions; existing field privacy and
+compiler-only tear rules remain unchanged. Directory imports use `root::path::*`
+for immediate module files or `root::path::{first, second}` for selected modules.
+Each imported module retains its namespace. See [modules](docs/modules.md).
+
+Longbow provides project creation, local checking/building, and execution:
+`longbow new hello`, `longbow check`, `longbow build`, and `longbow run`.
+See [Longbow](docs/longbow.md) for its manifest, library scaffolds, and current
+limits. The command set below is a historical tooling roadmap, not the current
+compiler CLI.
+
 
 The intended command-line interface is:
 
@@ -720,7 +739,7 @@ i32 main() {
 
 The following decisions are intentionally not finalized:
 
-- module, import, and visibility syntax;
+- re-exports, cyclic modules, and separately compiled module interfaces;
 - additional declaration forms, including whether to introduce `var`;
 - string literal representation and encoding;
 - slice syntax and array-to-slice conversion;

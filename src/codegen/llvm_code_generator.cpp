@@ -893,6 +893,22 @@ bool LlvmCodeGenerator::DeclareFunctions(
         llvm::Function* function = llvm::Function::Create(
             type, llvm::Function::ExternalLinkage, symbol.Name(), *_module);
         _functions.emplace(&symbol, function);
+        // A Flecha void entry point has a defined successful process status.
+        // Keep its language-level signature and synthesize the C ABI wrapper.
+        if (symbol.Name() == "main" &&
+            symbol.ReturnType().Kind() == semantic::SemanticTypeKind::Void &&
+            symbol.ParameterTypes().empty()) {
+            function->setName("$flecha$main");
+            auto* entryType = llvm::FunctionType::get(
+                llvm::Type::getInt32Ty(_context), false);
+            auto* entry = llvm::Function::Create(
+                entryType, llvm::Function::ExternalLinkage, "main", *_module);
+            llvm::IRBuilder<> builder(
+                llvm::BasicBlock::Create(_context, "entry", entry));
+            builder.CreateCall(function);
+            builder.CreateRet(
+                llvm::ConstantInt::get(llvm::Type::getInt32Ty(_context), 0));
+        }
     }
     return true;
 }
@@ -1868,14 +1884,17 @@ llvm::Value* LlvmCodeGenerator::EmitAddress(
         // Capture the receiver before evaluating the index, and finish the
         // bounds check before deriving an inbounds address or evaluating a
         // store RHS.
+        const bool heap = index.Receiver().Type().Kind() ==
+                          semantic::SemanticTypeKind::Pointer;
         const bool slice =
             index.Receiver().Type().Kind() == semantic::SemanticTypeKind::Slice;
         llvm::Value* descriptor =
-            slice ? EmitExpression(index.Receiver()) : nullptr;
+            (slice || heap) ? EmitExpression(index.Receiver()) : nullptr;
         if (slice && descriptor == nullptr) return nullptr;
         llvm::Value* storage = slice
                                    ? _builder.CreateExtractValue(descriptor, 0)
-                                   : EmitArrayStorage(index.Receiver());
+                               : heap ? descriptor
+                                      : EmitArrayStorage(index.Receiver());
         if (storage == nullptr) return nullptr;
         llvm::Type* sizeType =
             MapType(semantic::SemanticType(semantic::SemanticTypeKind::USize));
@@ -1883,6 +1902,13 @@ llvm::Value* LlvmCodeGenerator::EmitAddress(
             slice ? _builder.CreateExtractValue(descriptor, 1)
                   : llvm::ConstantInt::get(sizeType,
                                            index.Receiver().Type().Length());
+        if (heap) {
+            const auto getCount = _module->getOrInsertFunction(
+                "flecha_runtime_v1_allocation_count",
+                llvm::FunctionType::get(sizeType, {storage->getType()}, false));
+            length =
+                _builder.CreateCall(getCount, {storage}, "allocation.count");
+        }
         llvm::Value* offset =
             index.HasIndex()
                 ? EmitExpression(index.Index())
@@ -1892,7 +1918,7 @@ llvm::Value* LlvmCodeGenerator::EmitAddress(
                        : llvm::ConstantInt::get(sizeType, 0));
         if (offset == nullptr) return nullptr;
         EmitBoundsCheck(_builder.CreateICmpULT(offset, length));
-        if (slice)
+        if (slice || heap)
             return _builder.CreateInBoundsGEP(
                 MapType(*index.Receiver().Type().Target()), storage, offset,
                 "slice.element.address");
@@ -2042,6 +2068,18 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
         case lowering::BoundNodeKind::CallExpression: {
             const lowering::BoundCallExpression& call =
                 static_cast<const lowering::BoundCallExpression&>(expression);
+            if (call.Function().BuiltIn() == semantic::BuiltInFunction::Take) {
+                auto* address = EmitAddress(
+                    static_cast<const lowering::BoundPlaceExpression&>(
+                        *call.Arguments()[0]));
+                if (!address) return nullptr;
+                auto* value = _builder.CreateLoad(MapType(call.Type()), address,
+                                                  "taken.owner");
+                _builder.CreateStore(
+                    llvm::Constant::getNullValue(MapType(call.Type())),
+                    address);
+                return value;
+            }
             if (call.Type().ContainsStructure()) {
                 auto* storage = CreateOwnedValueTemporary(
                     call.Type(), "structure.call.result");
@@ -2327,16 +2365,25 @@ llvm::Value* LlvmCodeGenerator::EmitAllocation(
     llvm::Type* sizeType =
         MapType(semantic::SemanticType(semantic::SemanticTypeKind::USize));
     llvm::Type* pointerType = llvm::PointerType::getUnqual(_context);
+    const bool dynamic = expression.IsDynamic();
+    llvm::Value* count =
+        dynamic ? EmitExpression(expression.Initializer()) : nullptr;
+    if (dynamic && !count) return nullptr;
+    std::vector<llvm::Type*> parameters = {sizeType, sizeType};
+    std::vector<llvm::Value*> arguments = {
+        llvm::ConstantInt::get(
+            sizeType, layout.getTypeAllocSize(element).getFixedValue()),
+        llvm::ConstantInt::get(sizeType,
+                               layout.getABITypeAlign(element).value())};
+    if (dynamic) {
+        parameters.insert(parameters.begin(), sizeType);
+        arguments.insert(arguments.begin(), count);
+    }
     llvm::FunctionCallee allocate = _module->getOrInsertFunction(
-        "flecha_runtime_v1_alloc",
-        llvm::FunctionType::get(pointerType, {sizeType, sizeType}, false));
-    llvm::Value* pointer = _builder.CreateCall(
-        allocate,
-        {llvm::ConstantInt::get(
-             sizeType, layout.getTypeAllocSize(element).getFixedValue()),
-         llvm::ConstantInt::get(sizeType,
-                                layout.getABITypeAlign(element).value())},
-        "allocation");
+        dynamic ? "flecha_runtime_v1_alloc_array" : "flecha_runtime_v1_alloc",
+        llvm::FunctionType::get(pointerType, parameters, false));
+    llvm::Value* pointer =
+        _builder.CreateCall(allocate, arguments, "allocation");
     auto* success = llvm::BasicBlock::Create(_context, "allocation.success",
                                              _currentFunction);
     auto* failure = llvm::BasicBlock::Create(_context, "allocation.failure",
@@ -2348,7 +2395,8 @@ llvm::Value* LlvmCodeGenerator::EmitAllocation(
                               llvm::Constant::getNullValue(pointerType)),
         success, failure);
     _builder.SetInsertPoint(success);
-    if (!EmitInto(expression.Initializer(), pointer, expression.ElementType()))
+    if (!dynamic &&
+        !EmitInto(expression.Initializer(), pointer, expression.ElementType()))
         return nullptr;
     llvm::Value* successful =
         llvm::Constant::getNullValue(MapType(expression.Type()));

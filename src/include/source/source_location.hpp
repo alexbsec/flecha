@@ -1,9 +1,10 @@
 #ifndef FLECHA_SOURCE_SOURCE_LOCATION_HPP
 #define FLECHA_SOURCE_SOURCE_LOCATION_HPP
 
+#include <compare>
 #include <cstddef>
 #include <cstdint>
-#include <compare>
+#include <string>
 
 namespace flecha::source {
 
@@ -13,6 +14,7 @@ struct SourceLocation {
     std::size_t offset = 0;
     std::uint32_t line = 1;
     std::uint32_t column = 1;
+    std::string file;
 
     std::strong_ordering operator<=>(const SourceLocation&) const = default;
 };

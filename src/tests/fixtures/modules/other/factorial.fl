@@ -1,0 +1,2 @@
+module factorial;
+export i32 factorial(i32 n) { return n + 10; }

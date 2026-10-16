@@ -2735,7 +2735,7 @@ TEST(SemanticAllocationTests, TypesNewFreeAndAllocationErrors) {
 TEST(SemanticAllocationTests, RejectsUnsupportedStorageAndInvalidCalls) {
     for (const std::string& body :
          {"new(42);", "new<void>(none);", "new<stringv>(\"view\");",
-          "new<&i32>(none);", "new<[]i32>(none);", "free(42);",
+          "new<&i32>(none);", "new<[]string>(1);", "free(42);",
           "*void p = null; free(p);"}) {
         SCOPED_TRACE(body);
         EXPECT_NE(FindDiagnostic(Analyze("unsafe void f() { " + body + " }"),
@@ -3275,4 +3275,126 @@ TEST(SemanticMemoryTests, ContractSummariesRejectIndirectHandleMutation) {
 TEST(SemanticMemoryTests, ContractsRejectDuplicatedOwnersAndInteriorAliases) {
     EXPECT_TRUE(Analyze("unsafe (own *i32, own *i32) duplicate(own *i32 p) { return (p, p); }").diagnostics.HasErrors());
     EXPECT_TRUE(Analyze("structure Item { i32 n; }; unsafe void consume(own *Item p, lend *i32 inside) { free(p); } unsafe void f() { p,e := new<Item>(Item::init()); if e != none { return; } consume(p, &raw p->n); }").diagnostics.HasErrors());
+}
+
+TEST(SemanticMemoryTests, RuntimeArraysUseCountsAndExistingOwnershipContracts) {
+    auto analysis = Analyze(
+        "unsafe (own *i32, error) make(usize count) { return "
+        "new<[]i32>(count); } "
+        "unsafe i32 read(lend *const i32 p) { if p == null { return 0; } "
+        "return p[0]; } "
+        "unsafe void f(usize count) { p, e := make(count); if e != none { "
+        "return; } "
+        "defer free(p); p[0] = 42; read(p); }");
+    EXPECT_FALSE(analysis.diagnostics.HasErrors());
+}
+
+TEST(SemanticMemoryTests,
+     RuntimeArraysRejectUnsupportedElementsAndInvalidCounts) {
+    for (const std::string source :
+         {"unsafe void f(i32 n) { p, e := new<[]i32>(n); free(p); }",
+          "unsafe void f() { p, e := new<[]i32>(-1); free(p); }",
+          "unsafe void f() { p, e := new<[]string>(2); free(p); }",
+          "unsafe void f() { p, e := new<[]*i32>(2); free(p); }",
+          "unsafe void f() { p, e := new<[]i32>(); }",
+          "void f() { p, e := new<[]i32>(2); }"})
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors()) << source;
+}
+
+TEST(SemanticMemoryTests, RuntimeArrayIndexingRequiresLiveAllocationBases) {
+    for (const std::string source :
+         {"unsafe void f() { p, e := new<[]i32>(2); free(p); p[0] = 1; }",
+          "unsafe void f() { i32 x = 0; p := &raw x; p[0] = 1; }",
+          "unsafe void f() { *i32 p = null; p[0] = 1; }",
+          "unsafe void f() { p, e := new<[]const i32>(2); defer free(p); p[0] "
+          "= 1; }",
+          "unsafe void f() { p, e := new<[]i32>(2); defer free(p); r := &p[0]; "
+          "}",
+          "unsafe void f(*void p) { p[0]; }",
+          "unsafe void f() { p, e := new<const []i32>(2); defer free(p); p[0] "
+          "= 1; }",
+          "void f(*i32 p) { p[0] = 1; }"})
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors()) << source;
+}
+
+TEST(SemanticMemoryTests, RuntimeArrayCountRunsBeforeAllocationFailure) {
+    auto analysis = Analyze(
+        "unsafe usize count(own *i32 p) { free(p); return 3; } "
+        "unsafe void f() { old, e := new<i32>(1); "
+        "p, failure := new<[]i32>(count(old)); free(p); }");
+    EXPECT_FALSE(analysis.diagnostics.HasErrors());
+}
+
+TEST(SemanticMemoryTests, TakeAllowsExplicitFieldReplacementAndNullsTheSlot) {
+    const std::string prefix =
+        "structure Box { own *i32 p; }; "
+        "unsafe void Box::tear(&self) override { free(self->p); } ";
+    for (const std::string body :
+         {"old := take(self->p); free(old); self->p = replacement;",
+          "old := take(self->p); free(old); again := take(self->p); "
+          "free(again); self->p = replacement;"}) {
+        auto result =
+            Analyze(prefix +
+                    "unsafe void Box::replace(&self, own *i32 replacement) { " +
+                    body + " }");
+        for (const auto& diagnostic : result.diagnostics.Diagnostics())
+            ADD_FAILURE() << diagnostic.message;
+    }
+    auto tear = Analyze(
+        "structure Box { own *i32 p; }; unsafe void Box::tear(&self) override "
+        "{ old := take(self->p); free(old); }");
+    EXPECT_FALSE(tear.diagnostics.HasErrors());
+}
+
+TEST(SemanticMemoryTests, TakeRejectsLostOwnersAndAliasesAcrossReplacement) {
+    const std::string prefix =
+        "structure Box { own *i32 p; }; "
+        "unsafe void Box::tear(&self) override { free(self->p); } ";
+    for (const std::string body :
+         {"self->p = replacement;", "take(self->p); self->p = replacement;",
+          "alias := self->p; old := take(self->p); free(old); self->p = "
+          "replacement; *alias = 1;",
+          "old := take(self->p); self->p = old; free(old); free(replacement);",
+          "defer use(self->p); old := take(self->p); free(old); self->p = "
+          "replacement;",
+          "defer take(self->p); free(replacement);"}) {
+        auto result =
+            Analyze(prefix +
+                    "unsafe void use(lend *i32 p) {} "
+                    "unsafe void Box::replace(&self, own *i32 replacement) { " +
+                    body + " }");
+        EXPECT_TRUE(result.diagnostics.HasErrors()) << body;
+    }
+    EXPECT_TRUE(
+        Analyze(prefix +
+                "unsafe void Box::bad(&const self) { free(take(self->p)); }")
+            .diagnostics.HasErrors());
+    EXPECT_TRUE(
+        Analyze(prefix + "unsafe void bad(own *i32 p) { free(take(p)); }")
+            .diagnostics.HasErrors());
+}
+
+TEST(SemanticMemoryTests, MutableOwnerCallsInvalidateFieldAliases) {
+    const std::string prefix =
+        "structure Box { own *i32 p; }; "
+        "unsafe void Box::tear(&self) override { free(self->p); } "
+        "unsafe void Box::reset(&self) { old := take(self->p); free(old); } ";
+    EXPECT_TRUE(Analyze(prefix +
+                        "unsafe void Box::bad(&self) { "
+                        "alias := self->p; self->reset(); *alias = 1; }")
+                    .diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze(prefix + "unsafe void use(lend *i32 p) {} "
+                                 "unsafe void Box::bad(&self) { defer "
+                                 "use(self->p); self->reset(); }")
+                    .diagnostics.HasErrors());
+}
+
+TEST(SemanticMemoryTests, MutableOwnerCallsCannotReceiveTheirFieldAliases) {
+    auto result = Analyze(
+        "structure Box { own *i32 p; }; "
+        "unsafe void Box::tear(&self) override { free(self->p); } "
+        "unsafe void Box::change(&self, lend *i32 alias) { old := "
+        "take(self->p); free(old); *alias = 1; } "
+        "unsafe void Box::bad(&self) { self->change(self->p); }");
+    EXPECT_TRUE(result.diagnostics.HasErrors());
 }

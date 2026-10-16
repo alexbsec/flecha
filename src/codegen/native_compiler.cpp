@@ -130,8 +130,14 @@ bool NativeCompiler::LinkExecutable(const std::string& objectPath,
                     "unable to find the system C linker driver 'cc'");
     }
 
-    const llvm::StringRef arguments[] = {
-        *linker, objectPath, _runtimeLibraryPath, "-o", outputPath};
+    const llvm::StringRef arguments[] = {*linker,
+                                         objectPath,
+                                         _runtimeLibraryPath,
+#ifdef FLECHA_SANITIZED_RUNTIME
+                                         "-fsanitize=address,undefined",
+#endif
+                                         "-o",
+                                         outputPath};
     std::string executionError;
     bool executionFailed = false;
     const int result = llvm::sys::ExecuteAndWait(
