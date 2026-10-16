@@ -12,6 +12,15 @@
 #include <vector>
 
 #include "core/tokenizer.hpp"
+#include "flecha/version.hpp"
+
+#ifndef FLECHA_EXECUTABLE_SUFFIX
+#define FLECHA_EXECUTABLE_SUFFIX ""
+#endif
+
+#ifndef FLECHA_OBJECT_SUFFIX
+#define FLECHA_OBJECT_SUFFIX ".o"
+#endif
 
 namespace fs = std::filesystem;
 namespace {
@@ -167,9 +176,11 @@ std::string Compiler(const char* executable) {
         return configured;
     auto resolved = llvm::sys::findProgramByName(executable);
     fs::path binary = resolved ? fs::path(*resolved) : fs::absolute(executable);
-    const fs::path sibling = binary.parent_path() / "flecha";
+    const fs::path sibling =
+        binary.parent_path() / ("flecha" FLECHA_EXECUTABLE_SUFFIX);
     if (fs::is_regular_file(sibling)) return sibling.string();
-    auto compiler = llvm::sys::findProgramByName("flecha");
+    auto compiler =
+        llvm::sys::findProgramByName("flecha" FLECHA_EXECUTABLE_SUFFIX);
     if (compiler) return *compiler;
     throw std::runtime_error(
         "cannot find flecha; place it beside longbow or set FLECHA_COMPILER");
@@ -186,6 +197,14 @@ int Run(int argc, char** argv) {
         return 1;
     }
     const std::string command = argv[1];
+    if (command == "--version") {
+        if (argc != 2) {
+            Usage();
+            return 1;
+        }
+        std::cout << "longbow " << flecha::VERSION << "\n";
+        return 0;
+    }
     if (command == "--help" || command == "help") {
         Usage();
         return 0;
@@ -227,7 +246,9 @@ int Run(int argc, char** argv) {
         throw std::runtime_error("missing entry module " + entry.string());
     if (command == "run" && !binary)
         throw std::runtime_error("a library cannot be run");
-    const fs::path output = target / (manifest.name + (binary ? "" : ".o"));
+    const fs::path output =
+        target / (manifest.name +
+                  (binary ? FLECHA_EXECUTABLE_SUFFIX : FLECHA_OBJECT_SUFFIX));
     std::vector<std::string> compile{Compiler(argv[0]),
                                      command == "check" ? "check"
                                      : binary           ? "build"

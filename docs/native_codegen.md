@@ -7,9 +7,10 @@ width rather than a compiler-host constant.
 
 `NativeCompiler::EmitObject` runs LLVM's legacy code-emission pass pipeline and
 writes a relocatable object. `NativeCompiler::LinkExecutable` invokes the
-system `cc` driver without a shell, which supplies the platform startup objects
-and standard executable-linking conventions. `BuildExecutable` retains the
-intermediate object beside the executable as `<output>.o`.
+system C++ linker driver without a shell, which supplies the platform startup
+objects and standard executable-linking conventions. Unix hosts prefer `c++`;
+Windows hosts prefer `clang++`. `BuildExecutable` uses a temporary object with
+the host object suffix and removes it after linking.
 
 Commands:
 
@@ -18,9 +19,11 @@ flecha --emit-object program.fl -o program.o
 flecha build program.fl -o program
 ```
 
-The current implementation targets the machine running the compiler. Explicit
-cross-compilation triples, sysroots, runtime libraries, optimization levels,
-and debug information are future work.
+The current implementation targets the machine running the compiler. Installed
+distributions find the version-matched runtime archive relative to the compiler
+executable; `FLECHA_RUNTIME_LIBRARY` provides a development override. Explicit
+cross-compilation triples, sysroots, optimization levels, and debug information
+are future work.
 
 Run the native end-to-end proof with:
 

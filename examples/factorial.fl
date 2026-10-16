@@ -1,7 +1,3 @@
-@imports 
-    :: lib::std::containers
-    :: root::math;
-
 i32 factorial(i32 n) {
     if n <= 1 {
         return 1;

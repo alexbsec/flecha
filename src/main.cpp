@@ -11,6 +11,7 @@
 #include "codegen/llvm_code_generator.hpp"
 #include "codegen/native_compiler.hpp"
 #include "core/module_loader.hpp"
+#include "flecha/version.hpp"
 #include "lowering/lowerer.hpp"
 #include "semantic/semantic_analyzer.hpp"
 
@@ -112,6 +113,10 @@ void PrintUsage(const char* executable) {
 }
 }  // namespace
 int main(int argc, char** argv) {
+    if (argc == 2 && std::string(argv[1]) == "--version") {
+        std::cout << "flecha " << flecha::VERSION << "\n";
+        return 0;
+    }
     if (argc < 3) {
         PrintUsage(argv[0]);
         return 1;

@@ -25,6 +25,9 @@ target_link_libraries(llvm_codegen
 add_dependencies(llvm_codegen runtime)
 target_compile_definitions(llvm_codegen PRIVATE
     FLECHA_RUNTIME_LIBRARY_PATH="$<TARGET_FILE:runtime>"
+    FLECHA_RUNTIME_LIBRARY_NAME="$<TARGET_FILE_NAME:runtime>"
+    FLECHA_RUNTIME_INSTALL_DIRECTORY="${CMAKE_INSTALL_LIBDIR}/flecha"
+    FLECHA_OBJECT_SUFFIX="${CMAKE_CXX_OUTPUT_EXTENSION}"
 )
 
 if(FLECHA_ENABLE_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")

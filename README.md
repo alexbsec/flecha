@@ -19,7 +19,7 @@ The compiler is implemented in modern C++ and currently includes a tokenizer, pa
 - LLVM IR emission and native executable/object generation
 - Human-readable source diagnostics
 - A small package/project workflow through `longbow`
-- Neovim filetype and syntax support
+- Visual Studio Code and Neovim syntax support
 
 ## Quick start
 
@@ -48,6 +48,17 @@ To configure and build directly with CMake:
 cmake -S . -B build -G Ninja -DBUILD_TESTING=OFF
 cmake --build build --parallel
 ```
+
+Create relocatable `.tar.gz` and `.zip` release archives with:
+
+```sh
+cmake --build build --target package
+```
+
+The archives contain the Flecha compiler, Longbow, the runtime and standard
+library, reference documentation, and Visual Studio Code and Neovim support.
+See [`docs/release_0_1.md`](docs/release_0_1.md) for the Linux, Windows, and
+macOS release gates.
 
 ### Check and build a program
 
@@ -80,6 +91,7 @@ The complete command-line form is:
 ```text
 flecha <check|build|--emit-llvm|--emit-object> <input.fl> [-o output]
        [--root source-directory] [--lib name=source-directory ...]
+       [--link object-or-library ...]
 ```
 
 ## A small Flecha program
@@ -189,6 +201,7 @@ std/                    Flecha standard-library source packages
 examples/               Small language and package examples
 docs/                   Feature, implementation, and design documentation
 editors/neovim/         Neovim filetype and syntax support
+editors/vscode/         Visual Studio Code syntax extension
 SPEC.md                 Current language specification draft
 CODE_STYLE.md           C++ and repository style guidance
 CMakeLists.txt          CMake build definition
@@ -198,6 +211,9 @@ Makefile                Convenient build, test, and example targets
 ## Documentation guide
 
 - [`SPEC.md`](SPEC.md) — language goals, syntax, types, and current specification draft
+- [`docs/compiler.md`](docs/compiler.md) — compiler commands, outputs, and installed layout
+- [`docs/longbow.md`](docs/longbow.md) — project manifests, commands, and local dependencies
+- [`docs/release_0_1.md`](docs/release_0_1.md) — v0.1.0 platform contract and release gates
 - [`docs/semantic_analysis.md`](docs/semantic_analysis.md) — name binding, types, scopes, and analysis pipeline
 - [`docs/llvm_codegen.md`](docs/llvm_codegen.md) — current LLVM backend scope and limitations
 - [`docs/modules.md`](docs/modules.md) — modules, imports, and package libraries
@@ -207,6 +223,7 @@ Makefile                Convenient build, test, and example targets
 - [`docs/dynamic_arrays.md`](docs/dynamic_arrays.md) and [`docs/fixed_arrays.md`](docs/fixed_arrays.md) — array features
 - [`docs/error_values.md`](docs/error_values.md) — error declarations and propagation
 - [`docs/enums.md`](docs/enums.md) — nominal enums, defaults, discriminants, and member functions
+- [`editors/vscode/README.md`](editors/vscode/README.md) — Visual Studio Code highlighting setup
 - [`editors/neovim/README.md`](editors/neovim/README.md) — Neovim installation and usage
 
 The documentation intentionally labels proposals and proof-of-concept functionality. When behavior differs between the specification and the compiler, compiler tests and diagnostics are the most reliable description of current behavior.

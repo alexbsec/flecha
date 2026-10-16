@@ -1,0 +1,164 @@
+[
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/build-release/generated -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o CMakeFiles/flecha.dir/src/main.cpp.o -c /home/alexbsec/Projects/flecha/src/main.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/main.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/CMakeFiles/flecha.dir/src/main.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -DFLECHA_EXECUTABLE_SUFFIX=\\\"\\\" -DFLECHA_OBJECT_SUFFIX=\\\".o\\\" -I/home/alexbsec/Projects/flecha/build-release/generated -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o CMakeFiles/longbow.dir/src/longbow/main.cpp.o -c /home/alexbsec/Projects/flecha/src/longbow/main.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/longbow/main.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/CMakeFiles/longbow.dir/src/longbow/main.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/diagnostics/CMakeFiles/diagnostics.dir/diagnostic.cpp.o -c /home/alexbsec/Projects/flecha/src/diagnostics/diagnostic.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/diagnostics/diagnostic.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/diagnostics/CMakeFiles/diagnostics.dir/diagnostic.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/diagnostics/CMakeFiles/diagnostics.dir/diagnostic_bag.cpp.o -c /home/alexbsec/Projects/flecha/src/diagnostics/diagnostic_bag.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/diagnostics/diagnostic_bag.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/diagnostics/CMakeFiles/diagnostics.dir/diagnostic_bag.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/core/CMakeFiles/core.dir/module_loader.cpp.o -c /home/alexbsec/Projects/flecha/src/core/module_loader.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/core/module_loader.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/core/CMakeFiles/core.dir/module_loader.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/core/CMakeFiles/core.dir/parser.cpp.o -c /home/alexbsec/Projects/flecha/src/core/parser.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/core/parser.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/core/CMakeFiles/core.dir/parser.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/core/CMakeFiles/core.dir/tokenizer.cpp.o -c /home/alexbsec/Projects/flecha/src/core/tokenizer.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/core/tokenizer.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/core/CMakeFiles/core.dir/tokenizer.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/core/CMakeFiles/core.dir/core.cpp.o -c /home/alexbsec/Projects/flecha/src/core/core.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/core/core.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/core/CMakeFiles/core.dir/core.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/semantic/CMakeFiles/semantic.dir/allocation_checker.cpp.o -c /home/alexbsec/Projects/flecha/src/semantic/allocation_checker.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/semantic/allocation_checker.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/semantic/CMakeFiles/semantic.dir/allocation_checker.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/semantic/CMakeFiles/semantic.dir/borrow_checker.cpp.o -c /home/alexbsec/Projects/flecha/src/semantic/borrow_checker.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/semantic/borrow_checker.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/semantic/CMakeFiles/semantic.dir/borrow_checker.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/semantic/CMakeFiles/semantic.dir/control_flow_graph.cpp.o -c /home/alexbsec/Projects/flecha/src/semantic/control_flow_graph.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/semantic/control_flow_graph.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/semantic/CMakeFiles/semantic.dir/control_flow_graph.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/semantic/CMakeFiles/semantic.dir/definite_assignment.cpp.o -c /home/alexbsec/Projects/flecha/src/semantic/definite_assignment.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/semantic/definite_assignment.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/semantic/CMakeFiles/semantic.dir/definite_assignment.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/semantic/CMakeFiles/semantic.dir/generic_expander.cpp.o -c /home/alexbsec/Projects/flecha/src/semantic/generic_expander.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/semantic/generic_expander.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/semantic/CMakeFiles/semantic.dir/generic_expander.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/semantic/CMakeFiles/semantic.dir/scope.cpp.o -c /home/alexbsec/Projects/flecha/src/semantic/scope.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/semantic/scope.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/semantic/CMakeFiles/semantic.dir/scope.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/semantic/CMakeFiles/semantic.dir/semantic_analyzer.cpp.o -c /home/alexbsec/Projects/flecha/src/semantic/semantic_analyzer.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/semantic/semantic_analyzer.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/semantic/CMakeFiles/semantic.dir/semantic_analyzer.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/semantic/CMakeFiles/semantic.dir/semantic_model.cpp.o -c /home/alexbsec/Projects/flecha/src/semantic/semantic_model.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/semantic/semantic_model.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/semantic/CMakeFiles/semantic.dir/semantic_model.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/semantic/CMakeFiles/semantic.dir/semantic_type.cpp.o -c /home/alexbsec/Projects/flecha/src/semantic/semantic_type.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/semantic/semantic_type.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/semantic/CMakeFiles/semantic.dir/semantic_type.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/lowering/CMakeFiles/lowering.dir/bound_ir_dumper.cpp.o -c /home/alexbsec/Projects/flecha/src/lowering/bound_ir_dumper.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/lowering/bound_ir_dumper.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/lowering/CMakeFiles/lowering.dir/bound_ir_dumper.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/lowering/CMakeFiles/lowering.dir/lowerer.cpp.o -c /home/alexbsec/Projects/flecha/src/lowering/lowerer.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/lowering/lowerer.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/lowering/CMakeFiles/lowering.dir/lowerer.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -fPIC -o src/runtime/CMakeFiles/runtime.dir/runtime.cpp.o -c /home/alexbsec/Projects/flecha/src/runtime/runtime.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/runtime/runtime.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/runtime/CMakeFiles/runtime.dir/runtime.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -fPIC -o src/runtime/CMakeFiles/runtime.dir/allocation.cpp.o -c /home/alexbsec/Projects/flecha/src/runtime/allocation.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/runtime/allocation.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/runtime/CMakeFiles/runtime.dir/allocation.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -fPIC -o src/runtime/CMakeFiles/runtime.dir/filesystem.cpp.o -c /home/alexbsec/Projects/flecha/src/runtime/filesystem.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/runtime/filesystem.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/runtime/CMakeFiles/runtime.dir/filesystem.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -DFLECHA_OBJECT_SUFFIX=\\\".o\\\" -DFLECHA_RUNTIME_INSTALL_DIRECTORY=\\\"lib/flecha\\\" -DFLECHA_RUNTIME_LIBRARY_NAME=\\\"libflecha_runtime.a\\\" -DFLECHA_RUNTIME_LIBRARY_PATH=\\\"/home/alexbsec/Projects/flecha/build-release/src/runtime/libflecha_runtime.a\\\" -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/codegen/CMakeFiles/llvm_codegen.dir/llvm_code_generator.cpp.o -c /home/alexbsec/Projects/flecha/src/codegen/llvm_code_generator.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/codegen/llvm_code_generator.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/codegen/CMakeFiles/llvm_codegen.dir/llvm_code_generator.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -DFLECHA_OBJECT_SUFFIX=\\\".o\\\" -DFLECHA_RUNTIME_INSTALL_DIRECTORY=\\\"lib/flecha\\\" -DFLECHA_RUNTIME_LIBRARY_NAME=\\\"libflecha_runtime.a\\\" -DFLECHA_RUNTIME_LIBRARY_PATH=\\\"/home/alexbsec/Projects/flecha/build-release/src/runtime/libflecha_runtime.a\\\" -I/home/alexbsec/Projects/flecha/src/include -O3 -DNDEBUG -std=c++23 -o src/codegen/CMakeFiles/llvm_codegen.dir/native_compiler.cpp.o -c /home/alexbsec/Projects/flecha/src/codegen/native_compiler.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/codegen/native_compiler.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/codegen/CMakeFiles/llvm_codegen.dir/native_compiler.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -O3 -DNDEBUG -std=c++23 -o src/memory/CMakeFiles/memory.dir/memory.cpp.o -c /home/alexbsec/Projects/flecha/src/memory/memory.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/memory/memory.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/memory/CMakeFiles/memory.dir/memory.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -O3 -DNDEBUG -std=c++23 -o src/utils/CMakeFiles/utils.dir/utils.cpp.o -c /home/alexbsec/Projects/flecha/src/utils/utils.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/utils/utils.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/utils/CMakeFiles/utils.dir/utils.cpp.o"
+},
+{
+  "directory": "/home/alexbsec/Projects/flecha/build-release",
+  "command": "/usr/bin/c++ -O3 -DNDEBUG -std=c++23 -o src/std/CMakeFiles/flecha_std.dir/std.cpp.o -c /home/alexbsec/Projects/flecha/src/std/std.cpp",
+  "file": "/home/alexbsec/Projects/flecha/src/std/std.cpp",
+  "output": "/home/alexbsec/Projects/flecha/build-release/src/std/CMakeFiles/flecha_std.dir/std.cpp.o"
+}
+]

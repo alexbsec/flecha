@@ -1,0 +1,86 @@
+# Generics
+
+Flecha implements compile-time specialization of functions and structures. Type
+parameters are ordinary identifiers declared between `<` and `>`; `T` is not a
+keyword or a wildcard type. Every use supplies explicit concrete type arguments.
+
+```flecha
+T identity<T>(T value) { return value; }
+(A, B) pair<A, B>(A first, B second) { return (first, second); }
+
+structure Box<T> { T value; };
+T Box<T>::get(&const self) { return self->value; }
+void Box<T>::set(&self, T value) { self->value = value; }
+
+i32 main() {
+    box := Box<i32>::init();
+    box.set(identity<i32>(42));
+    return box.get();
+}
+```
+
+A method repeats its owner's parameter names in the same order. It may declare
+additional parameters: `U Box<T>::convert<U>(&const self)`. Such a method is called
+as `box.convert<i32>()`. Lifecycle methods cannot add type parameters of their
+own. Method declarations remain outside the structure body.
+
+## Types and references
+
+Each generic declaration and ordered argument list identifies one specialization.
+`Box<i32>` and `Box<f64>` are different types; repeated `Box<i32>` uses share a
+type, including across imports. Nested applications such as `Box<Box<i32>>` work.
+Concrete type arguments can include pointers, arrays, slices, tuples, and named
+types, subject to the ordinary rules at each substituted use.
+
+Generic functions can take `&T` and `&const T` parameters. Reference storage rules
+are unchanged: a structure field cannot store a reference, so a `Box<&const i32>`
+whose field is `T` is invalid. References take neither `own` nor `lend`.
+Raw pointers alone still carry no ownership contract; generic `own *T` and
+`lend *T` declarations undergo the existing ownership analysis.
+
+`const` controls mutation. It does not make a resource copyable. Structures with
+unsafe `tear` remain immovable and noncopyable, and `tear` remains callable only
+by the compiler. Instantiation does not bypass borrowing, allocation checking,
+unsafe permissions, visibility, or lifecycle rules.
+
+## Checking and modules
+
+Templates are parsed when loaded. Parameter-name collisions, malformed generic
+declarations, and private types exposed by exported generic signatures are
+rejected even without an instantiation. Concrete signatures and bodies are
+checked when instantiated. Operations must be valid for the supplied types;
+there are no named constraints or traits in this first version. Instantiating a
+structure also checks its ordinary methods. Methods with additional type
+parameters are checked when explicitly instantiated on their actual receiver.
+
+Export and import rules match ordinary declarations. A specialization resolves
+helpers in the defining module, while argument types retain their identity from
+the caller's module. Importing a structure includes its public methods and
+preserves private-member restrictions.
+
+Ordinary recursive calls to the same specialization are supported. Expanding
+recursion is bounded: specialization permits at most 64 levels of instantiation
+ancestry, 2,048 generated declarations, and 1,000,000 generated tokens per
+compilation. Exceeding a budget is an error, not permission to emit unchecked
+code. Invalid generic applications use `FLECHA-S0054`; errors in instantiated
+code include instantiation context.
+
+In expressions, a syntactically valid `<types>` followed by `(` or, for a type
+name, `::` is a type application. Parenthesize comparisons when their token
+sequence would otherwise have that form. Ordinary field comparisons such as
+`box.value < limit` remain comparisons.
+
+## Compiler implementation and scope
+
+The parser retains template tokens and identifies type parameter substitution
+sites through the AST. A pre-semantic expansion pass materializes concrete
+AST declarations, caches specializations, and preserves source/module identity.
+The normal semantic, allocation, lowering, and native code generation passes
+then process those declarations. Generic templates themselves emit no code.
+
+There is no argument inference, default type argument, variadic parameter pack,
+constant generic parameter, user specialization override, or separate compiled
+generic interface yet. The standard library provides [`RawArray<T>`](dynamic_arrays.md),
+implemented in Flecha. Its runtime storage currently supports numeric, boolean,
+and character elements; pointers and structures are not yet supported. Element
+restrictions are enforced when the relevant generic operations are instantiated.

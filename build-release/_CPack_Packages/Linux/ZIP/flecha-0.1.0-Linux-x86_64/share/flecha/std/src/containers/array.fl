@@ -1,0 +1,51 @@
+module array;
+
+@imports
+    :: root::containers::raw_array
+    :: root::containers::errors;
+
+export structure Array<T> {
+    private raw_array::RawArray<T> inner; 
+};
+
+usize Array<T>::len(&const self) {
+    return self->inner.len();
+}
+
+usize Array<T>::capacity(&const self) {
+    return self->inner.capacity();
+}
+
+error Array<T>::reserve(&self, usize capacity) {
+    unsafe {
+        return self->inner.reserve(capacity);
+    }
+}
+
+error Array<T>::push(&self, T value) {
+    unsafe {
+        return self->inner.push(value);
+    }
+}
+
+(T, error) Array<T>::get(&const self, usize index) {
+    unsafe {
+        return self->inner.get(index);
+    }
+}
+
+error Array<T>::set(&self, usize index, T value) {
+    unsafe {
+        return self->inner.set(index, value);
+    }
+}
+
+(T, error) Array<T>::pop(&self) {
+    unsafe {
+        return self->inner.pop();
+    }
+}
+
+void Array<T>::clear(&self) {
+    self->inner.clear();
+}

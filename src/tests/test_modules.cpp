@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-#include <unistd.h>
 
 #include <atomic>
 #include <filesystem>
@@ -17,8 +16,8 @@ class ModuleTests : public ::testing::Test {
     void SetUp() override {
         static std::atomic<unsigned> sequence{0};
         root = fs::temp_directory_path() /
-               ("flecha_modules_" + std::to_string(::getpid()) + "_" +
-                std::to_string(sequence++));
+               ("flecha_modules_" + std::to_string(sequence++));
+        fs::remove_all(root);
         fs::create_directories(root);
     }
     void TearDown() override { fs::remove_all(root); }
@@ -176,7 +175,9 @@ TEST_F(ModuleTests, DistinguishesErrorFamiliesWithIdenticalNames) {
 TEST_F(ModuleTests, RejectsSourceRootEscapesAndConflictingRoots) {
     Write("outside.fl", "module outside; export i32 value() { return 1; }");
     fs::create_directories(root / "library");
-    fs::create_symlink(root / "outside.fl", root / "library/outside.fl");
+    std::error_code error;
+    fs::create_symlink(root / "outside.fl", root / "library/outside.fl", error);
+    if (error) GTEST_SKIP() << "symbolic links are unavailable: " << error;
     Write("main.fl",
           "module main; @imports :: lib::test::outside; void main() {}");
     EXPECT_NE(Check().find("escapes its source root"), std::string::npos);
@@ -253,7 +254,9 @@ TEST_F(ModuleTests, WildcardsRejectInvalidNamesAndEscapingSymlinks) {
     fs::remove(root / "math/bad-name.fl");
     Write("outside.fl", "module outside; export i32 value() { return 42; }");
     fs::create_directories(root / "library");
-    fs::create_symlink(root / "outside.fl", root / "library/outside.fl");
+    std::error_code error;
+    fs::create_symlink(root / "outside.fl", root / "library/outside.fl", error);
+    if (error) GTEST_SKIP() << "symbolic links are unavailable: " << error;
     Write("main.fl", "module main; @imports :: lib::test::*; void main() {}");
     EXPECT_NE(Check().find("escapes its source root"), std::string::npos);
 }
@@ -319,7 +322,9 @@ TEST_F(ModuleTests, OrdinaryExportsCanExposePublicSpecializations) {
         export structure Box<T> { T value; };
         export Box<i32> make() { return Box<i32>::init(); }
     )");
-    Write("main.fl", "module main; @imports :: root::box; i32 main() { box::Box<i32> b = box::make(); return b.value; }");
+    Write("main.fl",
+          "module main; @imports :: root::box; i32 main() { box::Box<i32> b = "
+          "box::make(); return b.value; }");
     EXPECT_EQ(Check(), "");
     Write("box.fl", R"(module box;
         structure Secret { i32 value; };

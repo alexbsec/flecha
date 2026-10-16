@@ -29,6 +29,22 @@ target_link_libraries(test_flecha
 include(GoogleTest)
 gtest_discover_tests(test_flecha DISCOVERY_MODE PRE_TEST)
 
+add_test(NAME CliTests.FlechaVersion COMMAND $<TARGET_FILE:flecha> --version)
+set_tests_properties(CliTests.FlechaVersion PROPERTIES
+    PASS_REGULAR_EXPRESSION "^flecha ${PROJECT_VERSION}"
+)
+add_test(NAME CliTests.LongbowVersion COMMAND $<TARGET_FILE:longbow> --version)
+set_tests_properties(CliTests.LongbowVersion PROPERTIES
+    PASS_REGULAR_EXPRESSION "^longbow ${PROJECT_VERSION}"
+)
+
+add_test(NAME EditorTests.VSCodeManifest
+    COMMAND ${CMAKE_COMMAND}
+        -DEDITOR_ROOT=${PROJECT_SOURCE_DIR}/editors/vscode
+        -DPROJECT_VERSION=${PROJECT_VERSION}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_vscode.cmake
+)
+
 add_test(
     NAME NativeRuntimeTests.PrintsEveryPrintableType
     COMMAND ${CMAKE_COMMAND}

@@ -1,12 +1,5 @@
 #include "codegen/native_compiler.hpp"
 
-#include <memory>
-#include <optional>
-#include <string>
-#include <system_error>
-#include <utility>
-#include <vector>
-
 #include <llvm/ADT/SmallString.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
@@ -21,17 +14,81 @@
 #include <llvm/TargetParser/Host.h>
 #include <llvm/TargetParser/Triple.h>
 
-#include "codegen/llvm_code_generator.hpp"
+#include <cstdlib>
+#include <filesystem>
+#include <memory>
+#include <optional>
+#include <string>
+#include <system_error>
+#include <utility>
+#include <vector>
 
-namespace flecha::codegen {
+#include "codegen/llvm_code_generator.hpp"
 
 #ifndef FLECHA_RUNTIME_LIBRARY_PATH
 #define FLECHA_RUNTIME_LIBRARY_PATH ""
 #endif
 
+#ifndef FLECHA_RUNTIME_LIBRARY_NAME
+#define FLECHA_RUNTIME_LIBRARY_NAME ""
+#endif
+
+#ifndef FLECHA_RUNTIME_INSTALL_DIRECTORY
+#define FLECHA_RUNTIME_INSTALL_DIRECTORY "lib/flecha"
+#endif
+
+#ifndef FLECHA_OBJECT_SUFFIX
+#define FLECHA_OBJECT_SUFFIX ".o"
+#endif
+
+namespace {
+
+void MainExecutableAnchor() {}
+
+std::string DefaultRuntimeLibraryPath() {
+    if (const char* configured = std::getenv("FLECHA_RUNTIME_LIBRARY")) {
+        if (*configured != '\0') return configured;
+    }
+
+    const std::filesystem::path executable = llvm::sys::fs::getMainExecutable(
+        nullptr, reinterpret_cast<void*>(&MainExecutableAnchor));
+    if (!executable.empty()) {
+        const std::filesystem::path installed =
+            executable.parent_path().parent_path() /
+            FLECHA_RUNTIME_INSTALL_DIRECTORY / FLECHA_RUNTIME_LIBRARY_NAME;
+        if (std::filesystem::is_regular_file(installed))
+            return installed.string();
+    }
+
+    const std::filesystem::path buildPath = FLECHA_RUNTIME_LIBRARY_PATH;
+    if (!buildPath.empty() && std::filesystem::is_regular_file(buildPath))
+        return buildPath.string();
+
+    return buildPath.string();
+}
+
+std::optional<std::string> FindLinkerDriver() {
+#ifdef _WIN32
+    constexpr const char* CANDIDATES[] = {"clang++.exe", "clang++", "c++.exe",
+                                          "c++"};
+#else
+    constexpr const char* CANDIDATES[] = {"c++", "clang++", "g++"};
+#endif
+    for (const char* candidate : CANDIDATES) {
+        const llvm::ErrorOr<std::string> path =
+            llvm::sys::findProgramByName(candidate);
+        if (path) return *path;
+    }
+    return std::nullopt;
+}
+
+}  // namespace
+
+namespace flecha::codegen {
+
 NativeCompiler::NativeCompiler(std::string runtimeLibraryPath)
     : _runtimeLibraryPath(runtimeLibraryPath.empty()
-                              ? FLECHA_RUNTIME_LIBRARY_PATH
+                              ? DefaultRuntimeLibraryPath()
                               : std::move(runtimeLibraryPath)) {
     if (llvm::InitializeNativeTarget() ||
         llvm::InitializeNativeTargetAsmPrinter()) {
@@ -56,18 +113,18 @@ NativeCompiler::NativeCompiler(std::string runtimeLibraryPath)
     _targetMachine.reset(target->createTargetMachine(
         triple, "generic", "", options, llvm::Reloc::PIC_));
     if (_targetMachine == nullptr) {
-        Fail(diagnostics::DiagnosticCode::NativeTargetUnavailable,
-             "unable to create LLVM target machine for '" + _targetTriple +
-                 "'");
+        Fail(
+            diagnostics::DiagnosticCode::NativeTargetUnavailable,
+            "unable to create LLVM target machine for '" + _targetTriple + "'");
     }
 }
 
 bool NativeCompiler::Fail(diagnostics::DiagnosticCode code,
                           std::string message) {
     _error = std::move(message);
-    _diagnostic = diagnostics::Diagnostic{
-        code, diagnostics::DiagnosticSeverity::Error, _error,
-        source::SourceRange{}};
+    _diagnostic =
+        diagnostics::Diagnostic{code, diagnostics::DiagnosticSeverity::Error,
+                                _error, source::SourceRange{}};
     return false;
 }
 
@@ -92,8 +149,7 @@ bool NativeCompiler::EmitObject(const lowering::BoundProgram& program,
     }
 
     std::error_code fileError;
-    llvm::raw_fd_ostream output(objectPath, fileError,
-                                llvm::sys::fs::OF_None);
+    llvm::raw_fd_ostream output(objectPath, fileError, llvm::sys::fs::OF_None);
     if (fileError) {
         return Fail(diagnostics::DiagnosticCode::ObjectEmissionFailed,
                     "unable to open object file '" + objectPath +
@@ -101,9 +157,9 @@ bool NativeCompiler::EmitObject(const lowering::BoundProgram& program,
     }
 
     llvm::legacy::PassManager passManager;
-    if (_targetMachine->addPassesToEmitFile(
-            passManager, output, nullptr,
-            llvm::CodeGenFileType::ObjectFile, false)) {
+    if (_targetMachine->addPassesToEmitFile(passManager, output, nullptr,
+                                            llvm::CodeGenFileType::ObjectFile,
+                                            false)) {
         return Fail(diagnostics::DiagnosticCode::ObjectEmissionFailed,
                     "LLVM target cannot emit object files");
     }
@@ -127,14 +183,13 @@ bool NativeCompiler::LinkExecutable(
                     "Flecha runtime library was not found at '" +
                         _runtimeLibraryPath + "'");
     }
-    const llvm::ErrorOr<std::string> linker =
-        llvm::sys::findProgramByName("c++");
-    if (!linker) {
+    const std::optional<std::string> linker = FindLinkerDriver();
+    if (!linker.has_value()) {
         return Fail(diagnostics::DiagnosticCode::LinkerFailed,
-                    "unable to find the system C++ linker driver 'c++'");
+                    "unable to find a supported system C++ linker driver");
     }
 
-    std::vector<std::string> ownedArguments{*linker, objectPath};
+    std::vector<std::string> ownedArguments{linker.value(), objectPath};
     ownedArguments.insert(ownedArguments.end(), linkInputs.begin(),
                           linkInputs.end());
     ownedArguments.push_back(_runtimeLibraryPath);
@@ -150,8 +205,8 @@ bool NativeCompiler::LinkExecutable(
     std::string executionError;
     bool executionFailed = false;
     const int result =
-        llvm::sys::ExecuteAndWait(*linker, arguments, std::nullopt, {}, 0, 0,
-                                  &executionError, &executionFailed);
+        llvm::sys::ExecuteAndWait(linker.value(), arguments, std::nullopt, {},
+                                  0, 0, &executionError, &executionFailed);
     if (executionFailed || result != 0) {
         std::string message =
             "system linker failed with exit code " + std::to_string(result);
@@ -167,7 +222,7 @@ bool NativeCompiler::BuildExecutable(
     const std::string& outputPath, const std::vector<std::string>& linkInputs) {
     llvm::SmallString<256> objectPath;
     const std::error_code temporaryError = llvm::sys::fs::createUniqueFile(
-        outputPath + ".flecha-%%%%%%.o", objectPath);
+        outputPath + ".flecha-%%%%%%" FLECHA_OBJECT_SUFFIX, objectPath);
     if (temporaryError) {
         return Fail(diagnostics::DiagnosticCode::ObjectEmissionFailed,
                     "unable to create temporary object for '" + outputPath +

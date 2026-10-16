@@ -4,6 +4,10 @@ Longbow is Flecha's project tool. The initial binary creates program and library
 projects, checks/builds local source, and runs executables. It delegates language
 semantics and import resolution to `flecha`.
 
+Longbow and the compiler are versioned together. `longbow --version` prints the
+release version. Flecha 0.1.0 packages ship both tools; keeping them together is
+the supported setup on Linux, Windows, and macOS.
+
 Build both tools with `make build`. They are produced as `build/longbow` and
 `build/flecha`. Keep them together, put `flecha` on PATH, or set `FLECHA_COMPILER`
 to the compiler executable. This bootstrap implementation is C++; moving Longbow
@@ -47,7 +51,7 @@ library scaffolds also have valid importable module names.
 | `longbow new NAME --lib` | Create a library with an exported example function |
 | `longbow init [--lib]` | Scaffold the current existing directory without overwriting source or a manifest |
 | `longbow check` | Load and check source and its reachable imports without emitting artifacts |
-| `longbow build` | Compile a program, or emit an object for a library |
+| `longbow build` | Compile a program, or emit a host-native object for a library |
 | `longbow run -- ARGS` | Build, then run the program and propagate its exit status |
 | `longbow clean` | Remove the project's generated `target` directory |
 

@@ -1,0 +1,28 @@
+file(READ "${EDITOR_ROOT}/package.json" manifest)
+string(JSON packageVersion GET "${manifest}" version)
+if(NOT packageVersion STREQUAL PROJECT_VERSION)
+    message(FATAL_ERROR
+        "VS Code extension version ${packageVersion} does not match ${PROJECT_VERSION}")
+endif()
+
+string(JSON languageId GET "${manifest}" contributes languages 0 id)
+string(JSON grammarScope GET "${manifest}" contributes grammars 0 scopeName)
+if(NOT languageId STREQUAL "flecha" OR NOT grammarScope STREQUAL "source.flecha")
+    message(FATAL_ERROR "VS Code manifest does not register the Flecha language")
+endif()
+
+foreach(file IN ITEMS language-configuration.json syntaxes/flecha.tmLanguage.json)
+    file(READ "${EDITOR_ROOT}/${file}" json)
+    string(JSON jsonType TYPE "${json}")
+    if(NOT jsonType STREQUAL "OBJECT")
+        message(FATAL_ERROR "${file} must contain a JSON object")
+    endif()
+endforeach()
+
+file(READ "${EDITOR_ROOT}/syntaxes/flecha.tmLanguage.json" grammar)
+foreach(required IN ITEMS enum match "=>")
+    string(FIND "${grammar}" "${required}" position)
+    if(position EQUAL -1)
+        message(FATAL_ERROR "VS Code grammar does not cover ${required}")
+    endif()
+endforeach()

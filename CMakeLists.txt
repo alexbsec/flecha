@@ -1,8 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(Flecha LANGUAGES C CXX)
+project(Flecha VERSION 0.1.0 LANGUAGES C CXX)
 
 include(CTest)
+include(GNUInstallDirs)
+
+configure_file(
+    src/include/flecha/version.hpp.in
+    ${PROJECT_BINARY_DIR}/generated/flecha/version.hpp
+    @ONLY
+)
 
 option(FLECHA_ENABLE_SANITIZERS
     "Build Flecha with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
@@ -42,6 +49,7 @@ add_subdirectory(src/utils)
 add_subdirectory(src/std)
 
 add_executable(flecha src/main.cpp)
+target_include_directories(flecha PRIVATE ${PROJECT_BINARY_DIR}/generated)
 target_link_libraries(flecha
     PRIVATE
         flecha_project_options
@@ -57,11 +65,42 @@ target_link_libraries(flecha
 )
 
 add_executable(longbow src/longbow/main.cpp)
+target_include_directories(longbow PRIVATE ${PROJECT_BINARY_DIR}/generated)
 target_link_libraries(longbow PRIVATE flecha_project_options llvm_codegen LLVM)
+target_compile_definitions(longbow PRIVATE
+    FLECHA_EXECUTABLE_SUFFIX="${CMAKE_EXECUTABLE_SUFFIX}"
+    FLECHA_OBJECT_SUFFIX="${CMAKE_CXX_OUTPUT_EXTENSION}"
+)
 add_dependencies(longbow flecha)
+
+install(TARGETS flecha longbow
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+install(TARGETS runtime
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/flecha
+)
+install(DIRECTORY std/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/flecha/std
+    FILES_MATCHING PATTERN "*.fl"
+)
+install(DIRECTORY editors/neovim/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/flecha/editors/neovim
+    PATTERN "tests" EXCLUDE
+)
+install(DIRECTORY editors/vscode/
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/flecha/editors/vscode
+)
+install(FILES README.md SPEC.md LICENSE
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+)
+install(DIRECTORY docs/
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}/reference
+    FILES_MATCHING PATTERN "*.md"
+)
 
 if(BUILD_TESTING)
     include(FetchContent)
+    set(INSTALL_GTEST OFF CACHE BOOL "Do not install Flecha's test dependency" FORCE)
     FetchContent_Declare(
         googletest
         URL https://github.com/google/googletest/archive/refs/tags/release-1.12.1.zip
@@ -71,3 +110,12 @@ if(BUILD_TESTING)
 
     add_subdirectory(src/tests)
 endif()
+
+set(CPACK_PACKAGE_NAME "Flecha")
+set(CPACK_PACKAGE_VENDOR "Flecha")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_FILE_NAME
+    "flecha-${PROJECT_VERSION}-${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}"
+)
+set(CPACK_GENERATOR "TGZ;ZIP")
+include(CPack)
