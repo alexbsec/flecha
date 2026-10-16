@@ -22,6 +22,9 @@ if(WIN32)
     # that are intentionally absent. Stop dependency traversal at the Windows
     # system directories so the verifier only audits redistributable DLLs.
     list(APPEND runtimeDependencyFilters
+        PRE_EXCLUDE_REGEXES
+        "^api-ms-win-.*"
+        "^ext-ms-win-.*"
         POST_EXCLUDE_REGEXES
         "[/\\\\][Ww][Ii][Nn][Dd][Oo][Ww][Ss][/\\\\]([Ss][Yy][Ss][Tt][Ee][Mm]32|[Ss][Yy][Ss][Ww][Oo][Ww]64)[/\\\\]"
     )
