@@ -1,5 +1,12 @@
 find_package(LLVM REQUIRED CONFIG)
 
+# The top-level install rules use these directories to make release archives
+# independent of the LLVM installation present on the build runner.
+set(FLECHA_LLVM_RUNTIME_DIRS
+    "${LLVM_LIBRARY_DIRS};${LLVM_TOOLS_BINARY_DIR}"
+    PARENT_SCOPE
+)
+
 add_library(llvm_codegen STATIC
     llvm_code_generator.cpp
     native_compiler.cpp

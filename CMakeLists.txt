@@ -73,9 +73,46 @@ target_compile_definitions(longbow PRIVATE
 )
 add_dependencies(longbow flecha)
 
+if(UNIX AND NOT APPLE)
+    # BundleUtilities places non-system shared libraries beside the installed
+    # executables. Make the Linux loader search that relocatable directory.
+    set_target_properties(flecha longbow PROPERTIES INSTALL_RPATH "$ORIGIN")
+endif()
+
 install(TARGETS flecha longbow
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
+
+# Make release archives runnable without the LLVM installation used by the
+# build runner. BundleUtilities copies LLVM and its non-system dependencies;
+# on macOS it also rewrites absolute Homebrew install names, and on Windows it
+# places the required DLLs beside the executables.
+install(CODE "
+    include(BundleUtilities)
+    set(BU_CHMOD_BUNDLE_ITEMS TRUE)
+    function(gp_resolved_file_type_override resolved_file type_var)
+        get_filename_component(_dependency_name \"\${resolved_file}\" NAME)
+        if(_dependency_name MATCHES \"^libLLVM([.-]|$)\")
+            if(APPLE)
+                set(\${type_var} embedded PARENT_SCOPE)
+            else()
+                set(\${type_var} local PARENT_SCOPE)
+            endif()
+        endif()
+    endfunction()
+    function(gp_item_default_embedded_path_override item path_var)
+        set(\${path_var} \"@executable_path\" PARENT_SCOPE)
+    endfunction()
+    set(_flecha_install_bin
+        \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}\")
+    set(_flecha_dependency_dirs \"${FLECHA_LLVM_RUNTIME_DIRS}\")
+    fixup_bundle(
+        \"\${_flecha_install_bin}/flecha${CMAKE_EXECUTABLE_SUFFIX}\"
+        \"\"
+        \"\${_flecha_dependency_dirs}\"
+    )
+")
+
 install(TARGETS runtime
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}/flecha
 )
@@ -90,7 +127,7 @@ install(DIRECTORY editors/neovim/
 install(DIRECTORY editors/vscode/
     DESTINATION ${CMAKE_INSTALL_DATADIR}/flecha/editors/vscode
 )
-install(FILES README.md SPEC.md LICENSE
+install(FILES README.md CONTRIBUTING.md CODE_STYLE.md SPEC.md LICENSE
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
 install(DIRECTORY docs/

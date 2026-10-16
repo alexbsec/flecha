@@ -55,8 +55,9 @@ Create relocatable `.tar.gz` and `.zip` release archives with:
 cmake --build build --target package
 ```
 
-The archives contain the Flecha compiler, Longbow, the runtime and standard
-library, reference documentation, and Visual Studio Code and Neovim support.
+The archives contain the Flecha compiler, Longbow, their required shared
+runtime dependencies, the Flecha runtime and standard library, reference
+documentation, and Visual Studio Code and Neovim support.
 See [`docs/release_0_1.md`](docs/release_0_1.md) for the Linux, Windows, and
 macOS release gates.
 
@@ -242,9 +243,10 @@ The working tree may contain experimental language work, so changes should prese
 
 ## Contributing
 
-Contributions are welcome. For language changes, start by describing the syntax, typing, diagnostics, runtime/code-generation implications, and compatibility impact. Update the appropriate specification or design document and add examples or regression tests for implemented behavior.
-
-Please read [`CODE_STYLE.md`](CODE_STYLE.md) before changing C++ code. This project is released under the license in [`LICENSE`](LICENSE).
+Contributions are welcome. Please read [`CONTRIBUTING.md`](CONTRIBUTING.md)
+before opening a pull request, including the project's human-authorship and
+AI-assisted contribution policy. C++ changes also follow
+[`CODE_STYLE.md`](CODE_STYLE.md).
 
 ## License
 

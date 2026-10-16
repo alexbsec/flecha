@@ -11,6 +11,7 @@ Each platform archive contains:
 
 - the [`flecha` compiler](compiler.md);
 - the [`longbow` project tool](longbow.md);
+- the version-matched LLVM shared runtime and its non-system dependencies;
 - the version-matched native runtime archive;
 - the Flecha standard-library source packages;
 - Visual Studio Code syntax highlighting and language configuration;
@@ -55,8 +56,9 @@ a native Flecha program, and complete the Longbow `new`, `check`, `build`, and
 
 ## Distribution and editor gates
 
-- Release archives contain the compiler, Longbow, runtime, standard library,
-  editor bundles, license, and documentation.
+- Release archives contain the compiler, Longbow, their shared runtime
+  dependencies, the Flecha runtime, standard library, editor bundles, license,
+  and documentation.
 - The Visual Studio Code manifest and TextMate grammar are validated in tests.
 - The Neovim syntax test passes, and its installed directory can be added to
   `runtimepath` without the source checkout.
@@ -101,11 +103,9 @@ remaining work is:
    suffixes.
 4. Replace or conditionally adapt Unix-only test fixtures that use `fork`,
    `<unistd.h>`, GNU linker wrapping, and symlink assumptions.
-5. Decide whether release archives bundle LLVM shared libraries or require a
-   separately installed, version-matched LLVM distribution.
-6. Reconcile the specification and backend documentation with the exact
+5. Reconcile the specification and backend documentation with the exact
    v0.1.0 feature set and limitations.
-7. Package the VS Code directory as a `.vsix` and document one-command editor
+6. Package the VS Code directory as a `.vsix` and document one-command editor
    installation on every platform.
 
 Package registries, remote dependencies, an editor language server, a
