@@ -59,7 +59,8 @@ class LlvmCodeGenerator final {
 
     bool EmitInto(const lowering::BoundExpression& expression,
                   llvm::Value* destination, semantic::SemanticType type);
-    bool EmitDefaultInto(llvm::Value* destination, semantic::SemanticType type);
+    bool EmitDefaultInto(llvm::Value* destination, semantic::SemanticType type,
+                         bool semanticZero);
     void EmitDestroyAt(llvm::Value* storage, semantic::SemanticType type);
     void EmitArrayElements(llvm::Value* storage, semantic::SemanticType type,
                            bool reverse,
@@ -101,6 +102,9 @@ class LlvmCodeGenerator final {
         const lowering::BoundCastExpression& expression);
     [[nodiscard]] llvm::Value* EmitBinary(
         const lowering::BoundBinaryExpression& expression);
+    [[nodiscard]] llvm::Value* EmitValueEquality(llvm::Value* left,
+                                                 llvm::Value* right,
+                                                 semantic::SemanticType type);
     [[nodiscard]] llvm::Value* EmitBooleanLogical(
         const lowering::BoundBinaryExpression& expression);
     [[nodiscard]] llvm::Value* EmitStringViewEquality(llvm::Value* left,

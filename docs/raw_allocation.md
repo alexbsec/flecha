@@ -65,9 +65,9 @@ strings, structures, supported fixed arrays, and tuples. Const-qualified values
 are allowed and produce pointers with read-only targets. References, slices,
 `stringv`, void, and otherwise unsupported compound types are rejected.
 
-`new<T>(none)` performs defined zero initialization where T already supports
-`none`. Structures, including aggregates containing them, require explicit
-construction such as `new<Box>(Box::init(...))`. Raw pointer elements are
+`new<T>(none)` performs defined default initialization where T supports
+`none`. Structures use their generated or overridden `T::zero()`; a structure
+without valid default construction is rejected. Raw pointer elements are
 initialized to null by `none`; they do not allocate their targets.
 
 Existing copy rules apply to an initializer naming an existing value: owning

@@ -1523,6 +1523,61 @@ llvm::Value* LlvmCodeGenerator::EmitBooleanLogical(
     return result;
 }
 
+llvm::Value* LlvmCodeGenerator::EmitValueEquality(llvm::Value* left,
+                                                  llvm::Value* right,
+                                                  semantic::SemanticType type) {
+    using Kind = semantic::SemanticTypeKind;
+    if (type.Kind() == Kind::String || type.Kind() == Kind::StringView)
+        return EmitStringViewEquality(EmitStringView(left, type),
+                                      EmitStringView(right, type), false);
+    if (type.Kind() == Kind::Structure) {
+        llvm::Value* equal = llvm::ConstantInt::getTrue(_context);
+        for (std::size_t i = 0; i < type.Structure()->fields.size(); ++i) {
+            llvm::Value* field =
+                EmitValueEquality(_builder.CreateExtractValue(left, i),
+                                  _builder.CreateExtractValue(right, i),
+                                  type.Structure()->fields[i].type);
+            if (!field) return nullptr;
+            equal = _builder.CreateAnd(equal, field, "structure.field.equal");
+        }
+        return equal;
+    }
+    if (type.Kind() == Kind::Array) {
+        llvm::Value* equal = llvm::ConstantInt::getTrue(_context);
+        for (std::uint64_t i = 0; i < type.Length(); ++i) {
+            llvm::Value* item = EmitValueEquality(
+                _builder.CreateExtractValue(left, {static_cast<unsigned>(i)}),
+                _builder.CreateExtractValue(right, {static_cast<unsigned>(i)}),
+                *type.Target());
+            if (!item) return nullptr;
+            equal = _builder.CreateAnd(equal, item, "array.element.equal");
+        }
+        return equal;
+    }
+    if (type.Kind() == Kind::Tuple) {
+        llvm::Value* equal = llvm::ConstantInt::getTrue(_context);
+        for (std::size_t i = 0; i < type.Elements().size(); ++i) {
+            llvm::Value* field = EmitValueEquality(
+                _builder.CreateExtractValue(left, i),
+                _builder.CreateExtractValue(right, i), type.Elements()[i]);
+            if (!field) return nullptr;
+            equal = _builder.CreateAnd(equal, field, "tuple.field.equal");
+        }
+        return equal;
+    }
+    if (type.Kind() == Kind::ErrorValue) {
+        llvm::Value* sameFamily =
+            _builder.CreateICmpEQ(_builder.CreateExtractValue(left, 0),
+                                  _builder.CreateExtractValue(right, 0));
+        llvm::Value* sameCode =
+            _builder.CreateICmpEQ(_builder.CreateExtractValue(left, 1),
+                                  _builder.CreateExtractValue(right, 1));
+        return _builder.CreateAnd(sameFamily, sameCode, "error.equal");
+    }
+    if (type.IsFloating()) return _builder.CreateFCmpOEQ(left, right, "feq");
+    return _builder.CreateICmpEQ(left, right, "eq");
+}
+
 llvm::Value* LlvmCodeGenerator::EmitBinary(
     const lowering::BoundBinaryExpression& expression) {
     if (expression.Type().Kind() == semantic::SemanticTypeKind::Bool &&
@@ -1567,6 +1622,19 @@ llvm::Value* LlvmCodeGenerator::EmitBinary(
     llvm::Value* left = EmitExpression(expression.Left());
     llvm::Value* right = EmitExpression(expression.Right());
     if (left == nullptr || right == nullptr) return nullptr;
+    if (leftType.Kind() == semantic::SemanticTypeKind::Structure &&
+        rightType.Kind() == semantic::SemanticTypeKind::Structure &&
+        (expression.OperatorType() == TokenType::Equal ||
+         expression.OperatorType() == TokenType::NotEqual ||
+         expression.OperatorType() == TokenType::StrictEqual ||
+         expression.OperatorType() == TokenType::StrictNotEqual)) {
+        llvm::Value* equal = EmitValueEquality(left, right, leftType);
+        if (!equal) return nullptr;
+        return expression.OperatorType() == TokenType::NotEqual ||
+                       expression.OperatorType() == TokenType::StrictNotEqual
+                   ? _builder.CreateNot(equal, "structure.not_equal")
+                   : equal;
+    }
     if (leftType.Kind() == semantic::SemanticTypeKind::ErrorValue ||
         rightType.Kind() == semantic::SemanticTypeKind::ErrorValue) {
         const semantic::SemanticType generic(
@@ -2060,6 +2128,22 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
                     expression);
             llvm::Value* storage = EmitAddress(assignment.Target());
             if (storage == nullptr) return nullptr;
+            if (assignment.Value().Kind() ==
+                    lowering::BoundNodeKind::DefaultExpression &&
+                static_cast<const lowering::BoundDefaultExpression&>(
+                    assignment.Value())
+                    .IsSemanticZero() &&
+                assignment.Target().Type().ContainsStructure()) {
+                EmitValueDestroy(
+                    _builder.CreateLoad(MapType(assignment.Target().Type()),
+                                        storage, "value.old"),
+                    assignment.Target().Type());
+                if (!EmitInto(assignment.Value(), storage,
+                              assignment.Target().Type()))
+                    return nullptr;
+                return _builder.CreateLoad(MapType(assignment.Target().Type()),
+                                           storage, "value.defaulted");
+            }
             llvm::Value* value = EmitExpression(assignment.Value());
             if (value == nullptr) return nullptr;
             value = CoerceValue(value, assignment.Value().Type(),
@@ -2251,27 +2335,30 @@ void LlvmCodeGenerator::EmitDestroyAt(llvm::Value* storage,
 }
 
 bool LlvmCodeGenerator::EmitDefaultInto(llvm::Value* destination,
-                                        semantic::SemanticType type) {
+                                        semantic::SemanticType type,
+                                        bool semanticZero) {
     using Kind = semantic::SemanticTypeKind;
     if (type.Kind() == Kind::Structure) {
-        if (!type.Structure()->init)
-            return Fail("missing structure initializer");
-        if (!type.Structure()->init->ParameterTypes().empty())
+        const semantic::FunctionSymbol* constructor =
+            semanticZero ? type.Structure()->zero : type.Structure()->init;
+        if (!constructor)
+            return Fail(semanticZero ? "missing structure default constructor"
+                                     : "missing structure initializer");
+        if (!semanticZero && !constructor->ParameterTypes().empty())
             return Fail(
                 "default construction requires a zero-argument initializer");
-        _builder.CreateCall(_functions.at(type.Structure()->init),
-                            {destination});
+        _builder.CreateCall(_functions.at(constructor), {destination});
     } else if (type.Kind() == Kind::Array && type.ContainsStructure()) {
         bool success = true;
         EmitArrayElements(destination, type, false, [&](llvm::Value* slot) {
-            success &= EmitDefaultInto(slot, *type.Target());
+            success &= EmitDefaultInto(slot, *type.Target(), semanticZero);
         });
         return success;
     } else if (type.Kind() == Kind::Tuple && type.ContainsStructure()) {
         for (std::size_t i = 0; i < type.Elements().size(); ++i)
             if (!EmitDefaultInto(
                     _builder.CreateStructGEP(MapType(type), destination, i),
-                    type.Elements()[i]))
+                    type.Elements()[i], semanticZero))
                 return false;
     } else
         _builder.CreateStore(llvm::Constant::getNullValue(MapType(type)),
@@ -2285,7 +2372,10 @@ bool LlvmCodeGenerator::EmitInto(const lowering::BoundExpression& expression,
     using Node = lowering::BoundNodeKind;
     using Kind = semantic::SemanticTypeKind;
     if (expression.Kind() == Node::DefaultExpression)
-        return EmitDefaultInto(destination, type);
+        return EmitDefaultInto(
+            destination, type,
+            static_cast<const lowering::BoundDefaultExpression&>(expression)
+                .IsSemanticZero());
     if (expression.Kind() == Node::BuildExpression) {
         const auto& build =
             static_cast<const lowering::BoundBuildExpression&>(expression);
@@ -2411,9 +2501,38 @@ llvm::Value* LlvmCodeGenerator::EmitAllocation(
                               llvm::Constant::getNullValue(pointerType)),
         success, failure);
     _builder.SetInsertPoint(success);
-    if (!dynamic &&
-        !EmitInto(expression.Initializer(), pointer, expression.ElementType()))
-        return nullptr;
+    if (!dynamic) {
+        if (!EmitInto(expression.Initializer(), pointer,
+                      expression.ElementType()))
+            return nullptr;
+    } else if (expression.ElementType().Kind() ==
+               semantic::SemanticTypeKind::Structure) {
+        auto* indexStorage =
+            CreateTemporaryAlloca(sizeType, "allocation.zero.index");
+        _builder.CreateStore(llvm::ConstantInt::get(sizeType, 0), indexStorage);
+        auto* condition = llvm::BasicBlock::Create(
+            _context, "allocation.zero.condition", _currentFunction);
+        auto* body = llvm::BasicBlock::Create(_context, "allocation.zero.body",
+                                              _currentFunction);
+        auto* initialized = llvm::BasicBlock::Create(
+            _context, "allocation.zero.done", _currentFunction);
+        _builder.CreateBr(condition);
+        _builder.SetInsertPoint(condition);
+        llvm::Value* index =
+            _builder.CreateLoad(sizeType, indexStorage, "allocation.zero.i");
+        _builder.CreateCondBr(_builder.CreateICmpULT(index, count), body,
+                              initialized);
+        _builder.SetInsertPoint(body);
+        llvm::Value* slot = _builder.CreateInBoundsGEP(element, pointer, index,
+                                                       "allocation.zero.slot");
+        if (!EmitDefaultInto(slot, expression.ElementType(), true))
+            return nullptr;
+        _builder.CreateStore(
+            _builder.CreateAdd(index, llvm::ConstantInt::get(sizeType, 1)),
+            indexStorage);
+        _builder.CreateBr(condition);
+        _builder.SetInsertPoint(initialized);
+    }
     llvm::Value* successful =
         llvm::Constant::getNullValue(MapType(expression.Type()));
     successful = _builder.CreateInsertValue(successful, pointer, 0);

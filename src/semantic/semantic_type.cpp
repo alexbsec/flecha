@@ -37,6 +37,39 @@ bool SemanticType::ContainsStructure() const {
     return false;
 }
 
+bool SemanticType::IsZeroable() const {
+    if (_kind == SemanticTypeKind::Structure)
+        return _structure->validLayout && _structure->zero;
+    if (_kind == SemanticTypeKind::Array) return Target()->IsZeroable();
+    if (_kind == SemanticTypeKind::Tuple) {
+        for (const auto& element : Elements())
+            if (!element.IsZeroable()) return false;
+        return true;
+    }
+    return IsNumeric() || _kind == SemanticTypeKind::Bool ||
+           _kind == SemanticTypeKind::Char ||
+           _kind == SemanticTypeKind::Pointer;
+}
+
+bool SemanticType::IsTriviallyZeroable() const {
+    if (_kind == SemanticTypeKind::Structure) {
+        if (!_structure->zero || !_structure->zeroIsGenerated) return false;
+        for (const auto& field : _structure->fields)
+            if (!field.type.IsTriviallyZeroable()) return false;
+        return true;
+    }
+    if (_kind == SemanticTypeKind::Array)
+        return Target()->IsTriviallyZeroable();
+    if (_kind == SemanticTypeKind::Tuple) {
+        for (const auto& element : Elements())
+            if (!element.IsTriviallyZeroable()) return false;
+        return true;
+    }
+    return IsNumeric() || _kind == SemanticTypeKind::Bool ||
+           _kind == SemanticTypeKind::Char ||
+           _kind == SemanticTypeKind::Pointer;
+}
+
 bool SemanticType::IsCopyable() const {
     if (_kind == SemanticTypeKind::Structure) {
         if (!_structure->validLayout || _structure->tear) return false;
@@ -274,8 +307,10 @@ bool IsAssignable(SemanticType destination, SemanticType source) {
         source.Kind() == SemanticTypeKind::StringView) {
         return true;
     }
-    return !destination.ContainsStructure() &&
-           source.Kind() == SemanticTypeKind::None &&
+    if (source.Kind() == SemanticTypeKind::None &&
+        destination.ContainsStructure())
+        return destination.IsZeroable();
+    return source.Kind() == SemanticTypeKind::None &&
            destination.Kind() != SemanticTypeKind::Void &&
            destination.Kind() != SemanticTypeKind::Function &&
            !destination.IsBorrowed();

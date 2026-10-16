@@ -111,7 +111,10 @@ struct StructureType final {
     std::vector<StructureField> fields;
     std::unordered_map<std::string, const FunctionSymbol*> methods;
     const FunctionSymbol* init = nullptr;
+    const FunctionSymbol* zero = nullptr;
     const FunctionSymbol* tear = nullptr;
+    bool hasCustomInit = false;
+    bool zeroIsGenerated = false;
     bool validLayout = false;
 };
 

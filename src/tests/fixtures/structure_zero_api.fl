@@ -1,0 +1,117 @@
+structure Position {
+    i32 line;
+    i32 column;
+};
+
+Position Position::zero() override {
+    return build Position {
+        self.line = 1;
+        self.column = 1;
+    };
+}
+
+structure Plain {
+    i32 number;
+    i32 declared = 99;
+    bool flag;
+    *i32 pointer;
+    [2]char characters;
+};
+
+structure Managed {
+    i32 value;
+};
+
+Managed Managed::zero() override {
+    return build Managed {
+        self.value = 17;
+    };
+}
+
+void Managed::tear(&self) override {
+}
+
+Position make_position(&i32 calls) {
+    *calls = *calls + 1;
+    return Position::zero();
+}
+
+Managed make_managed() {
+    return none;
+}
+
+i32 structure_zero_test() {
+    Position position = none;
+    if position.line != 1 || position.column != 1 {
+        return 1;
+    }
+
+    position = none;
+    if position != none || none != position {
+        return 2;
+    }
+
+    position.line = 2;
+    if position == none || none == position {
+        return 3;
+    }
+
+    if position === none || none === position || !(position !== none) || !(none !== position) {
+        return 4;
+    }
+
+    i32 calls = 0;
+    if make_position(&calls) != none || calls != 1 {
+        return 5;
+    }
+
+    Plain plain = none;
+    if plain.number != 0 || plain.declared != 0 || plain.flag || plain.pointer != null || plain.characters[0] != '\0' || plain.characters[1] != '\0' {
+        return 6;
+    }
+
+    Plain initialized = Plain::init();
+    if initialized.declared != 99 {
+        return 10;
+    }
+
+    Managed managed = none;
+    if managed.value != 17 {
+        return 11;
+    }
+
+    managed.value = 3;
+    managed = none;
+    if managed.value != 17 {
+        return 12;
+    }
+
+    Managed returned = make_managed();
+    if returned.value != 17 {
+        return 13;
+    }
+
+    unsafe {
+        values, err := new<[]Position>(3);
+        if err != none {
+            return 7;
+        }
+
+        defer free(values);
+        usize index = 0;
+        while index < 3 {
+            if values[index].line != 1 || values[index].column != 1 {
+                return 8;
+            }
+
+            index++;
+        }
+
+        values[1].column = 42;
+        if values[0] == values[1] || values[1] == none {
+            return 9;
+        }
+    }
+
+    return 42;
+}

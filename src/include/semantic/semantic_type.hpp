@@ -83,6 +83,8 @@ class SemanticType final {
           _structure(structure) {}
     const StructureType* Structure() const { return _structure; }
     bool ContainsStructure() const;
+    bool IsZeroable() const;
+    bool IsTriviallyZeroable() const;
     bool IsCopyable() const;
     bool IsImmovable() const;
     [[nodiscard]] bool OwnsStorage() const;

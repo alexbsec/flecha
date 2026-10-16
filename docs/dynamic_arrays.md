@@ -3,9 +3,13 @@
 Runtime-sized storage uses `new<[]T>(count)` in an unsafe context. `count` has type
 `usize` and is evaluated exactly once, before attempting allocation. The result is
 `(*T, error)`, matching the existing pointer/error convention. Numeric, boolean,
-and character elements are currently supported; every element starts at zero.
-Structures, strings, pointer elements, and partially initialized storage are not
-supported by this first runtime-array form.
+and character elements are supported. Runtime arrays also accept copyable,
+default-constructible structures whose recursively stored fields are numbers,
+booleans, characters, raw pointers, fixed arrays, or other supported
+structures. Every slot is default-constructed after allocation succeeds;
+custom `zero()` overrides therefore run once per slot. Strings, pointer
+elements, destructible/noncopyable structures, and partially initialized
+storage are not supported by this runtime-array form.
 
 ```flecha
 unsafe {
@@ -69,9 +73,9 @@ can declare a local `std` dependency in `longbow.toml`, then import:
 ```
 
 Construct `raw_array::RawArray<i32>::init()` in an unsafe context, substituting
-any supported scalar type for `i32`. `RawArray<T>` is generic, but currently only
-numeric, boolean, and character elements are supported by its runtime storage.
-Pointers, structures, strings, and reference elements are not supported.
+any supported scalar or structure type for `i32`. Structure elements must meet
+the runtime-array restrictions above. Pointer, string, reference, owning, and
+destructible elements are not supported.
 
 The name reflects its unsafe API and raw allocated storage. It is not a safe
 dynamic-array abstraction. It maintains a used length and an allocated capacity,
@@ -103,3 +107,6 @@ clearing, independent arrays, and exact cleanup of all buffers.
 
 `StandardLibraryTests.RawArrayScalarTypes` exercises all 14 supported scalar
 types, including empty results, growth, bounds, mutation, and capacity reuse.
+`StandardLibraryTests.RawArrayStructures` exercises the same generic API with a
+custom-defaulted `Token` structure, including growth, empty/error defaults,
+field-wise equality, and cleanup.

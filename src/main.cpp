@@ -19,8 +19,10 @@ void PrintDiagnostic(const flecha::diagnostics::Diagnostic& diagnostic) {
         std::cerr << diagnostic.range.start.file << ":";
     std::cerr << flecha::diagnostics::DiagnosticCodeName(diagnostic.code) << ":"
               << diagnostic.range.start.line << ":"
-              << diagnostic.range.start.column << ": " << diagnostic.message
-              << "\n";
+              << diagnostic.range.start.column << ": ";
+    if (diagnostic.severity == flecha::diagnostics::DiagnosticSeverity::Warning)
+        std::cerr << "warning: ";
+    std::cerr << diagnostic.message << "\n";
 }
 void PrintDiagnostics(const flecha::diagnostics::DiagnosticBag& diagnostics) {
     for (const auto& diagnostic : diagnostics.Diagnostics())
@@ -42,6 +44,7 @@ int Compile(const std::string& command, const std::string& input,
         PrintDiagnostics(diagnostics);
         return 1;
     }
+    PrintDiagnostics(diagnostics);
     if (command == "build") {
         const flecha::semantic::FunctionSymbol* entry = nullptr;
         for (const auto& symbol : semanticModel.Symbols())

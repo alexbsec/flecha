@@ -41,6 +41,7 @@ class Lowerer final {
 
     const semantic::SemanticModel* _semanticModel = nullptr;
     semantic::SemanticType _returnType = semantic::SemanticType::Error();
+    bool _zeroFunction = false;
 };
 
 }  // namespace flecha::lowering
