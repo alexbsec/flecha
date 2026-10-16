@@ -100,6 +100,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install LLVM development files (Windows)
+        if: runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            mingw-w64-ucrt-x86_64-clang
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-llvm
+
       - name: Install LLVM development files (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -117,8 +130,15 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-          "LLVM_DIR=C:\Program Files\LLVM\lib\cmake\llvm" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $prefix = Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'ucrt64'
+          $cmakePrefix = $prefix -replace '\\', '/'
+          if (!(Test-Path "$prefix\lib\cmake\llvm\LLVMConfig.cmake")) {
+            throw 'MSYS2 LLVM development files were not installed'
+          }
+          "$prefix\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          "LLVM_DIR=$cmakePrefix/lib/cmake/llvm" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "FLECHA_C_COMPILER=$cmakePrefix/bin/clang.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "FLECHA_CXX_COMPILER=$cmakePrefix/bin/clang++.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Configure release build
         shell: bash
@@ -126,8 +146,8 @@ jobs:
           cmake -S . -B build -G Ninja
           -DBUILD_TESTING=OFF
           -DCMAKE_BUILD_TYPE=Release
-          -DCMAKE_C_COMPILER=clang
-          -DCMAKE_CXX_COMPILER=clang++
+          "-DCMAKE_C_COMPILER=${FLECHA_C_COMPILER:-clang}"
+          "-DCMAKE_CXX_COMPILER=${FLECHA_CXX_COMPILER:-clang++}"
           "-DLLVM_DIR=$LLVM_DIR"
 
       - name: Build

@@ -1,5 +1,6 @@
 #include "codegen/llvm_code_generator.hpp"
 
+#include <llvm/Config/llvm-config.h>
 #include <llvm/IR/BasicBlock.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/Function.h>
@@ -493,8 +494,13 @@ void LlvmCodeGenerator::InitializeDeferredScope(const CleanupScope& scope) {
     llvm::Type* pointer = llvm::PointerType::getUnqual(_context);
     _builder.CreateStore(llvm::Constant::getNullValue(pointer),
                          scope.deferredHead);
+#if LLVM_VERSION_MAJOR >= 20
     llvm::Function* save = llvm::Intrinsic::getOrInsertDeclaration(
         _module.get(), llvm::Intrinsic::stacksave, {pointer});
+#else
+    llvm::Function* save = llvm::Intrinsic::getDeclaration(
+        _module.get(), llvm::Intrinsic::stacksave, {pointer});
+#endif
     _builder.CreateStore(_builder.CreateCall(save), scope.stackMark);
 }
 
@@ -643,8 +649,13 @@ bool LlvmCodeGenerator::EmitDeferredCalls(const CleanupScope& scope) {
     _builder.SetInsertPoint(invalid);
     _builder.CreateUnreachable();
     _builder.SetInsertPoint(done);
+#if LLVM_VERSION_MAJOR >= 20
     llvm::Function* restore = llvm::Intrinsic::getOrInsertDeclaration(
         _module.get(), llvm::Intrinsic::stackrestore, {pointer});
+#else
+    llvm::Function* restore = llvm::Intrinsic::getDeclaration(
+        _module.get(), llvm::Intrinsic::stackrestore, {pointer});
+#endif
     _builder.CreateCall(restore,
                         {_builder.CreateLoad(pointer, scope.stackMark)});
     return true;
@@ -2752,7 +2763,11 @@ std::unique_ptr<llvm::Module> LlvmCodeGenerator::Generate(
     _variables.clear();
     _module = std::make_unique<llvm::Module>(moduleName, _context);
     if (!_targetTriple.empty()) {
+#if LLVM_VERSION_MAJOR >= 21
         _module->setTargetTriple(llvm::Triple(_targetTriple));
+#else
+        _module->setTargetTriple(_targetTriple);
+#endif
     }
     if (_dataLayout.has_value()) _module->setDataLayout(*_dataLayout);
     if (!DeclareFunctions(program)) return nullptr;

@@ -1,6 +1,7 @@
 #include "codegen/native_compiler.hpp"
 
 #include <llvm/ADT/SmallString.h>
+#include <llvm/Config/llvm-config.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/MC/TargetRegistry.h>
@@ -100,8 +101,13 @@ NativeCompiler::NativeCompiler(std::string runtimeLibraryPath)
     _targetTriple = llvm::sys::getDefaultTargetTriple();
     const llvm::Triple triple(_targetTriple);
     std::string lookupError;
+#if LLVM_VERSION_MAJOR >= 21
     const llvm::Target* target =
         llvm::TargetRegistry::lookupTarget(triple, lookupError);
+#else
+    const llvm::Target* target =
+        llvm::TargetRegistry::lookupTarget(_targetTriple, lookupError);
+#endif
     if (target == nullptr) {
         Fail(diagnostics::DiagnosticCode::NativeTargetUnavailable,
              "unable to find LLVM target for '" + _targetTriple +
@@ -110,8 +116,13 @@ NativeCompiler::NativeCompiler(std::string runtimeLibraryPath)
     }
 
     llvm::TargetOptions options;
+#if LLVM_VERSION_MAJOR >= 21
     _targetMachine.reset(target->createTargetMachine(
         triple, "generic", "", options, llvm::Reloc::PIC_));
+#else
+    _targetMachine.reset(target->createTargetMachine(
+        _targetTriple, "generic", "", options, llvm::Reloc::PIC_));
+#endif
     if (_targetMachine == nullptr) {
         Fail(
             diagnostics::DiagnosticCode::NativeTargetUnavailable,
@@ -157,9 +168,13 @@ bool NativeCompiler::EmitObject(const lowering::BoundProgram& program,
     }
 
     llvm::legacy::PassManager passManager;
+#if LLVM_VERSION_MAJOR >= 18
+    constexpr auto objectFileType = llvm::CodeGenFileType::ObjectFile;
+#else
+    constexpr auto objectFileType = llvm::CGFT_ObjectFile;
+#endif
     if (_targetMachine->addPassesToEmitFile(passManager, output, nullptr,
-                                            llvm::CodeGenFileType::ObjectFile,
-                                            false)) {
+                                            objectFileType, false)) {
         return Fail(diagnostics::DiagnosticCode::ObjectEmissionFailed,
                     "LLVM target cannot emit object files");
     }
