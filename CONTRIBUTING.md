@@ -65,6 +65,9 @@ Every pull request from a contributor fork requires at least one approving
 review from a Flecha maintainer before it can be merged. The author cannot
 approve their own work. New commits that materially change the reviewed diff
 may require a fresh approval, and all required CI checks must still pass.
+GitHub enforces every Linux test, sanitizer, editor, and cross-platform package
+check on `master`. A failed, canceled, skipped, or missing required check blocks
+the merge, and the pull-request branch must be up to date with `master`.
 
 Maintainers may work directly in the upstream repository. For now, a
 maintainer's own pull request does not require a second maintainer's approval,
