@@ -1,0 +1,32 @@
+# Flecha 0.1.1 stabilization milestone
+
+Flecha 0.1.1 is a focused stabilization release. It strengthens the first
+public release without starting another language-feature wave.
+
+## Scope
+
+1. Fix compiler crashes and incorrect diagnostics.
+2. Test release bundles on clean Linux, Windows, and macOS installations.
+3. Improve diagnostics for missing linkers, LLVM installations, and platform
+   SDK components.
+4. Pin and document the supported compiler, LLVM, linker, and platform
+   toolchain versions.
+5. Package the Visual Studio Code extension as a `.vsix`.
+6. Document straightforward Visual Studio Code and Neovim installation
+   workflows.
+7. Reconcile outdated v0.1 documentation with the feature set and limitations
+   that actually shipped.
+8. Keep all existing CI, sanitizer, packaging, installed-layout, and
+   portability checks green.
+
+## Non-goals
+
+Flecha 0.1.1 does not include self-hosting, a package registry, a language
+server, a formatter, the project website, or major syntax and language
+features. Those remain post-0.1.1 work.
+
+## Release condition
+
+The milestone is complete when all eight scope items are satisfied from one
+revision on `master`, the full protected CI matrix passes, and the v0.1.1
+release workflow publishes verified bundles for every supported platform.

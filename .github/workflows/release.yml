@@ -121,7 +121,6 @@ jobs:
           cmake
           "-DFLECHA_COMPILER=$PWD/build/flecha${{ matrix.suffix }}"
           "-DLONGBOW=$PWD/build/longbow${{ matrix.suffix }}"
-          "-DSOURCE_ROOT=$PWD"
           "-DOUTPUT_ROOT=$PWD/build/release-smoke"
           "-DEXECUTABLE_SUFFIX=${{ matrix.suffix }}"
           -P cmake/release_smoke.cmake
@@ -140,7 +139,6 @@ jobs:
           cmake \
             "-DFLECHA_COMPILER=$PWD/build/stage/bin/flecha${{ matrix.suffix }}" \
             "-DLONGBOW=$PWD/build/stage/bin/longbow${{ matrix.suffix }}" \
-            "-DSOURCE_ROOT=$PWD" \
             "-DOUTPUT_ROOT=$PWD/build/installed-smoke" \
             "-DEXECUTABLE_SUFFIX=${{ matrix.suffix }}" \
             -P cmake/release_smoke.cmake
@@ -161,9 +159,132 @@ jobs:
             build/flecha-${{ matrix.name }}.sha256
           if-no-files-found: error
 
+  clean-install-support:
+    name: Prepare clean-install test support
+    needs: validate-release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clean-install-support
+          path: |
+            cmake/release_smoke.cmake
+            cmake/verify_bundle.cmake
+          if-no-files-found: error
+
+  clean-install:
+    name: Clean install (${{ matrix.name }})
+    needs:
+      - build-release
+      - clean-install-support
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            name: linux-x86_64
+            suffix: ""
+            archive_suffix: .tar.gz
+          - os: windows-2025
+            name: windows-x86_64
+            suffix: .exe
+            archive_suffix: .zip
+          - os: macos-15-intel
+            name: macos-x86_64
+            suffix: ""
+            archive_suffix: .tar.gz
+          - os: macos-15
+            name: macos-arm64
+            suffix: ""
+            archive_suffix: .tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Install host linker (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang
+
+      - name: Install host linker (Windows)
+        if: runner.os == 'Windows'
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: mingw-w64-ucrt-x86_64-clang
+
+      - name: Add the Windows host linker to PATH
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $prefix = Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'ucrt64\bin'
+          $prefix | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Verify the macOS host linker and SDK
+        if: runner.os == 'macOS'
+        run: |
+          xcrun --find clang++
+          xcrun --show-sdk-path
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-${{ matrix.name }}
+          path: package
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: clean-install-support
+          path: test-support
+
+      - name: Extract and relocate the release archive
+        shell: bash
+        env:
+          ARCHIVE_SUFFIX: ${{ matrix.archive_suffix }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          archives=(package/flecha-*"$ARCHIVE_SUFFIX")
+          if [[ ${#archives[@]} -ne 1 ]]; then
+            echo "Expected one $ARCHIVE_SUFFIX archive, found ${#archives[@]}" >&2
+            exit 1
+          fi
+          mkdir unpacked relocated
+          (
+            cd unpacked
+            cmake -E tar xf "../${archives[0]}"
+          )
+          bundles=(unpacked/flecha-*/)
+          if [[ ${#bundles[@]} -ne 1 ]]; then
+            echo "Expected one extracted bundle, found ${#bundles[@]}" >&2
+            exit 1
+          fi
+          mv "${bundles[0]}" relocated/flecha
+          echo "FLECHA_BUNDLE=$PWD/relocated/flecha" >> "$GITHUB_ENV"
+
+      - name: Verify bundled runtime dependencies
+        shell: bash
+        run: >-
+          cmake
+          "-DINSTALL_ROOT=$FLECHA_BUNDLE"
+          "-DEXECUTABLE_SUFFIX=${{ matrix.suffix }}"
+          -P test-support/verify_bundle.cmake
+
+      - name: Exercise the relocated installation
+        shell: bash
+        run: >-
+          cmake
+          "-DFLECHA_COMPILER=$FLECHA_BUNDLE/bin/flecha${{ matrix.suffix }}"
+          "-DLONGBOW=$FLECHA_BUNDLE/bin/longbow${{ matrix.suffix }}"
+          "-DOUTPUT_ROOT=$PWD/clean-install-smoke"
+          "-DEXECUTABLE_SUFFIX=${{ matrix.suffix }}"
+          -P test-support/release_smoke.cmake
+
   publish-assets:
     name: Attach bundles to GitHub Release
-    needs: build-release
+    needs: clean-install
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4

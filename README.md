@@ -215,6 +215,7 @@ Makefile                Convenient build, test, and example targets
 - [`docs/compiler.md`](docs/compiler.md) — compiler commands, outputs, and installed layout
 - [`docs/longbow.md`](docs/longbow.md) — project manifests, commands, and local dependencies
 - [`docs/release_0_1.md`](docs/release_0_1.md) — v0.1.0 platform contract and release gates
+- [`docs/release_0_1_1.md`](docs/release_0_1_1.md) — v0.1.1 stabilization scope and release condition
 - [`docs/semantic_analysis.md`](docs/semantic_analysis.md) — name binding, types, scopes, and analysis pipeline
 - [`docs/llvm_codegen.md`](docs/llvm_codegen.md) — current LLVM backend scope and limitations
 - [`docs/modules.md`](docs/modules.md) — modules, imports, and package libraries

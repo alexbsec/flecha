@@ -29,6 +29,25 @@ declarations.
 The compiler invokes a host C++ linker driver for executable builds. Flecha
 0.1.0 release packages must validate this path on Linux, Windows, and macOS.
 
+### Binary release requirements
+
+Release archives include the matching LLVM shared runtime, so using an archive
+does not require LLVM development files. Emitting and linking an executable
+does require a host C++ linker driver and the platform's native SDK components:
+
+- Linux requires `clang++`, `g++`, or `c++`, together with the system C/C++
+  development and startup files. The release smoke test installs the
+  distribution's `clang` package.
+- Windows packages target MSYS2 UCRT64 and require its `clang++` driver on
+  `PATH`. The release smoke test installs `mingw-w64-ucrt-x86_64-clang`; it does
+  not install the LLVM development package.
+- macOS requires the Xcode command-line tools, including `clang++` and the
+  macOS SDK. Install them with `xcode-select --install` when they are absent.
+
+`flecha check` and `flecha --emit-object` do not invoke the system linker.
+Building Flecha itself from source still requires the LLVM development package
+listed in the repository build requirements.
+
 ## Installed layout
 
 The compiler locates its version-matched runtime archive relative to the
