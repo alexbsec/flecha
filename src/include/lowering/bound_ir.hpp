@@ -433,14 +433,17 @@ class BoundAllocationExpression final : public BoundExpression {
                               semantic::SemanticType result,
                               semantic::SemanticType element,
                               semantic::SemanticType failure,
-                              std::unique_ptr<BoundExpression> initializer)
+                              std::unique_ptr<BoundExpression> initializer,
+                              bool dynamic = false)
         : BoundExpression(range, result),
           _element(element),
           _failure(failure),
-          _initializer(std::move(initializer)) {}
+          _initializer(std::move(initializer)),
+          _dynamic(dynamic) {}
     BoundNodeKind Kind() const override {
         return BoundNodeKind::AllocationExpression;
     }
+    bool IsDynamic() const { return _dynamic; }
     semantic::SemanticType ElementType() const { return _element; }
     semantic::SemanticType FailureType() const { return _failure; }
     const BoundExpression& Initializer() const { return *_initializer; }
@@ -449,6 +452,7 @@ class BoundAllocationExpression final : public BoundExpression {
     semantic::SemanticType _element;
     semantic::SemanticType _failure;
     std::unique_ptr<BoundExpression> _initializer;
+    bool _dynamic;
 };
 
 class BoundCallExpression final : public BoundExpression {

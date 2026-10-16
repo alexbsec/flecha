@@ -442,12 +442,13 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                     *_semanticModel->SymbolFor(callee));
             if (function.BuiltIn() == semantic::BuiltInFunction::New)
                 return std::make_unique<BoundAllocationExpression>(
-                    expression.Range(), type, function.ParameterTypes()[0],
+                    expression.Range(), type, *type.Elements()[0].Target(),
                     _semanticModel->GlobalScope()
                         .Lookup("AllocationError")
                         ->Type(),
                     LowerExpression(*call.Arguments()[0],
-                                    function.ParameterTypes()[0]));
+                                    function.ParameterTypes()[0]),
+                    call.TypeArgument()->TypeForm() == core::TypeKind::Slice);
             std::vector<std::unique_ptr<BoundExpression>> arguments;
             arguments.reserve(call.Arguments().size());
             for (const std::unique_ptr<core::Expression>& argument :
@@ -515,7 +516,9 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
         case core::AstNodeKind::IndexExpression: {
             const core::IndexExpression& index =
                 static_cast<const core::IndexExpression&>(expression);
-            if (_semanticModel->TypeOf(index.Receiver()).IsSequence())
+            if (_semanticModel->TypeOf(index.Receiver()).IsSequence() ||
+                _semanticModel->TypeOf(index.Receiver()).Kind() ==
+                    semantic::SemanticTypeKind::Pointer)
                 return LowerPlace(expression);
             std::vector<std::unique_ptr<BoundExpression>> arguments;
             arguments.push_back(LowerExpression(index.Index()));

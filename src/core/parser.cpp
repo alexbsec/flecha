@@ -177,6 +177,11 @@ bool Parser::ScanType(std::size_t& offset) const {
     }
     if (IsTypeToken(token) || token == TokenType::Identifier) {
         ++offset;
+        if (token == TokenType::Identifier &&
+            _importAliases.contains(Peek(offset - 1).value) &&
+            Peek(offset).type == TokenType::Scope &&
+            Peek(offset + 1).type == TokenType::Identifier)
+            offset += 2;
         return true;
     }
     return false;
@@ -285,10 +290,19 @@ std::unique_ptr<TypeNode> Parser::ParseType(bool allowOwn, bool allowLend,
             source::SourceRange{start, close->range.end}, std::move(elements),
             explicitConst, qualifierRange);
     }
-    if (Match(TokenType::Identifier))
-        return std::make_unique<TypeNode>(
-            source::SourceRange{start, token.range.end}, token.value,
-            explicitConst, qualifierRange);
+    if (Match(TokenType::Identifier)) {
+        std::string name = token.value;
+        auto end = token.range.end;
+        if (_importAliases.contains(name) && Match(TokenType::Scope)) {
+            const Token* member = Consume(TokenType::Identifier,
+                                          "type name after module qualifier");
+            if (!member) return nullptr;
+            name += "::" + member->value;
+            end = member->range.end;
+        }
+        return std::make_unique<TypeNode>(source::SourceRange{start, end}, name,
+                                          explicitConst, qualifierRange);
+    }
     PrimitiveType type;
 
     switch (token.type) {
@@ -539,6 +553,17 @@ std::unique_ptr<StructureDeclaration> Parser::ParseStructureDeclaration() {
 }
 
 std::unique_ptr<Declaration> Parser::ParseDeclaration() {
+    if (Match(TokenType::Export)) {
+        auto declaration = ParseDeclaration();
+        if (declaration) {
+            if (declaration->exported)
+                _diagnostics.Report(
+                    diagnostics::DiagnosticCode::UnexpectedToken,
+                    declaration->Range(), "duplicate export modifier");
+            declaration->exported = true;
+        }
+        return declaration;
+    }
     if (Check(TokenType::Structure)) return ParseStructureDeclaration();
     if (Check(TokenType::Error) && Peek(1).type == TokenType::Identifier &&
         Peek(2).type == TokenType::LCurly)
@@ -1436,9 +1461,20 @@ std::unique_ptr<Expression> Parser::ParsePrimaryExpression() {
             Advance();
             return std::make_unique<LiteralExpression>(token.range, token.type,
                                                        token.value);
-        case TokenType::Identifier:
+        case TokenType::Identifier: {
             Advance();
-            return std::make_unique<NameExpression>(token.range, token.value);
+            std::string name = token.value;
+            auto range = token.range;
+            if (_importAliases.contains(name) && Match(TokenType::Scope)) {
+                const Token* member =
+                    Consume(TokenType::Identifier,
+                            "declaration name after module qualifier");
+                if (!member) return nullptr;
+                name += "::" + member->value;
+                range.end = member->range.end;
+            }
+            return std::make_unique<NameExpression>(range, name);
+        }
         case TokenType::LParen: {
             const Token& openParen = Advance();
             std::unique_ptr<Expression> expression = ParseExpression();
@@ -1502,10 +1538,102 @@ void Parser::SynchronizeStatement() {
     Match(TokenType::SemiColon);
 }
 
-std::unique_ptr<CompilationUnit> Parser::Parse() {
-    const source::SourceLocation start = Current().range.start;
-    std::vector<std::unique_ptr<Declaration>> declarations;
+void Parser::ParseHeader() {
+    if (_headerParsed) return;
+    _headerParsed = true;
+    auto& moduleName = _moduleName;
+    auto& imports = _imports;
+    if (Match(TokenType::Module)) {
+        const Token* name = Consume(TokenType::Identifier, "module name");
+        if (name) moduleName = name->value;
+        Consume(TokenType::SemiColon, "';' after module declaration");
+    }
+    if (Match(TokenType::At)) {
+        const Token* directive =
+            Consume(TokenType::Identifier, "imports after '@'");
+        if (!directive || directive->value != "imports")
+            ReportUnexpectedToken("in @imports directive");
+        while (Match(TokenType::Scope)) {
+            Import import;
+            import.range.start = Current().range.start;
+            const Token* segment =
+                Consume(TokenType::Identifier, "import path");
+            if (!segment) break;
+            import.path.push_back(segment->value);
+            // A new entry's ':: root' or ':: lib' is distinguished from a
+            // path separator by its reserved import-root segment.
+            while (Check(TokenType::Scope) &&
+                   Peek(1).type == TokenType::Identifier &&
+                   Peek(1).value != "root" && Peek(1).value != "lib") {
+                Advance();
+                import.path.push_back(Advance().value);
+            }
+            const bool selection =
+                Check(TokenType::Scope) && (Peek(1).type == TokenType::Mul ||
+                                            Peek(1).type == TokenType::LCurly);
+            if (selection) Advance();
+            if (selection && Match(TokenType::LCurly)) {
+                do {
+                    const Token* name =
+                        Consume(TokenType::Identifier, "selected module name");
+                    if (!name) break;
+                    Import selected = import;
+                    selected.path.push_back(name->value);
+                    selected.alias = name->value;
+                    selected.range.end = Current().range.start;
+                    if (name->value == "root" || name->value == "lib")
+                        ReportUnexpectedToken("reserved import path word");
+                    imports.push_back(std::move(selected));
+                } while (Match(TokenType::Comma));
+                Consume(TokenType::RCurly, "'}' after selected modules");
+            } else {
+                import.wildcard = selection && Match(TokenType::Mul);
+                if (!import.wildcard) {
+                    import.alias = import.path.back();
+                    if (Match(TokenType::As)) {
+                        const Token* alias =
+                            Consume(TokenType::Identifier, "import alias");
+                        if (!alias) break;
+                        import.alias = alias->value;
+                    }
+                }
+                import.range.end = Current().range.start;
+                imports.push_back(std::move(import));
+            }
+        }
+        if (imports.empty())
+            ReportUnexpectedToken("in empty @imports directive");
+        Consume(TokenType::SemiColon, "';' after imports block");
+        if (moduleName.empty())
+            _diagnostics.Report(diagnostics::DiagnosticCode::UnexpectedToken,
+                                directive ? directive->range : Current().range,
+                                "@imports requires a module declaration");
+    }
 
+    for (const auto& import : imports) {
+        const auto minimum = import.path[0] == "lib" ? 3u : 2u;
+        if ((import.path[0] != "root" && import.path[0] != "lib") ||
+            import.path.size() + (import.wildcard ? 1u : 0u) < minimum)
+            _diagnostics.Report(
+                diagnostics::DiagnosticCode::UnexpectedToken, import.range,
+                "imports require root::<module> or lib::<library>::<module>");
+    }
+}
+
+void Parser::SetImports(std::vector<Import> imports) {
+    _imports = std::move(imports);
+}
+
+std::unique_ptr<CompilationUnit> Parser::Parse() {
+    const source::SourceLocation start = _tokens.front().range.start;
+    ParseHeader();
+    for (const auto& import : _imports) {
+        if (!import.wildcard && !_importAliases.insert(import.alias).second)
+            _diagnostics.Report(
+                diagnostics::DiagnosticCode::DuplicateDeclaration, import.range,
+                "duplicate import alias '" + import.alias + "'");
+    }
+    std::vector<std::unique_ptr<Declaration>> declarations;
     while (!IsAtEnd()) {
         const std::size_t startPosition = _position;
         std::unique_ptr<Declaration> declaration = ParseDeclaration();
@@ -1519,9 +1647,12 @@ std::unique_ptr<CompilationUnit> Parser::Parse() {
         }
     }
 
-    return std::make_unique<CompilationUnit>(
+    auto unit = std::make_unique<CompilationUnit>(
         source::SourceRange{start, Current().range.end},
         std::move(declarations));
+    unit->moduleName = std::move(_moduleName);
+    unit->imports = std::move(_imports);
+    return unit;
 }
 
 }  // namespace flecha::core

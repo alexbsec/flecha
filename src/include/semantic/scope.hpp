@@ -14,6 +14,7 @@ class Scope final {
 
     [[nodiscard]] const Scope* Parent() const { return _parent; }
     [[nodiscard]] bool Declare(const Symbol& symbol);
+    bool DeclareAs(std::string name, const Symbol& symbol);
     [[nodiscard]] const Symbol* LookupLocal(std::string_view name) const;
     [[nodiscard]] const Symbol* Lookup(std::string_view name) const;
 

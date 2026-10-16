@@ -84,3 +84,11 @@ result into `(*T, error)`. Allocation errors use the existing generic error ABI.
 
 The allocation-failure test harness wraps the allocation symbol at link time;
 production code has no failure-injection setting or test-only global state.
+
+Runtime scalar arrays use `flecha_runtime_v1_alloc_array(count, element_size,
+alignment)`, which checks multiplication before allocating zeroed storage.
+`flecha_runtime_v1_allocation_count(pointer)` returns the recorded count (zero
+for null); it requires a Flecha allocation base. Ordinary allocations record a
+count of one. The hidden allocator header now stores both the original base
+and element count. Previously built objects and runtime libraries should be
+rebuilt together. `free` retains the same public ABI and accepts either form.

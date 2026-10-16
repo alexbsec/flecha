@@ -20,6 +20,13 @@ typedef struct FlechaRuntimeString {
 // Only pointers returned by this allocator may be released. The compiler tears
 // down the object before releasing storage.
 void* flecha_runtime_v1_alloc(size_t size, size_t alignment);
+// Allocates count zeroed elements, checking multiplication before allocation.
+// Zero count still returns a releasable allocation on success. Zero element
+// size is invalid. Failure returns null and does not allocate storage.
+void* flecha_runtime_v1_alloc_array(size_t count, size_t element_size,
+                                    size_t alignment);
+// Requires an allocation base returned by this runtime, or null.
+size_t flecha_runtime_v1_allocation_count(const void* data);
 void flecha_runtime_v1_free(void* data);
 
 void flecha_runtime_v1_stdout_string_view(const char* data, size_t length);

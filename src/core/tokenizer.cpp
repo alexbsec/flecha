@@ -27,6 +27,7 @@ const KeywordMap KEYWORDS = {
     {"void", TokenType::Void},
     {"string", TokenType::String},
     {"stringv", TokenType::StringView},
+    {"module", TokenType::Module},
     {"structure", TokenType::Structure},
     {"private", TokenType::Private},
     {"override", TokenType::Override},
@@ -201,6 +202,8 @@ Token Tokenizer::NextToken() {
             return makeToken(TokenType::Mod);
         case '^':
             return makeToken(TokenType::Xor);
+        case '@':
+            return makeToken(TokenType::At);
         case '#':
             return makeToken(TokenType::Hash);
         case ':':

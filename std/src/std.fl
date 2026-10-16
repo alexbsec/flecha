@@ -1,0 +1,4 @@
+module std;
+
+@imports
+    :: root::containers::array_i32;

@@ -74,6 +74,8 @@ class AstNode {
 class Declaration : public AstNode {
    public:
     using AstNode::AstNode;
+    std::string moduleId;
+    bool exported = false;
 };
 
 class Statement : public AstNode {
@@ -425,12 +427,33 @@ class FunctionDeclaration final : public Declaration {
     source::SourceRange _nameRange;
 };
 
+struct Import final {
+    bool wildcard = false;
+    std::vector<std::string> path;
+    std::string alias;
+    std::string resolvedModule;
+    source::SourceRange range;
+};
+struct Module final {
+    std::string id;
+    std::string name;
+    std::string file;
+    bool entry = false;
+    std::vector<Import> imports;
+};
+
 class CompilationUnit final : public AstNode {
    public:
     CompilationUnit(source::SourceRange range,
                     std::vector<std::unique_ptr<Declaration>> declarations)
         : AstNode(range), _declarations(std::move(declarations)) {}
 
+    std::string moduleName;
+    std::vector<Import> imports;
+    std::vector<Module> modules;
+    std::vector<std::unique_ptr<Declaration>> TakeDeclarations() {
+        return std::move(_declarations);
+    }
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::CompilationUnit;
     }

@@ -1244,3 +1244,32 @@ TEST(ParserTests, PreservesOwnershipContractsWithoutChangingPointerTypes) {
     EXPECT_EQ(function.Parameters()[1]->Type().Contract(),
               OwnershipContract::Lend);
 }
+
+TEST(ParserTests, ParsesModuleImportsAndExportsOnOneLineOrMultipleLines) {
+    for (const std::string& imports :
+         {"@imports :: root::math :: lib::std::containers as collections;",
+          "@imports\n    :: root::math\n    :: lib::std::containers as "
+          "collections;"}) {
+        DiagnosticBag diagnostics;
+        auto unit =
+            ParseSource("module example; " + imports +
+                            " export i32 answer() { return math::answer(); }",
+                        diagnostics);
+        ASSERT_FALSE(diagnostics.HasErrors());
+        EXPECT_EQ(unit->moduleName, "example");
+        ASSERT_EQ(unit->imports.size(), 2);
+        EXPECT_EQ(unit->imports[0].path,
+                  (std::vector<std::string>{"root", "math"}));
+        EXPECT_EQ(unit->imports[1].alias, "collections");
+        ASSERT_EQ(unit->Declarations().size(), 1);
+        EXPECT_TRUE(unit->Declarations()[0]->exported);
+        const auto& function =
+            static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+        const auto& returned = static_cast<const ReturnStatement&>(
+            *function.Body().Statements()[0]);
+        const auto& call =
+            static_cast<const CallExpression&>(*returned.Value());
+        EXPECT_EQ(static_cast<const NameExpression&>(call.Callee()).Name(),
+                  "math::answer");
+    }
+}

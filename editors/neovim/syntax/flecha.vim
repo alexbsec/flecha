@@ -4,6 +4,8 @@ endif
 
 syntax case match
 
+syntax match flechaImports /@imports\>/
+
 syntax keyword flechaType i8 i16 i32 i64 isize
 syntax keyword flechaType u8 u16 u32 u64 usize
 syntax keyword flechaType f32 f64 bool char void string stringv error AllocationError
@@ -11,7 +13,7 @@ syntax keyword flechaType f32 f64 bool char void string stringv error Allocation
 syntax keyword flechaModifier unsafe export extern inline comptime own lend const constptr constref volatile private override
 syntax keyword flechaConditional if else also
 syntax keyword flechaRepeat while for loop range
-syntax keyword flechaStatement return yield proceed break defer structure build
+syntax keyword flechaStatement return yield proceed break defer module structure build
 syntax keyword flechaJump jumpto nextgroup=flechaJumpTarget skipwhite
 syntax keyword flechaCast as
 syntax keyword flechaBoolean true false
@@ -22,6 +24,7 @@ syntax match flechaOperator /::\|->\|:=\|===\|!==\|==\|!=\|<=\|>=\|&&\|||\|[&=+*
 syntax match flechaRawAddress /\%(&\s*\)\@<=raw\>/
 syntax match flechaFunction /\<[A-Za-z_][A-Za-z0-9_]*\>\ze\s*(/
 syntax match flechaAllocation /\<new\>\ze\s*</
+syntax match flechaAllocation /\<take\>\ze\s*(/
 syntax match flechaCastMethod /\.cast\>\ze\s*</
 syntax match flechaLabel /#\s*[A-Za-z_][A-Za-z0-9_]*/
 syntax match flechaJumpTarget /\<[A-Za-z_][A-Za-z0-9_]*\>/ contained
@@ -38,6 +41,7 @@ syntax keyword flechaTodo TODO FIXME XXX NOTE contained
 syntax match flechaLineComment /\/\/.*$/ contains=flechaTodo
 syntax region flechaBlockComment start=/\/\*/ end=/\*\// contains=flechaTodo
 
+highlight default flechaImports guifg=#87CEFA ctermfg=117
 highlight default link flechaType Type
 highlight default link flechaModifier StorageClass
 highlight default link flechaConditional Conditional

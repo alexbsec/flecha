@@ -86,10 +86,23 @@ call assert_equal('flechaOperator', s:HighlightAt('::', 0))
 call assert_equal('flechaOperator', s:HighlightAt('->', 0))
 
 call assert_equal('flechaAllocation', s:HighlightAt('new<u8>', 0))
+call assert_equal('flechaAllocation', s:HighlightAt('new<[]i32>', 0))
+call assert_equal('flechaAllocation', s:HighlightAt('take(self->storage)', 0))
 call assert_equal('flechaType', s:HighlightAt('AllocationError', 0))
 
 call assert_equal('flechaModifier', s:HighlightAt('own *i32', 0))
 call assert_equal('flechaModifier', s:HighlightAt('lend *const i32', 0))
+
+call assert_equal('flechaImports', s:HighlightAt('@imports ::', 0))
+call assert_equal('flechaImports', s:HighlightAt('@imports ::', 7))
+call assert_notequal('flechaImports', s:HighlightAt('@imports_extra', 0))
+call assert_equal('flechaLineComment', s:HighlightAt('@imports comment', 0))
+call assert_equal('flechaString', s:HighlightAt('@imports string', 0))
+call assert_equal('#87cefa', tolower(synIDattr(hlID('flechaImports'), 'fg#', 'gui')))
+call assert_equal('117', synIDattr(hlID('flechaImports'), 'fg', 'cterm'))
+
+call assert_equal('flechaStatement', s:HighlightAt('module highlighting', 0))
+call assert_equal('flechaModifier', s:HighlightAt('export i32', 0))
 
 if !empty(v:errors)
     for error in v:errors

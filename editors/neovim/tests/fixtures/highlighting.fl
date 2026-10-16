@@ -58,3 +58,15 @@ unsafe { pointer, err := new<u8>(42); defer free(pointer); }
 error allocError = AllocationError.OutOfMemory;
 unsafe own *i32 transfer(own *i32 pointer) { return pointer; }
 unsafe void inspect(lend *const i32 pointer) {}
+
+@imports :: root::math;
+@imports
+    :: lib::std::containers;
+@imports_extra
+// @imports comment
+stringv directive = "@imports string";
+
+module highlighting;
+export i32 exported_function() { return 42; }
+
+unsafe { old := take(self->storage); buffer, err := new<[]i32>(count); }

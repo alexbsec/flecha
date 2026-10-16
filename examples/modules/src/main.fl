@@ -1,0 +1,9 @@
+module main;
+
+@imports
+    :: root::parser::math::factorial;
+
+void main() {
+    stdout("Factorial: ");
+    stdoutln(factorial::factorial(5));
+}

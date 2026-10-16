@@ -56,6 +56,10 @@ target_link_libraries(flecha
         flecha_std
 )
 
+add_executable(longbow src/longbow/main.cpp)
+target_link_libraries(longbow PRIVATE flecha_project_options llvm_codegen LLVM)
+add_dependencies(longbow flecha)
+
 if(BUILD_TESTING)
     include(FetchContent)
     FetchContent_Declare(

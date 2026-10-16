@@ -1,0 +1,23 @@
+module main;
+
+@imports
+    :: lib::std::containers::array_i32;
+
+i32 main() {
+    unsafe {
+        numbers := array_i32::I32Array::init();
+        i32 i = 0;
+        while i < 100 {
+            err := numbers.push(i);
+            if err != none { return 1; }
+            i++;
+        }
+        value, err := numbers.get(42);
+        if err != none { return 2; }
+        stdout("Array length: ");
+        stdoutln(numbers.len());
+        stdout("Element 42: ");
+        stdoutln(value);
+        return value;
+    }
+}

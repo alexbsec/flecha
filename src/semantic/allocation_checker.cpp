@@ -60,6 +60,7 @@ struct State final {
     std::set<std::pair<const Symbol*, const core::StructureField*>>
         initializedOwners;
     std::set<Identity> nullPointers;
+    std::map<const core::StructureField*, Value> fieldValues;
     bool operator==(const State&) const = default;
 };
 struct Outcome final {
@@ -103,7 +104,15 @@ class AllocationChecker final {
                         : node.memoryDefer    ? Callee(node.memoryDefer->Call())
                                               : nullptr;
                     const auto found = _functions.find(callee);
-                    if (node.allocation ||
+                    const bool heapIndex =
+                        node.memoryExpression &&
+                        node.memoryExpression->Kind() ==
+                            AstNodeKind::IndexExpression &&
+                        _model.TypeOf(static_cast<const core::IndexExpression&>(
+                                          *node.memoryExpression)
+                                          .Receiver())
+                                .Kind() == SemanticTypeKind::Pointer;
+                    if (node.allocation || heapIndex ||
                         (callee &&
                          callee->BuiltIn() == BuiltInFunction::Free) ||
                         (found != _functions.end() &&
@@ -221,6 +230,8 @@ class AllocationChecker final {
                 continue;
             const bool tear = function.Name() == "tear";
             state.resources[field.syntax] = {true, tear, !tear, true};
+            state.fieldValues[field.syntax] = {ValueKind::Pointer,
+                                               field.syntax};
         }
     }
     bool Lent(const State& state, const Value& value) const {
@@ -277,7 +288,7 @@ class AllocationChecker final {
 
     void Report(DiagnosticCode code, const core::AstNode& at,
                 const std::string& message, Identity origin = nullptr) {
-        if (!_reported.emplace(code, at.Range().start.offset).second) return;
+        if (!_reported.emplace(code, at.Range().start).second) return;
         source::SourceRange range = at.Range();
         if (at.Kind() == AstNodeKind::BlockStatement && !range.Empty()) {
             range.start = range.end;
@@ -419,6 +430,8 @@ class AllocationChecker final {
                 Contains(returned, identity))
                 continue;
             bool held = false;
+            for (const auto& [field, value] : state.fieldValues)
+                held |= Contains(value, identity);
             for (const auto& [symbol, value] : state.bindings)
                 held |= Contains(value, identity);
             for (const auto& [expression, value] : state.values)
@@ -470,7 +483,10 @@ class AllocationChecker final {
         if (target.Kind() == AstNodeKind::IndexExpression) {
             const auto& index =
                 static_cast<const core::IndexExpression&>(target);
-            Value receiver = Address(state, index.Receiver());
+            Value receiver = _model.TypeOf(index.Receiver()).Kind() ==
+                                     SemanticTypeKind::Pointer
+                                 ? Get(state, index.Receiver())
+                                 : Address(state, index.Receiver());
             if (receiver.identity) receiver.kind = ValueKind::Interior;
             receiver.address = nullptr;
             return receiver;
@@ -486,7 +502,9 @@ class AllocationChecker final {
         if (unwrapped.Kind() == AstNodeKind::IndexExpression) {
             const auto& index =
                 static_cast<const core::IndexExpression&>(unwrapped);
-            if (Owns(state, Get(state, index.Receiver())))
+            if (_model.TypeOf(index.Receiver()).Kind() !=
+                    SemanticTypeKind::Pointer &&
+                Owns(state, Get(state, index.Receiver())))
                 Report(DiagnosticCode::UnverifiedOwnership, target,
                        "cannot verify mutation of an aggregate containing "
                        "allocation handles");
@@ -502,10 +520,31 @@ class AllocationChecker final {
                     receiver && receiver->Name() == "self" &&
                     receiver->Kind() == SymbolKind::LocalVariable;
                 if (!building) {
-                    Report(DiagnosticCode::UnverifiedOwnership, target,
-                           "owning fields can currently be assigned only "
-                           "during build; tear discharges them",
-                           field->syntax);
+                    if (!receiver || receiver->Name() != "self") {
+                        Report(DiagnosticCode::UnverifiedOwnership, target,
+                               "replace owning fields only through self",
+                               field->syntax);
+                        return;
+                    }
+                    const Value previous = Get(state, member);
+                    if (previous.kind != ValueKind::Null) {
+                        Report(
+                            DiagnosticCode::MemoryLeak, target,
+                            "take the current owning field before replacing it",
+                            field->syntax);
+                        return;
+                    }
+                    if (!Transfer(state, value, target)) return;
+                    if (value.kind == ValueKind::Null) {
+                        state.fieldValues[field->syntax] = {ValueKind::Null};
+                        return;
+                    }
+                    const bool tear =
+                        !_active.empty() && _active.back()->Name() == "tear";
+                    state.resources[&target] = {true, tear, !tear, true};
+                    state.nullPointers.erase(&target);
+                    state.fieldValues[field->syntax] = {ValueKind::Pointer,
+                                                        &target};
                     return;
                 }
                 const auto slot = std::make_pair(receiver, field->syntax);
@@ -580,16 +619,94 @@ class AllocationChecker final {
         return _resourceFunctions.contains(found->second);
     }
 
+    void InvalidateMutableFields(State& state, const FunctionSymbol* function,
+                                 const core::Expression& at,
+                                 const std::vector<Value>& arguments) {
+        if (!function) return;
+        for (const auto& parameter : function->ParameterTypes()) {
+            if (parameter.Kind() != SemanticTypeKind::Reference ||
+                parameter.Target()->Kind() != SemanticTypeKind::Structure ||
+                parameter.Target()->IsConst())
+                continue;
+            for (const auto& field : parameter.Target()->Structure()->fields) {
+                auto slot = state.fieldValues.find(field.syntax);
+                if (slot == state.fieldValues.end()) continue;
+                const auto identity = slot->second.identity;
+                if (identity) {
+                    for (const auto& argument : arguments)
+                        if (RefersTo(argument, identity))
+                            Report(DiagnosticCode::UnverifiedOwnership, at,
+                                   "a mutable owner call cannot also receive "
+                                   "an alias of its owning field",
+                                   identity);
+                    for (const auto& deferred : state.deferred)
+                        for (const auto& argument : deferred.arguments)
+                            if (RefersTo(argument, identity))
+                                Report(DiagnosticCode::UnverifiedOwnership, at,
+                                       "mutable owner call conflicts with a "
+                                       "deferred field alias",
+                                       identity);
+                    state.resources[identity].live = false;
+                    for (auto& [symbol, alias] : state.bindings)
+                        Invalidate(alias, identity);
+                    for (auto& [node, alias] : state.values)
+                        Invalidate(alias, identity);
+                    state.nullPointers.erase(identity);
+                }
+                // A mutable call may replace any owning field. Keep a fresh
+                // abstract field capability, but never revive earlier aliases.
+                const bool tear =
+                    !_active.empty() && _active.back()->Name() == "tear";
+                state.resources[field.syntax] = {true, tear, !tear, true};
+                state.nullPointers.erase(field.syntax);
+                slot->second = {ValueKind::Pointer, field.syntax};
+            }
+        }
+    }
     std::vector<Outcome> Invoke(const core::Expression& expression,
                                 const FunctionSymbol* function,
                                 const std::vector<Value>& arguments,
                                 State state) {
+        if (function && function->BuiltIn() == BuiltInFunction::Take) {
+            const auto& call =
+                static_cast<const core::CallExpression&>(expression);
+            const auto& member =
+                static_cast<const core::MemberAccessExpression&>(
+                    Unwrap(*call.Arguments()[0]));
+            const auto* field = _model.FieldFor(member);
+            Value value = arguments[0];
+            if (value.kind == ValueKind::Null) {
+                state.fieldValues[field->syntax] = {ValueKind::Null};
+                return {{std::move(state), value}};
+            }
+            CheckUse(state, value, expression);
+            auto& resource = state.resources[value.identity];
+            resource.owned = true;
+            resource.lent = false;
+            if (!Transfer(state, value, expression))
+                return {{std::move(state), {}}};
+            state.fieldValues[field->syntax] = {ValueKind::Null};
+            if (state.resources.contains(&expression) &&
+                state.resources[&expression].live) {
+                Report(DiagnosticCode::UnverifiedOwnership, expression,
+                       "take site is revisited while its previous owner is "
+                       "still live");
+                return {{std::move(state), {}}};
+            }
+            for (auto& [symbol, alias] : state.bindings)
+                Retire(alias, &expression);
+            for (auto& [node, alias] : state.values) Retire(alias, &expression);
+            state.resources[&expression] = {true, true, false,
+                                            resource.nullable};
+            return {{std::move(state), {ValueKind::Pointer, &expression}}};
+        }
         if (function && function->BuiltIn() == BuiltInFunction::Free) {
             if (!arguments.empty()) Free(state, arguments[0], expression);
             return {{std::move(state), {}}};
         }
         for (const Value& argument : arguments)
             CheckUse(state, argument, expression);
+        InvalidateMutableFields(state, function, expression, arguments);
         if (!Relevant(function, arguments)) return {{std::move(state), {}}};
         const auto found = _functions.find(function);
         if (found == _functions.end()) {
@@ -999,6 +1116,15 @@ class AllocationChecker final {
                         !state.initializedOwners.contains(
                             {receiver, field->syntax}))
                         return {ValueKind::Null};
+                    if (const auto stored =
+                            state.fieldValues.find(field->syntax);
+                        stored != state.fieldValues.end()) {
+                        Value value = stored->second;
+                        if (state.nullPointers.contains(value.identity))
+                            return {ValueKind::Null};
+                        CheckUse(state, value, expression);
+                        return value;
+                    }
                     if (state.nullPointers.contains(field->syntax))
                         return {ValueKind::Null};
                     if (!state.resources.contains(field->syntax))
@@ -1023,9 +1149,18 @@ class AllocationChecker final {
                     static_cast<const core::IndexExpression&>(expression);
                 Value receiver = Get(state, index.Receiver());
                 const Value subscript = Get(state, index.Index());
-                if (receiver.kind == ValueKind::Address)
+                if (receiver.kind == ValueKind::Address &&
+                    _model.TypeOf(index.Receiver()).Kind() !=
+                        SemanticTypeKind::Pointer)
                     receiver = Binding(state, receiver.address);
-                CheckUse(state, receiver, expression);
+                const bool heap = _model.TypeOf(index.Receiver()).Kind() ==
+                                  SemanticTypeKind::Pointer;
+                CheckUse(state, receiver, expression, heap);
+                if (heap && (receiver.kind == ValueKind::Address ||
+                             receiver.kind == ValueKind::Interior))
+                    Report(DiagnosticCode::UnverifiedOwnership, expression,
+                           "raw indexing requires a runtime allocation base",
+                           receiver.identity);
                 if (receiver.kind == ValueKind::Aggregate) {
                     if (subscript.kind == ValueKind::Integer &&
                         subscript.integer < receiver.elements.size())
@@ -1339,8 +1474,11 @@ class AllocationChecker final {
                             HasOwningFields(function))
                             for (const auto& field :
                                  Function(function)->Owner()->fields) {
-                                const auto resource =
-                                    finished.resources.find(field.syntax);
+                                const auto resource = finished.resources.find(
+                                    finished.fieldValues.contains(field.syntax)
+                                        ? finished.fieldValues.at(field.syntax)
+                                              .identity
+                                        : field.syntax);
                                 if (field.syntax->Type().Contract() ==
                                         OwnershipContract::Own &&
                                     resource != finished.resources.end() &&
@@ -1515,7 +1653,7 @@ class AllocationChecker final {
     std::vector<const core::FunctionDeclaration*> _ordered;
     std::set<const core::FunctionDeclaration*> _resourceFunctions;
     std::vector<const core::FunctionDeclaration*> _active;
-    std::set<std::pair<DiagnosticCode, std::size_t>> _reported;
+    std::set<std::pair<DiagnosticCode, source::SourceLocation>> _reported;
     std::size_t _steps = 0;
 };
 }  // namespace

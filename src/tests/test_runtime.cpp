@@ -89,3 +89,29 @@ TEST(RuntimeAllocationTests, RejectsInvalidAlignmentAndSizeOverflow) {
     EXPECT_EQ(flecha_runtime_v1_alloc(SIZE_MAX, 8), nullptr);
     EXPECT_EQ(flecha_runtime_v1_alloc(SIZE_MAX - sizeof(void*), 64), nullptr);
 }
+
+TEST(RuntimeAllocationTests, AllocatesZeroedRuntimeElementCounts) {
+    auto* elements = static_cast<int32_t*>(
+        flecha_runtime_v1_alloc_array(37, sizeof(int32_t), alignof(int32_t)));
+    ASSERT_NE(elements, nullptr);
+    for (size_t i = 0; i < 37; ++i) {
+        EXPECT_EQ(elements[i], 0);
+        elements[i] = static_cast<int32_t>(i);
+    }
+    EXPECT_EQ(elements[36], 36);
+    EXPECT_EQ(flecha_runtime_v1_allocation_count(elements), 37u);
+    flecha_runtime_v1_free(elements);
+    void* empty = flecha_runtime_v1_alloc_array(0, sizeof(int32_t), 64);
+    ASSERT_NE(empty, nullptr);
+    EXPECT_EQ(reinterpret_cast<uintptr_t>(empty) % 64, 0u);
+    EXPECT_EQ(flecha_runtime_v1_allocation_count(empty), 0u);
+    EXPECT_EQ(flecha_runtime_v1_allocation_count(nullptr), 0u);
+    flecha_runtime_v1_free(empty);
+}
+
+TEST(RuntimeAllocationTests, RejectsArrayOverflowBeforeAllocating) {
+    EXPECT_EQ(flecha_runtime_v1_alloc_array(SIZE_MAX / 4 + 1, 4, 4), nullptr);
+    EXPECT_EQ(flecha_runtime_v1_alloc_array(SIZE_MAX, 2, 8), nullptr);
+    EXPECT_EQ(flecha_runtime_v1_alloc_array(1, 0, 8), nullptr);
+    EXPECT_EQ(flecha_runtime_v1_alloc_array(0, 4, 3), nullptr);
+}

@@ -1,0 +1,52 @@
+unsafe (own *i32, error) array_allocate(usize count) { return new<[]i32>(count); }
+unsafe i32 array_values_test() {
+    p, e := array_allocate(7);
+    if e != none { return 1; }
+    defer free(p);
+    usize i = 0;
+    while i < 7 {
+        if p[i] != 0 { return 2; }
+        p[i] = (i as i32) * 7;
+        i++;
+    }
+    return p[6];
+}
+unsafe i32 array_zero_test() {
+    p, e := new<[]i32>(0);
+    if e != none { return 1; }
+    free(p);
+    return 42;
+}
+unsafe i32 array_overflow_test() {
+    usize count = (0 as usize) - 1;
+    p, e := new<[]i32>(count);
+    defer free(p);
+    if e != AllocationError.OutOfMemory { return 1; }
+    if p != null { return 2; }
+    return 42;
+}
+unsafe usize array_count_once(&i32 calls) { *calls = *calls + 1; return 4; }
+unsafe i32 array_failure_test() {
+    i32 calls = 0;
+    p, e := new<[]i32>(array_count_once(&calls));
+    defer free(p);
+    if calls != 1 { return 1; }
+    if e != AllocationError.OutOfMemory { return 2; }
+    if p != null { return 3; }
+    return 42;
+}
+unsafe i32 array_bool_test() {
+    p, e := new<[]bool>(3);
+    if e != none { return 1; }
+    defer free(p);
+    if p[2] { return 2; }
+    p[2] = true;
+    if p[2] { return 42; }
+    return 3;
+}
+unsafe i32 array_bounds_test(usize count) {
+    p, e := new<[]i32>(count);
+    if e != none { return 1; }
+    defer free(p);
+    return p[count];
+}

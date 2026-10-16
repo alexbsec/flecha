@@ -172,12 +172,122 @@ Scope& SemanticAnalyzer::AddScope(const Scope* parent) {
     return *_model._scopes.back();
 }
 
+void SemanticAnalyzer::SetModule(const std::string& id) {
+    const auto found = _moduleScopes.find(id);
+    if (found != _moduleScopes.end()) _currentScope = found->second;
+}
+std::string SemanticAnalyzer::TopName(const core::Declaration& declaration,
+                                      const std::string& name) const {
+    if (name == "main" && _entryModules.contains(declaration.moduleId) &&
+        declaration.Kind() == core::AstNodeKind::FunctionDeclaration)
+        return name;
+    return declaration.moduleId + name;
+}
+void SemanticAnalyzer::BindImports(const core::CompilationUnit& unit) {
+    for (const auto& module : unit.modules) {
+        auto* scope = _moduleScopes.at(module.id);
+        for (const auto& import : module.imports) {
+            for (const auto& declaration : unit.Declarations()) {
+                if (declaration->moduleId != import.resolvedModule ||
+                    !declaration->exported)
+                    continue;
+                const Symbol* symbol = _model.DeclaredSymbol(*declaration);
+                if (!symbol) continue;
+                std::string name;
+                if (declaration->Kind() ==
+                    core::AstNodeKind::FunctionDeclaration) {
+                    const auto& function =
+                        static_cast<const core::FunctionDeclaration&>(
+                            *declaration);
+                    if (!function.Owner().empty()) continue;
+                    name = function.Name();
+                } else if (declaration->Kind() ==
+                           core::AstNodeKind::StructureDeclaration)
+                    name = static_cast<const core::StructureDeclaration&>(
+                               *declaration)
+                               .Name();
+                else if (declaration->Kind() ==
+                         core::AstNodeKind::ErrorDeclaration)
+                    name =
+                        static_cast<const core::ErrorDeclaration&>(*declaration)
+                            .Name();
+                if (!name.empty())
+                    (void)scope->DeclareAs(import.alias + "::" + name, *symbol);
+            }
+        }
+    }
+}
+
+void SemanticAnalyzer::ValidateExports(const core::CompilationUnit& unit) {
+    std::unordered_set<const ErrorFamily*> privateErrors;
+    for (const auto& declaration : unit.Declarations())
+        if (declaration->Kind() == core::AstNodeKind::ErrorDeclaration &&
+            !declaration->exported) {
+            const auto* symbol = _model.DeclaredSymbol(*declaration);
+            if (symbol) privateErrors.insert(&symbol->Type().Family());
+        }
+    std::function<bool(SemanticType)> visible = [&](SemanticType type) {
+        if (type.Kind() == SemanticTypeKind::Structure)
+            return type.Structure()->syntax->exported;
+        if (type.Kind() == SemanticTypeKind::NamedError)
+            return !privateErrors.contains(&type.Family());
+        if (type.Kind() == SemanticTypeKind::Tuple) {
+            for (const auto& element : type.Elements())
+                if (!visible(element)) return false;
+        }
+        return !type.Target() || visible(*type.Target());
+    };
+    const auto check = [&](SemanticType type, source::SourceRange range) {
+        if (!visible(type))
+            Report(diagnostics::DiagnosticCode::PrivateAccess, range,
+                   "exported APIs cannot expose private types; export the type "
+                   "or make the member private");
+    };
+    for (const auto& structure : _model._structures) {
+        if (!structure->syntax->exported) continue;
+        for (const auto& field : structure->fields)
+            if (!field.syntax->IsPrivate())
+                check(field.type, field.syntax->Range());
+        for (const auto& [name, method] : structure->methods) {
+            if (method->IsPrivate() || name == "tear") continue;
+            check(method->ReturnType(), method->DeclarationRange());
+            for (const auto& parameter : method->ParameterTypes())
+                check(parameter, method->DeclarationRange());
+        }
+    }
+    for (const auto& declaration : unit.Declarations()) {
+        if (!declaration->exported ||
+            declaration->Kind() != core::AstNodeKind::FunctionDeclaration)
+            continue;
+        const auto* function = static_cast<const FunctionSymbol*>(
+            _model.DeclaredSymbol(*declaration));
+        if (!function) continue;
+        check(function->ReturnType(), declaration->Range());
+        for (const auto& parameter : function->ParameterTypes())
+            check(parameter, declaration->Range());
+    }
+}
+
 const Symbol* SemanticAnalyzer::AddSymbol(std::unique_ptr<Symbol> symbol,
                                           const core::AstNode& declaration) {
     const Symbol* result = symbol.get();
     _model._symbols.push_back(std::move(symbol));
     _model._declarations.emplace(&declaration, result);
-    if (!_currentScope->Declare(*result)) {
+    std::string localName = result->Name();
+    if (declaration.Kind() == core::AstNodeKind::StructureDeclaration)
+        localName =
+            static_cast<const core::StructureDeclaration&>(declaration).Name();
+    else if (declaration.Kind() == core::AstNodeKind::ErrorDeclaration)
+        localName =
+            static_cast<const core::ErrorDeclaration&>(declaration).Name();
+    else if (declaration.Kind() == core::AstNodeKind::FunctionDeclaration) {
+        const auto& function =
+            static_cast<const core::FunctionDeclaration&>(declaration);
+        if (function.Owner().empty()) localName = function.Name();
+    }
+    const bool declared = _currentScope->DeclareAs(localName, *result);
+    if (localName != result->Name()) (void)_currentScope->Declare(*result);
+    if (!declared) {
         Report(diagnostics::DiagnosticCode::DuplicateDeclaration,
                result->DeclarationRange(),
                "duplicate declaration of '" + result->Name() + "'");
@@ -431,8 +541,9 @@ void SemanticAnalyzer::RegisterErrorTypes(const core::CompilationUnit& unit) {
             continue;
         const auto& error =
             static_cast<const core::ErrorDeclaration&>(*declaration);
+        SetModule(error.moduleId);
         auto family = std::make_shared<ErrorFamily>();
-        family->name = error.Name();
+        family->name = TopName(error, error.Name());
         std::unordered_set<std::string> variants;
         for (const auto& variant : error.Variants()) {
             if (!variants.insert(variant.name).second)
@@ -446,7 +557,8 @@ void SemanticAnalyzer::RegisterErrorTypes(const core::CompilationUnit& unit) {
                    error.Range(),
                    "error types require at least one failure variant; none is "
                    "implicit");
-        AddSymbol(std::make_unique<Symbol>(SymbolKind::ErrorType, error.Name(),
+        AddSymbol(std::make_unique<Symbol>(SymbolKind::ErrorType,
+                                           TopName(error, error.Name()),
                                            SemanticType(std::move(family)),
                                            error.NameRange(), false),
                   error);
@@ -462,6 +574,7 @@ void SemanticAnalyzer::RegisterFunctions(const core::CompilationUnit& unit) {
 
 void SemanticAnalyzer::RegisterFunction(
     const core::FunctionDeclaration& function, bool generated) {
+    SetModule(function.moduleId);
     StructureType* owner = nullptr;
     if (!function.Owner().empty()) {
         const Symbol* type = _currentScope->Lookup(function.Owner());
@@ -516,8 +629,14 @@ void SemanticAnalyzer::RegisterFunction(
          parameterTypes[0].Target()->IsConst()))
         Report(diagnostics::DiagnosticCode::InvalidLifecycle, function.Range(),
                "tear must return void and take only &self");
-    const std::string name =
-        owner ? owner->name + "::" + function.Name() : function.Name();
+    if (owner && function.exported)
+        Report(diagnostics::DiagnosticCode::InvalidStructure, function.Range(),
+               "export the structure, not individual member functions");
+    if (owner && owner->syntax->moduleId != function.moduleId)
+        Report(diagnostics::DiagnosticCode::PrivateAccess, function.Range(),
+               "methods must be defined in their structure's module");
+    const std::string name = owner ? owner->name + "::" + function.Name()
+                                   : TopName(function, function.Name());
     const auto* symbol = static_cast<const FunctionSymbol*>(AddSymbol(
         std::make_unique<FunctionSymbol>(
             name, returnType, std::move(parameterTypes), function.NameRange(),
@@ -545,11 +664,48 @@ SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
     _buildDepth = 0;
     _currentScope = &AddScope(nullptr);
     RegisterBuiltIns();
+    _moduleScopes.clear();
+    _entryModules.clear();
+    Scope* builtins = _currentScope;
+    _moduleScopes[""] = builtins;
+    for (const auto& module : unit.modules) {
+        if (!module.id.empty()) _moduleScopes[module.id] = &AddScope(builtins);
+        if (module.entry) _entryModules.insert(module.id);
+        for (const auto& import : module.imports)
+            for (const auto& declaration : unit.Declarations()) {
+                if (declaration->moduleId != module.id) continue;
+                std::string name;
+                if (declaration->Kind() ==
+                    core::AstNodeKind::FunctionDeclaration) {
+                    const auto& function =
+                        static_cast<const core::FunctionDeclaration&>(
+                            *declaration);
+                    if (function.Owner().empty()) name = function.Name();
+                }
+                if (declaration->Kind() ==
+                    core::AstNodeKind::StructureDeclaration)
+                    name = static_cast<const core::StructureDeclaration&>(
+                               *declaration)
+                               .Name();
+                if (declaration->Kind() == core::AstNodeKind::ErrorDeclaration)
+                    name =
+                        static_cast<const core::ErrorDeclaration&>(*declaration)
+                            .Name();
+                if (name == import.alias)
+                    Report(diagnostics::DiagnosticCode::DuplicateDeclaration,
+                           import.range,
+                           "import alias conflicts with declaration '" + name +
+                               "'");
+            }
+    }
     RegisterErrorTypes(unit);
     RegisterStructures(unit);
+    BindImports(unit);
     ResolveStructureFields();
     RegisterFunctions(unit);
     GenerateInitializers();
+    BindImports(unit);
+    ValidateExports(unit);
     for (const auto& structure : _model._structures)
         for (const auto& field : structure->fields)
             if (field.syntax->Type().Contract() ==
@@ -569,6 +725,7 @@ SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
     for (const auto& structure : _model._structures)
         for (const auto& field : structure->fields)
             if (field.syntax->Initializer()) {
+                SetModule(structure->syntax->moduleId);
                 const SemanticType actual =
                     AnalyzeExpression(*field.syntax->Initializer(), field.type);
                 if (!IsAssignable(field.type, actual))
@@ -595,6 +752,7 @@ SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
 
 void SemanticAnalyzer::AnalyzeFunction(
     const core::FunctionDeclaration& function) {
+    SetModule(function.moduleId);
     const std::size_t diagnosticsBefore = _diagnostics.Diagnostics().size();
     _buildSelf = nullptr;
     _buildDepth = 0;
@@ -851,10 +1009,12 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             if (symbol == nullptr || symbol->Kind() != SymbolKind::Function)
                 break;
             const auto& function = static_cast<const FunctionSymbol&>(*symbol);
-            if (function.BuiltIn() == BuiltInFunction::New) {
+            if (function.BuiltIn() == BuiltInFunction::New ||
+                function.BuiltIn() == BuiltInFunction::Take) {
                 Report(diagnostics::DiagnosticCode::InvalidDefer,
                        expression->Range(),
-                       "defer new would discard an allocation; defer free(ptr) "
+                       "defer new or take would discard ownership; defer "
+                       "free(ptr) "
                        "instead");
                 break;
             }
@@ -1367,6 +1527,11 @@ bool SemanticAnalyzer::IsSafePlace(const core::Expression& expression) const {
                 .Inner());
     if (expression.Kind() == core::AstNodeKind::NameExpression)
         return !PlaceType(expression).IsError();
+    if (expression.Kind() == core::AstNodeKind::IndexExpression &&
+        _model.TypeOf(static_cast<const core::IndexExpression&>(expression)
+                          .Receiver())
+                .Kind() == SemanticTypeKind::Pointer)
+        return false;
     if (expression.Kind() == core::AstNodeKind::IndexExpression)
         return !PlaceType(expression).IsError() &&
                (_model.TypeOf(
@@ -1407,6 +1572,11 @@ bool SemanticAnalyzer::IsReferencePlace(
         return IsReferencePlace(
             static_cast<const core::ParenthesizedExpression&>(expression)
                 .Inner());
+    if (expression.Kind() == core::AstNodeKind::IndexExpression &&
+        _model.TypeOf(static_cast<const core::IndexExpression&>(expression)
+                          .Receiver())
+                .Kind() == SemanticTypeKind::Pointer)
+        return false;
     if (expression.Kind() == core::AstNodeKind::IndexExpression)
         return _model.TypeOf(
                          static_cast<const core::IndexExpression&>(expression)
@@ -1444,7 +1614,9 @@ SemanticType SemanticAnalyzer::PlaceType(
         if (call.Member() != "front" && call.Member() != "back")
             return SemanticType::Error();
         const SemanticType value = _model.TypeOf(call.Receiver());
-        if (value.Kind() == SemanticTypeKind::Slice) return *value.Target();
+        if (value.Kind() == SemanticTypeKind::Slice ||
+            value.Kind() == SemanticTypeKind::Pointer)
+            return *value.Target();
         const SemanticType place = PlaceType(call.Receiver());
         if (place.Kind() == SemanticTypeKind::Array)
             return place.IsConst() ? place.Target()->WithConst()
@@ -1465,7 +1637,9 @@ SemanticType SemanticAnalyzer::PlaceType(
         const auto& index =
             static_cast<const core::IndexExpression&>(expression);
         const SemanticType value = _model.TypeOf(index.Receiver());
-        if (value.Kind() == SemanticTypeKind::Slice) return *value.Target();
+        if (value.Kind() == SemanticTypeKind::Slice ||
+            value.Kind() == SemanticTypeKind::Pointer)
+            return *value.Target();
         const SemanticType receiver = PlaceType(index.Receiver());
         if (receiver.Kind() == SemanticTypeKind::Array)
             return receiver.IsConst() ? receiver.Target()->WithConst()
@@ -1803,12 +1977,25 @@ SemanticType SemanticAnalyzer::AnalyzeAllocationCall(
     RequireUnsafe(expression.Range());
     const bool allocate = intrinsic == BuiltInFunction::New;
     SemanticType element = SemanticType::Error();
+    const bool dynamic =
+        allocate && expression.TypeArgument() &&
+        expression.TypeArgument()->TypeForm() == core::TypeKind::Slice;
     if (allocate) {
         if (!expression.TypeArgument())
             Report(diagnostics::DiagnosticCode::InvalidAllocation,
                    expression.Range(), "allocation requires new<T>(value)");
         else {
-            element = ResolveType(*expression.TypeArgument());
+            element = ResolveType(dynamic ? *expression.TypeArgument()->Target()
+                                          : *expression.TypeArgument());
+            if (dynamic && expression.TypeArgument()->IsConst())
+                element = element.WithConst();
+            if (dynamic && !(element.IsNumeric() ||
+                             element.Kind() == SemanticTypeKind::Bool ||
+                             element.Kind() == SemanticTypeKind::Char))
+                Report(diagnostics::DiagnosticCode::InvalidAllocation,
+                       expression.TypeArgument()->Range(),
+                       "runtime arrays currently require numeric, bool, or "
+                       "char elements");
             if (!element.IsError() && !StorageSize(element))
                 Report(
                     diagnostics::DiagnosticCode::InvalidAllocation,
@@ -1820,20 +2007,23 @@ SemanticType SemanticAnalyzer::AnalyzeAllocationCall(
     if (expression.Arguments().size() != 1)
         Report(diagnostics::DiagnosticCode::WrongArgumentCount,
                expression.Range(),
-               allocate ? "new<T> requires exactly one initializer"
+               allocate ? (dynamic ? "new<[]T> requires exactly one usize count"
+                                   : "new<T> requires exactly one initializer")
                         : "free requires exactly one raw pointer");
+    const SemanticType input =
+        dynamic ? SemanticType(SemanticTypeKind::USize) : element;
     SemanticType argument = SemanticType::Error();
     for (const auto& value : expression.Arguments()) {
-        argument = AnalyzeExpression(
-            *value, allocate ? element : SemanticType::Error());
+        argument =
+            AnalyzeExpression(*value, allocate ? input : SemanticType::Error());
         if (allocate) {
-            CheckCopy(*value, element);
-            if (!IsAssignable(element, argument))
+            CheckCopy(*value, input);
+            if (!IsAssignable(input, argument))
                 Report(diagnostics::DiagnosticCode::IncompatibleArgument,
-                       value->Range(), TypeMismatch(element, argument));
+                       value->Range(), TypeMismatch(input, argument));
         }
     }
-    SemanticType parameter = element;
+    SemanticType parameter = input;
     SemanticType result(SemanticTypeKind::Void);
     if (allocate) {
         result = SemanticType(std::vector<SemanticType>{
@@ -1866,6 +2056,65 @@ SemanticType SemanticAnalyzer::AnalyzeAllocationCall(
 
 SemanticType SemanticAnalyzer::AnalyzeCall(
     const core::CallExpression& expression) {
+    if (expression.Callee().Kind() == core::AstNodeKind::NameExpression &&
+        static_cast<const core::NameExpression&>(expression.Callee()).Name() == "take" &&
+        !_currentScope->Lookup("take")) {
+        RequireUnsafe(expression.Range());
+        if (expression.Arguments().size() != 1) {
+            Report(diagnostics::DiagnosticCode::WrongArgumentCount,
+                   expression.Range(),
+                   "take requires exactly one owning self field");
+            return SemanticType::Error();
+        }
+        const auto& argument = *expression.Arguments()[0];
+        const auto type = AnalyzeExpression(argument);
+        const auto place = PlaceType(argument);
+        const core::Expression* unwrapped = &argument;
+        while (unwrapped->Kind() == core::AstNodeKind::ParenthesizedExpression)
+            unwrapped =
+                &static_cast<const core::ParenthesizedExpression&>(*unwrapped)
+                     .Inner();
+        bool valid = false;
+        if (unwrapped->Kind() == core::AstNodeKind::MemberAccessExpression) {
+            const auto& member =
+                static_cast<const core::MemberAccessExpression&>(*unwrapped);
+            const auto* field = _model.FieldFor(member);
+            const auto* receiver = &member.Receiver();
+            while (receiver->Kind() ==
+                   core::AstNodeKind::ParenthesizedExpression)
+                receiver = &static_cast<const core::ParenthesizedExpression&>(
+                                *receiver)
+                                .Inner();
+            valid =
+                field &&
+                field->syntax->Type().Contract() ==
+                    core::OwnershipContract::Own &&
+                receiver->Kind() == core::AstNodeKind::NameExpression &&
+                static_cast<const core::NameExpression&>(*receiver).Name() ==
+                    "self" &&
+                CurrentOwner() && _currentFunction->HasReceiver() &&
+                _model.SymbolFor(
+                    static_cast<const core::NameExpression&>(*receiver)) &&
+                _model.SymbolFor(
+                          static_cast<const core::NameExpression&>(*receiver))
+                        ->Kind() == SymbolKind::Parameter &&
+                member.Access() == TokenType::Arrow && !place.IsConst();
+        }
+        if (!valid)
+            Report(
+                diagnostics::DiagnosticCode::UnverifiedOwnership,
+                argument.Range(),
+                "take requires a mutable owning field accessed through self");
+        const auto& callee =
+            static_cast<const core::NameExpression&>(expression.Callee());
+        auto specialized = std::make_unique<FunctionSymbol>(
+            callee.Name(), type, std::vector<SemanticType>{type},
+            callee.Range(), BuiltInFunction::Take, true);
+        _model._types.insert_or_assign(&callee, SemanticType(SemanticTypeKind::Function));
+        _model._bindings[&callee] = specialized.get();
+        _model._symbols.push_back(std::move(specialized));
+        return type;
+    }
     const SemanticType calleeType = AnalyzeExpression(expression.Callee());
     const FunctionSymbol* function = nullptr;
     if (expression.Callee().Kind() == core::AstNodeKind::NameExpression) {
@@ -2107,11 +2356,19 @@ SemanticType SemanticAnalyzer::AnalyzeSlice(
 SemanticType SemanticAnalyzer::AnalyzeIndex(
     const core::IndexExpression& expression) {
     const SemanticType receiver = AnalyzeExpression(expression.Receiver());
+    const bool heap = receiver.Kind() == SemanticTypeKind::Pointer;
+    if (heap) {
+        RequireUnsafe(expression.Range());
+        if (!StorageSize(*receiver.Target()))
+            Report(diagnostics::DiagnosticCode::InvalidAllocation,
+                   expression.Range(),
+                   "raw indexing requires a pointer to a sized value type");
+    }
     const SemanticType index = AnalyzeExpression(
-        expression.Index(), receiver.IsSequence()
+        expression.Index(), (receiver.IsSequence() || heap)
                                 ? SemanticType(SemanticTypeKind::USize)
                                 : SemanticType::Error());
-    if (receiver.IsSequence()) {
+    if ((receiver.IsSequence() || heap)) {
         if (!index.IsError() && index.Kind() != SemanticTypeKind::USize)
             Report(diagnostics::DiagnosticCode::IncompatibleArgument,
                    expression.Index().Range(),
@@ -2156,11 +2413,12 @@ void SemanticAnalyzer::RegisterStructures(const core::CompilationUnit& unit) {
             continue;
         const auto& syntax =
             static_cast<const core::StructureDeclaration&>(*declaration);
+        SetModule(syntax.moduleId);
         auto structure = std::make_unique<StructureType>();
-        structure->name = syntax.Name();
+        structure->name = TopName(syntax, syntax.Name());
         structure->syntax = &syntax;
         AddSymbol(std::make_unique<Symbol>(
-                      SymbolKind::StructureType, syntax.Name(),
+                      SymbolKind::StructureType, TopName(syntax, syntax.Name()),
                       SemanticType(structure.get()), syntax.NameRange(), false),
                   syntax);
         _model._structures.push_back(std::move(structure));
@@ -2169,6 +2427,7 @@ void SemanticAnalyzer::RegisterStructures(const core::CompilationUnit& unit) {
 
 void SemanticAnalyzer::ResolveStructureFields() {
     for (const auto& structure : _model._structures) {
+        SetModule(structure->syntax->moduleId);
         std::unordered_set<std::string> names;
         for (const auto& field : structure->syntax->Fields()) {
             if (!names.insert(field->Name()).second)
@@ -2225,9 +2484,11 @@ void SemanticAnalyzer::ResolveStructureFields() {
     }
     // Layouts must be complete before applying the ordinary compound-type
     // checks, including unsupported types hidden behind a pointer field.
-    for (const auto& structure : _model._structures)
+    for (const auto& structure : _model._structures) {
+        SetModule(structure->syntax->moduleId);
         for (const auto& field : structure->fields)
             (void)ResolveType(field.syntax->Type());
+    }
 }
 
 void SemanticAnalyzer::GenerateInitializers() {
@@ -2269,6 +2530,7 @@ void SemanticAnalyzer::GenerateInitializers() {
             std::make_unique<core::BlockStatement>(range,
                                                    std::move(statements)),
             range, structure->name);
+        init->moduleId = structure->syntax->moduleId;
         RegisterFunction(*init, true);
         _model._generatedFunctions.push_back(std::move(init));
     }
