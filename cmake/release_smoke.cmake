@@ -13,9 +13,10 @@ execute_process(
     RESULT_VARIABLE versionResult
     OUTPUT_VARIABLE versionOutput
     ERROR_VARIABLE versionError
+    OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 if(NOT versionResult EQUAL 0 OR
-   NOT versionOutput MATCHES "^flecha 0\\.1\\.0")
+   NOT versionOutput MATCHES "^flecha [0-9]+\\.[0-9]+\\.[0-9]+$")
     message(FATAL_ERROR
         "compiler version probe failed: ${versionOutput}${versionError}")
 endif()
@@ -56,6 +57,7 @@ execute_process(
     OUTPUT_VARIABLE runOutput
     ERROR_VARIABLE runError
 )
+string(REPLACE "\r\n" "\n" runOutput "${runOutput}")
 if(NOT runResult EQUAL 0 OR NOT runOutput STREQUAL "Hello from Flecha!\n")
     message(FATAL_ERROR
         "Longbow smoke failed: ${runOutput}${runError}")

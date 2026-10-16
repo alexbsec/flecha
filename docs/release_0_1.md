@@ -62,12 +62,36 @@ a native Flecha program, and complete the Longbow `new`, `check`, `build`, and
   `runtimepath` without the source checkout.
 - Every published archive has a checksum and concise changelog.
 
+## Automation
+
+Pull requests and pushes to `master` run `.github/workflows/ci.yml`. The
+workflow checks patch whitespace, runs the full Linux test and editor suites,
+runs AddressSanitizer and UBSan, and performs native build, Longbow, package,
+and installed-layout smoke tests on Linux, Windows, Intel macOS, and Apple
+silicon macOS.
+
+Publishing a GitHub Release runs `.github/workflows/release.yml`. Use a semantic
+version tag matching the compiler and VS Code extension, for example `v0.1.0`.
+The tag must point to a commit contained in `master`. All platform archives are
+built and retained as workflow artifacts first. Only after every platform
+succeeds does the final job attach the archives and `SHA256SUMS` to the GitHub
+Release.
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Create a GitHub Release for that tag and publish it. Draft releases do not start
+the workflow until they are published. Re-running a successful release workflow
+replaces assets with the same names.
+
 ## Work remaining
 
 The repository now has Linux, Windows, Intel macOS, and Apple-silicon macOS
 package jobs. Each job builds the tools, runs native compiler and Longbow smoke
-tests from both the build and installed layouts, creates archives, and uploads
-them. The remaining work is:
+tests from both the build and installed layouts, and creates archives. The
+remaining work is:
 
 1. Make the platform package jobs green on the hosted runners and pin the
    exact supported LLVM/toolchain versions from those results.

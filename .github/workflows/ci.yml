@@ -1,26 +1,85 @@
-name: CI
+name: Pull request validation
 
 on:
-  push:
   pull_request:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pull-request-validation-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   linux-tests:
+    name: Linux tests and editor checks
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - name: Install LLVM development files
+        with:
+          fetch-depth: 0
+
+      - name: Check patch whitespace
+        if: github.event_name == 'pull_request'
+        run: git diff --check "${{ github.event.pull_request.base.sha }}...HEAD"
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-dev ninja-build neovim
+
+      - name: Configure
+        run: cmake -S . -B build-tests -G Ninja -DBUILD_TESTING=ON
+
+      - name: Build
+        run: cmake --build build-tests --parallel
+
+      - name: Run compiler and runtime tests
+        run: ctest --test-dir build-tests --output-on-failure
+
+      - name: Run Neovim syntax tests
+        run: make test-neovim
+
+  sanitizers:
+    name: AddressSanitizer and UBSan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y llvm-dev ninja-build
-      - name: Configure
-        run: cmake -S . -B build-tests -G Ninja -DBUILD_TESTING=ON
-      - name: Build
-        run: cmake --build build-tests --parallel
-      - name: Test
-        run: ctest --test-dir build-tests --output-on-failure
 
-  platform-package:
+      - name: Configure sanitizer build
+        run: >-
+          cmake -S . -B build-sanitizers -G Ninja
+          -DBUILD_TESTING=ON
+          -DFLECHA_ENABLE_SANITIZERS=ON
+
+      - name: Build sanitizer targets
+        run: cmake --build build-sanitizers --parallel
+
+      - name: Run sanitized unit tests
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: build-sanitizers/src/tests/test_flecha
+
+      - name: Run sanitized native smoke tests
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: >-
+          ctest --test-dir build-sanitizers --output-on-failure
+          -R '^NativeSemanticTests\.(ControlFlowDefiniteAssignment|ConstDeclarations|UnsafePointers|CheckedReferences|FixedArrays|Iteration|CheckedSlices|Defer|Tuples|ErrorValues|Structures|RawAllocation)$'
+
+  platform-build:
+    name: Build and package (${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
@@ -31,10 +90,10 @@ jobs:
           - os: windows-2025
             name: windows-x86_64
             suffix: .exe
-          - os: macos-15
+          - os: macos-15-intel
             name: macos-x86_64
             suffix: ""
-          - os: macos-15-arm64
+          - os: macos-15
             name: macos-arm64
             suffix: ""
     runs-on: ${{ matrix.os }}
@@ -61,11 +120,12 @@ jobs:
           "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
           "LLVM_DIR=C:\Program Files\LLVM\lib\cmake\llvm" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Configure
+      - name: Configure release build
         shell: bash
         run: >-
           cmake -S . -B build -G Ninja
           -DBUILD_TESTING=OFF
+          -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=clang
           -DCMAKE_CXX_COMPILER=clang++
           "-DLLVM_DIR=$LLVM_DIR"
@@ -84,7 +144,7 @@ jobs:
           "-DEXECUTABLE_SUFFIX=${{ matrix.suffix }}"
           -P cmake/release_smoke.cmake
 
-      - name: Package
+      - name: Build release archives
         run: cmake --build build --target package
 
       - name: Verify installed layout
@@ -98,11 +158,3 @@ jobs:
             "-DOUTPUT_ROOT=$PWD/build/installed-smoke" \
             "-DEXECUTABLE_SUFFIX=${{ matrix.suffix }}" \
             -P cmake/release_smoke.cmake
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: flecha-${{ matrix.name }}
-          path: |
-            build/flecha-*.tar.gz
-            build/flecha-*.zip
-          if-no-files-found: error

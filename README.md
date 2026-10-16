@@ -232,6 +232,12 @@ The documentation intentionally labels proposals and proof-of-concept functional
 
 Use the existing build and test targets when possible. C++ code follows the conventions in [`CODE_STYLE.md`](CODE_STYLE.md), and generated build directories should remain uncommitted. Before opening a change, run the relevant focused tests as well as `make test` when practical.
 
+Pull requests run unit and native tests, sanitizers, editor checks, and
+cross-platform package smoke tests. Publishing a GitHub Release with a matching
+semantic version tag such as `v0.1.0` builds and attaches the Linux, Windows,
+and macOS bundles automatically. See the
+[`v0.1.0 automation guide`](docs/release_0_1.md#automation).
+
 The working tree may contain experimental language work, so changes should preserve existing diagnostics, examples, and test fixtures unless the behavior change is intentional and documented.
 
 ## Contributing
