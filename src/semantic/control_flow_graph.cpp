@@ -334,6 +334,16 @@ class GraphBuilder final {
                     next = BuildExpression(**element, next);
                 return next;
             }
+            case core::AstNodeKind::MatchExpression: {
+                const auto& match =
+                    static_cast<const core::MatchExpression&>(expression);
+                std::vector<NodeId> alternatives;
+                alternatives.reserve(match.Arms().size());
+                for (const auto& arm : match.Arms())
+                    alternatives.push_back(BuildExpression(arm->Value(), next));
+                const NodeId dispatch = AddNode(std::move(alternatives));
+                return BuildExpression(match.Value(), dispatch);
+            }
             case core::AstNodeKind::NameExpression: {
                 const NodeId read = AddNode({next});
                 _graph.nodes[read].read =

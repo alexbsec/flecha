@@ -83,6 +83,8 @@ TEST(DiagnosticTests, SemanticCodesAreStableAndContiguous) {
               "FLECHA-S0022");
     EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::InvalidExtern),
               "FLECHA-S0055");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::InvalidMatch),
+              "FLECHA-S0057");
 }
 
 TEST(DiagnosticTests, CompilerCodesAreStableAndContiguous) {

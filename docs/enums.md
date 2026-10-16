@@ -98,5 +98,7 @@ default construction needs the enum to declare a default variant. Non-zero
 defaults are emitted as semantic initialization rather than bytewise zeroing.
 
 The numeric representation is an implementation detail of the declared enum;
-enum types are not currently permitted in `extern` signatures. Exhaustive
-`match` expressions are planned separately and are not part of this milestone.
+enum types are not currently permitted in `extern` signatures. Enums can be
+inspected with exhaustive `match` expressions. See
+[enum matching](match.md) for patterns, wildcard arms, result typing, and the
+current restrictions.

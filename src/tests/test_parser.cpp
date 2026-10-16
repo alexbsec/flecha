@@ -1196,6 +1196,27 @@ TEST(ParserEnumTests, UsesU32WhenTheBackingTypeIsOmitted) {
     ASSERT_EQ(enumeration.Variants().size(), 2);
 }
 
+TEST(ParserEnumTests, ParsesRustStyleMatchExpressions) {
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource(
+        "enum TokenKind { Identifier, Number, End, } "
+        "i32 classify(TokenKind kind) { return match kind { "
+        "TokenKind.Identifier => 1, TokenKind.Number => 2, _ => 0, }; }",
+        diagnostics);
+
+    ASSERT_FALSE(diagnostics.HasErrors());
+    const auto& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[1]);
+    const auto& returned =
+        static_cast<const ReturnStatement&>(*function.Body().Statements()[0]);
+    const auto& match = static_cast<const MatchExpression&>(*returned.Value());
+    EXPECT_EQ(match.Value().Kind(), AstNodeKind::NameExpression);
+    ASSERT_EQ(match.Arms().size(), 3);
+    EXPECT_EQ(match.Arms()[0]->EnumName(), "TokenKind");
+    EXPECT_EQ(match.Arms()[0]->Variant(), "Identifier");
+    EXPECT_TRUE(match.Arms()[2]->IsWildcard());
+}
+
 TEST(ParserErrorTests, KeepsQualifiedValuesAndRawAddressesAsExpressions) {
     DiagnosticBag diagnostics;
     auto unit = ParseSource(

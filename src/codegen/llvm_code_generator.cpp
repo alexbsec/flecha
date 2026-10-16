@@ -888,8 +888,7 @@ llvm::FunctionType* LlvmCodeGenerator::MapFunctionType(
 }
 
 std::optional<llvm::Attribute::AttrKind>
-LlvmCodeGenerator::ExternIntegerExtension(
-    semantic::SemanticType type) const {
+LlvmCodeGenerator::ExternIntegerExtension(semantic::SemanticType type) const {
     using Kind = semantic::SemanticTypeKind;
     const llvm::Triple triple(_targetTriple);
 
@@ -2141,6 +2140,9 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
         case lowering::BoundNodeKind::ArrayExpression:
             return EmitArray(
                 static_cast<const lowering::BoundArrayExpression&>(expression));
+        case lowering::BoundNodeKind::MatchExpression:
+            return EmitMatch(
+                static_cast<const lowering::BoundMatchExpression&>(expression));
         case lowering::BoundNodeKind::ArrayLengthExpression: {
             const auto& length =
                 static_cast<const lowering::BoundArrayLengthExpression&>(
@@ -2339,6 +2341,75 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
             Fail("unsupported bound expression");
             return nullptr;
     }
+}
+
+llvm::Value* LlvmCodeGenerator::EmitMatch(
+    const lowering::BoundMatchExpression& expression) {
+    llvm::Value* matched = EmitExpression(expression.Matched());
+    if (matched == nullptr) return nullptr;
+
+    const bool returnsVoid =
+        expression.Type().Kind() == semantic::SemanticTypeKind::Void;
+    llvm::AllocaInst* result = nullptr;
+    if (!returnsVoid) {
+        result =
+            expression.Type().OwnsStorage()
+                ? CreateOwnedValueTemporary(expression.Type(), "match.result")
+                : CreateTemporaryAlloca(MapType(expression.Type()),
+                                        "match.result");
+    }
+
+    llvm::BasicBlock* merge =
+        llvm::BasicBlock::Create(_context, "match.end", _currentFunction);
+    std::vector<llvm::BasicBlock*> armBlocks;
+    armBlocks.reserve(expression.Arms().size());
+    llvm::BasicBlock* wildcard = nullptr;
+    for (const auto& arm : expression.Arms()) {
+        llvm::BasicBlock* block =
+            llvm::BasicBlock::Create(_context, "match.arm", _currentFunction);
+        armBlocks.push_back(block);
+        if (!arm.discriminant.has_value()) wildcard = block;
+    }
+    llvm::BasicBlock* invalid =
+        wildcard == nullptr ? llvm::BasicBlock::Create(
+                                  _context, "match.invalid", _currentFunction)
+                            : nullptr;
+    llvm::SwitchInst* dispatch = _builder.CreateSwitch(
+        matched, wildcard == nullptr ? invalid : wildcard,
+        expression.Arms().size() - (wildcard == nullptr ? 0 : 1));
+    auto* matchedType = llvm::cast<llvm::IntegerType>(matched->getType());
+    for (std::size_t index = 0; index < expression.Arms().size(); ++index) {
+        const auto& arm = expression.Arms()[index];
+        if (arm.discriminant.has_value())
+            dispatch->addCase(
+                llvm::ConstantInt::get(matchedType, *arm.discriminant),
+                armBlocks[index]);
+    }
+
+    for (std::size_t index = 0; index < expression.Arms().size(); ++index) {
+        _builder.SetInsertPoint(armBlocks[index]);
+        if (returnsVoid) {
+            if (EmitExpression(*expression.Arms()[index].value) == nullptr)
+                return nullptr;
+        } else if (!EmitInto(*expression.Arms()[index].value, result,
+                             expression.Type())) {
+            return nullptr;
+        }
+        if (_builder.GetInsertBlock()->getTerminator() == nullptr)
+            _builder.CreateBr(merge);
+    }
+
+    if (invalid != nullptr) {
+        _builder.SetInsertPoint(invalid);
+        _builder.CreateUnreachable();
+    }
+    _builder.SetInsertPoint(merge);
+    if (returnsVoid) return llvm::ConstantInt::getFalse(_context);
+    if (expression.Type().ContainsStructure())
+        _builder.CreateStore(llvm::ConstantInt::getTrue(_context),
+                             LifetimeFlag(result));
+    return _builder.CreateLoad(MapType(expression.Type()), result,
+                               "match.value");
 }
 
 llvm::AllocaInst* LlvmCodeGenerator::LifetimeFlag(llvm::Value* storage) {

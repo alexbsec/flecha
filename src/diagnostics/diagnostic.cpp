@@ -118,6 +118,8 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0055";
         case DiagnosticCode::InvalidEnumDeclaration:
             return "FLECHA-S0056";
+        case DiagnosticCode::InvalidMatch:
+            return "FLECHA-S0057";
         case DiagnosticCode::InvalidGeneric:
             return "FLECHA-S0054";
         case DiagnosticCode::InvalidAllocation:

@@ -12,7 +12,7 @@ The compiler is implemented in modern C++ and currently includes a tokenizer, pa
 
 ## Highlights
 
-- Statically typed primitives, functions, enums, tuples, structures, arrays, strings, and error values
+- Statically typed primitives, functions, enums with exhaustive matching, tuples, structures, arrays, strings, and error values
 - Explicit `unsafe` features for raw pointers and allocation
 - Checked references and slices, ownership contracts, and definite-assignment analysis
 - Modules and library imports through `root::` and `lib::` paths

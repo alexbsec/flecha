@@ -125,8 +125,7 @@ TEST(LoweringTests, PreservesEveryCastInAChain) {
         static_cast<const BoundVariableDeclarationStatement&>(
             *function.Body().Statements()[0]);
     ASSERT_NE(declaration.Initializer(), nullptr);
-    ASSERT_EQ(declaration.Initializer()->Kind(),
-              BoundNodeKind::CastExpression);
+    ASSERT_EQ(declaration.Initializer()->Kind(), BoundNodeKind::CastExpression);
     const BoundCastExpression& outer =
         static_cast<const BoundCastExpression&>(*declaration.Initializer());
     EXPECT_EQ(outer.Type().Kind(), SemanticTypeKind::I32);
@@ -135,10 +134,9 @@ TEST(LoweringTests, PreservesEveryCastInAChain) {
         static_cast<const BoundCastExpression&>(outer.Value());
     EXPECT_EQ(middle.Type().Kind(), SemanticTypeKind::U8);
     ASSERT_EQ(middle.Value().Kind(), BoundNodeKind::CastExpression);
-    EXPECT_EQ(static_cast<const BoundCastExpression&>(middle.Value())
-                  .Type()
-                  .Kind(),
-              SemanticTypeKind::I64);
+    EXPECT_EQ(
+        static_cast<const BoundCastExpression&>(middle.Value()).Type().Kind(),
+        SemanticTypeKind::I64);
 }
 
 TEST(LoweringTests, PreservesTypesAndSourceRanges) {
@@ -282,8 +280,8 @@ TEST(LoweringTests, PreservesConstDeclarationsButReadsOrdinaryValues) {
 
 TEST(LoweringTests, StopsUnsupportedCompoundTypesBeforeCodeGeneration) {
     for (const std::string& source :
-         {"void f() { constref u8 p; }", "void f(*&const u8 r) {}", "*&u8 f() {}",
-          "void f() { 42 as *&u8; }"}) {
+         {"void f() { constref u8 p; }", "void f(*&const u8 r) {}",
+          "*&u8 f() {}", "void f() { 42 as *&u8; }"}) {
         SCOPED_TRACE(source);
         LoweredSource result = Lower(source);
         EXPECT_TRUE(result.diagnostics.HasErrors());
@@ -312,6 +310,31 @@ TEST(LoweringTests, GivesNoneInitializersTheirDeclaredValueType) {
                  .Initializer());
     EXPECT_FALSE(word.IsZeroValue());
     EXPECT_EQ(word.Value(), "none");
+}
+
+TEST(LoweringTests, LowersEnumMatchesToDiscriminantArms) {
+    LoweredSource result = Lower(R"(
+        enum TokenKind: u8 { Identifier = 2, Number = 7, End = 9, }
+        i32 classify(TokenKind kind) {
+            return match kind {
+                TokenKind.Identifier => 10,
+                TokenKind.Number => 20,
+                _ => 30,
+            };
+        }
+    )");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    const auto& returned = static_cast<const BoundReturnStatement&>(
+        *result.program->Functions()[0]->Body().Statements()[0]);
+    const auto& match =
+        static_cast<const BoundMatchExpression&>(*returned.Expression());
+    ASSERT_EQ(match.Arms().size(), 3);
+    EXPECT_EQ(match.Arms()[0].discriminant, 2);
+    EXPECT_EQ(match.Arms()[1].discriminant, 7);
+    EXPECT_FALSE(match.Arms()[2].discriminant.has_value());
+    EXPECT_NE(DumpBoundProgram(*result.program).find("(2 => 10:i32)"),
+              std::string::npos);
 }
 
 TEST(LoweringTests, RepresentsDirectAndIndirectStorageLocations) {

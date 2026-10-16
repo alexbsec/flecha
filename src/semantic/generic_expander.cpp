@@ -147,6 +147,17 @@ void Walk(const AstNode& input, const Callback& callback) {
             list(n.Elements());
             break;
         }
+        case AstNodeKind::MatchExpression: {
+            NODE(MatchExpression);
+            visit(n.Value());
+            list(n.Arms());
+            break;
+        }
+        case AstNodeKind::MatchArm: {
+            NODE(MatchArm);
+            visit(n.Value());
+            break;
+        }
         case AstNodeKind::NameExpression: {
             NODE(NameExpression);
             list(n.typeArguments);
@@ -901,6 +912,13 @@ class Expander {
                 return ExpressionType(
                     static_cast<const ParenthesizedExpression&>(expression)
                         .Inner());
+            case AstNodeKind::MatchExpression: {
+                const auto& match =
+                    static_cast<const MatchExpression&>(expression);
+                return match.Arms().empty()
+                           ? TypeView{}
+                           : ExpressionType(match.Arms().front()->Value());
+            }
             case AstNodeKind::BuildExpression:
                 return {&static_cast<const BuildExpression&>(expression).Type(),
                         current->moduleId};
@@ -996,8 +1014,8 @@ class Expander {
                 const auto& member =
                     static_cast<const MemberAccessExpression&>(expression);
                 const auto* owner = Nominal(ExpressionType(member.Receiver()));
-                if (!owner || owner->Kind() !=
-                                  AstNodeKind::StructureDeclaration)
+                if (!owner ||
+                    owner->Kind() != AstNodeKind::StructureDeclaration)
                     return {};
                 const auto* structure =
                     static_cast<const StructureDeclaration*>(owner);

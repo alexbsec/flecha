@@ -19,8 +19,8 @@ std::unique_ptr<TypeNode> MakeI32Type() {
 }
 
 std::unique_ptr<LiteralExpression> MakeInteger(std::string value) {
-    return std::make_unique<LiteralExpression>(
-        RANGE, TokenType::NumberLiteral, std::move(value));
+    return std::make_unique<LiteralExpression>(RANGE, TokenType::NumberLiteral,
+                                               std::move(value));
 }
 
 }  // namespace
@@ -58,9 +58,9 @@ TEST(AstTests, RepresentsCallsWithOwnedArguments) {
     arguments.push_back(MakeInteger("10"));
     arguments.push_back(MakeInteger("3"));
 
-    CallExpression call(
-        RANGE, std::make_unique<NameExpression>(RANGE, "divide"),
-        std::move(arguments));
+    CallExpression call(RANGE,
+                        std::make_unique<NameExpression>(RANGE, "divide"),
+                        std::move(arguments));
 
     EXPECT_EQ(call.Callee().Kind(), AstNodeKind::NameExpression);
     ASSERT_EQ(call.Arguments().size(), 2);
@@ -74,6 +74,23 @@ TEST(AstTests, RepresentsAssignmentWithOwnedTargetAndValue) {
 
     EXPECT_EQ(assignment.Target().Kind(), AstNodeKind::NameExpression);
     EXPECT_EQ(assignment.Value().Kind(), AstNodeKind::LiteralExpression);
+}
+
+TEST(AstTests, RepresentsMatchExpressionsAndWildcardArms) {
+    std::vector<std::unique_ptr<MatchArm>> arms;
+    arms.push_back(std::make_unique<MatchArm>(
+        RANGE, false, "TokenKind", "Identifier", RANGE, MakeInteger("1")));
+    arms.push_back(std::make_unique<MatchArm>(RANGE, true, "", "", RANGE,
+                                              MakeInteger("0")));
+    MatchExpression match(RANGE,
+                          std::make_unique<NameExpression>(RANGE, "kind"),
+                          std::move(arms));
+
+    EXPECT_EQ(match.Kind(), AstNodeKind::MatchExpression);
+    ASSERT_EQ(match.Arms().size(), 2);
+    EXPECT_EQ(match.Arms()[0]->EnumName(), "TokenKind");
+    EXPECT_EQ(match.Arms()[0]->Variant(), "Identifier");
+    EXPECT_TRUE(match.Arms()[1]->IsWildcard());
 }
 
 TEST(AstTests, RepresentsOptionalReturnAndVariableInitializers) {
@@ -114,8 +131,7 @@ TEST(AstTests, RepresentsFunctionAndCompilationUnit) {
 
     EXPECT_EQ(unit.Kind(), AstNodeKind::CompilationUnit);
     ASSERT_EQ(unit.Declarations().size(), 1);
-    EXPECT_EQ(unit.Declarations()[0]->Kind(),
-              AstNodeKind::FunctionDeclaration);
+    EXPECT_EQ(unit.Declarations()[0]->Kind(), AstNodeKind::FunctionDeclaration);
 }
 
 TEST(AstTests, NodesAreMoveOnly) {

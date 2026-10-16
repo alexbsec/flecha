@@ -240,8 +240,8 @@ void MarkDirectConstruction(
             directConstructions.erase(current);
         if (current->Kind() != core::AstNodeKind::ParenthesizedExpression)
             return;
-        current =
-            &static_cast<const core::ParenthesizedExpression&>(*current).Inner();
+        current = &static_cast<const core::ParenthesizedExpression&>(*current)
+                       .Inner();
     }
 }
 
@@ -1746,6 +1746,11 @@ SemanticType SemanticAnalyzer::AnalyzeExpression(
                 static_cast<const core::ArrayExpression&>(expression),
                 expected);
             break;
+        case core::AstNodeKind::MatchExpression:
+            type = AnalyzeMatch(
+                static_cast<const core::MatchExpression&>(expression),
+                expected);
+            break;
         case core::AstNodeKind::LiteralExpression:
             type = AnalyzeLiteral(
                 static_cast<const core::LiteralExpression&>(expression),
@@ -1814,6 +1819,98 @@ SemanticType SemanticAnalyzer::AnalyzeExpression(
          expression.Kind() == core::AstNodeKind::BuildExpression))
         RecordCleanupEffects(type);
     return type;
+}
+
+SemanticType SemanticAnalyzer::AnalyzeMatch(
+    const core::MatchExpression& expression, SemanticType expected) {
+    const SemanticType valueType = AnalyzeExpression(expression.Value());
+    const EnumType* enumeration =
+        valueType.Kind() == SemanticTypeKind::Enum ? valueType.Enum() : nullptr;
+    if (!valueType.IsError() && enumeration == nullptr)
+        Report(diagnostics::DiagnosticCode::InvalidMatch,
+               expression.Value().Range(),
+               "match value must have an enum type, found '" +
+                   valueType.Name() + "'");
+
+    if (expression.Arms().empty())
+        Report(diagnostics::DiagnosticCode::InvalidMatch, expression.Range(),
+               "match expression must contain at least one arm");
+
+    std::unordered_set<std::string> covered;
+    bool wildcard = false;
+    SemanticType result =
+        expected.IsError() ? SemanticType::Error() : expected.WithoutConst();
+    for (std::size_t index = 0; index < expression.Arms().size(); ++index) {
+        const core::MatchArm& arm = *expression.Arms()[index];
+        if (wildcard) {
+            Report(diagnostics::DiagnosticCode::InvalidMatch,
+                   arm.PatternRange(),
+                   "match arm is unreachable after wildcard pattern");
+        } else if (arm.IsWildcard()) {
+            wildcard = true;
+        } else if (enumeration != nullptr) {
+            const Symbol* patternType = _currentScope->Lookup(arm.EnumName());
+            if (patternType == nullptr ||
+                patternType->Kind() != SymbolKind::EnumType) {
+                Report(diagnostics::DiagnosticCode::InvalidMatch,
+                       arm.PatternRange(),
+                       "match pattern type '" + arm.EnumName() +
+                           "' is not an enum");
+            } else if (patternType->Type().Enum() != enumeration) {
+                Report(diagnostics::DiagnosticCode::InvalidMatch,
+                       arm.PatternRange(),
+                       "pattern for enum '" + patternType->Type().Name() +
+                           "' cannot match value of type '" + valueType.Name() +
+                           "'");
+            } else {
+                const auto variant = std::find_if(
+                    enumeration->variants.begin(), enumeration->variants.end(),
+                    [&](const EnumVariant& candidate) {
+                        return candidate.name == arm.Variant();
+                    });
+                if (variant == enumeration->variants.end()) {
+                    Report(diagnostics::DiagnosticCode::InvalidMatch,
+                           arm.PatternRange(),
+                           "enum '" + valueType.Name() + "' has no variant '" +
+                               arm.Variant() + "'");
+                } else if (!covered.insert(arm.Variant()).second) {
+                    Report(diagnostics::DiagnosticCode::InvalidMatch,
+                           arm.PatternRange(),
+                           "duplicate match pattern '" + arm.EnumName() + "." +
+                               arm.Variant() + "'");
+                }
+            }
+        }
+
+        const SemanticType armType = AnalyzeExpression(
+            arm.Value(), result.IsError() ? SemanticType::Error() : result);
+        if (armType.IsError()) continue;
+        if (result.IsError()) {
+            result = armType.WithoutConst();
+        } else if (!IsAssignable(result, armType)) {
+            Report(diagnostics::DiagnosticCode::InvalidMatch,
+                   arm.Value().Range(),
+                   "match arm has type '" + armType.Name() + "', expected '" +
+                       result.Name() + "'");
+        }
+    }
+
+    if (enumeration != nullptr && !wildcard) {
+        std::string missing;
+        for (const EnumVariant& variant : enumeration->variants) {
+            if (covered.contains(variant.name)) continue;
+            if (!missing.empty()) missing += ", ";
+            missing += enumeration->name + "." + variant.name;
+        }
+        if (!missing.empty())
+            Report(diagnostics::DiagnosticCode::InvalidMatch,
+                   expression.Range(),
+                   "non-exhaustive match; missing " + missing);
+    }
+    if (!result.IsError() && result.IsBorrowed())
+        Report(diagnostics::DiagnosticCode::InvalidMatch, expression.Range(),
+               "match expressions cannot yet produce borrowed references");
+    return result;
 }
 
 void SemanticAnalyzer::ValidateArrayType(SemanticType type,
@@ -2714,6 +2811,13 @@ bool SemanticAnalyzer::BorrowsLocalString(
             return _model.TypeOf(call.Receiver()).Kind() ==
                        SemanticTypeKind::String ||
                    BorrowsLocalString(call.Receiver());
+        }
+        case core::AstNodeKind::MatchExpression: {
+            const auto& match =
+                static_cast<const core::MatchExpression&>(expression);
+            for (const auto& arm : match.Arms())
+                if (BorrowsLocalString(arm->Value())) return true;
+            return false;
         }
         default:
             return false;

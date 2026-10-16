@@ -328,6 +328,30 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                 expression.Range(), type, std::move(elements),
                 array.IsRepeat());
         }
+        case core::AstNodeKind::MatchExpression: {
+            const auto& match =
+                static_cast<const core::MatchExpression&>(expression);
+            const semantic::SemanticType matchedType =
+                _semanticModel->TypeOf(match.Value());
+            std::vector<BoundMatchArm> arms;
+            arms.reserve(match.Arms().size());
+            for (const auto& arm : match.Arms()) {
+                std::optional<std::uint64_t> discriminant;
+                if (!arm->IsWildcard()) {
+                    for (const auto& variant : matchedType.Enum()->variants) {
+                        if (variant.name == arm->Variant()) {
+                            discriminant = variant.value;
+                            break;
+                        }
+                    }
+                }
+                arms.push_back(
+                    {discriminant, LowerExpression(arm->Value(), type)});
+            }
+            return std::make_unique<BoundMatchExpression>(
+                expression.Range(), type, LowerExpression(match.Value()),
+                std::move(arms));
+        }
         case core::AstNodeKind::MemberAccessExpression: {
             const auto& member =
                 static_cast<const core::MemberAccessExpression&>(expression);

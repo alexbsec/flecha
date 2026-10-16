@@ -52,6 +52,7 @@ class Parser {
                                         bool allowTupleOwners = false);
     std::optional<std::uint64_t> ParseArrayLength();
     std::unique_ptr<Expression> ParseArrayExpression();
+    std::unique_ptr<Expression> ParseMatchExpression();
     std::unique_ptr<Parameter> ParseParameter();
     std::unique_ptr<BlockStatement> ParseBlockStatement(bool isUnsafe = false);
     std::unique_ptr<Statement> ParseStatement();

@@ -938,6 +938,14 @@ class AllocationChecker final {
                          .Elements())
                     state.values.erase(element.get());
                 break;
+            case AstNodeKind::MatchExpression: {
+                const auto& match =
+                    static_cast<const core::MatchExpression&>(expression);
+                state.values.erase(&match.Value());
+                for (const auto& arm : match.Arms())
+                    state.values.erase(&arm->Value());
+                break;
+            }
             default:
                 break;
         }
@@ -1097,6 +1105,15 @@ class AllocationChecker final {
                          .Elements())
                     value.elements.push_back(Get(state, *element));
                 return value;
+            }
+            case AstNodeKind::MatchExpression: {
+                const auto& match =
+                    static_cast<const core::MatchExpression&>(expression);
+                for (const auto& arm : match.Arms()) {
+                    const auto found = state.values.find(&arm->Value());
+                    if (found != state.values.end()) return found->second;
+                }
+                return {};
             }
             case AstNodeKind::MemberAccessExpression: {
                 const auto& member =
@@ -1258,6 +1275,13 @@ class AllocationChecker final {
                          .Elements())
                     Drop(state, *element);
                 break;
+            case AstNodeKind::MatchExpression: {
+                const auto& match =
+                    static_cast<const core::MatchExpression&>(expression);
+                Drop(state, match.Value());
+                for (const auto& arm : match.Arms()) Drop(state, arm->Value());
+                break;
+            }
             default:
                 break;
         }

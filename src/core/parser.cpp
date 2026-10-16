@@ -620,10 +620,9 @@ std::unique_ptr<EnumDeclaration> Parser::ParseEnumDeclaration() {
                 Consume(TokenType::NumberLiteral, "integer discriminant");
             if (value == nullptr) return nullptr;
             discriminant = minus ? "-" + value->value : value->value;
-            discriminantRange =
-                minus ? source::SourceRange{minus->range.start,
-                                            value->range.end}
-                      : value->range;
+            discriminantRange = minus ? source::SourceRange{minus->range.start,
+                                                            value->range.end}
+                                      : value->range;
         }
         variants.push_back({variant->value, variant->range, isDefault,
                             std::move(discriminant), discriminantRange});
@@ -1613,6 +1612,65 @@ std::unique_ptr<Expression> Parser::ParseArrayExpression() {
         repeat, length);
 }
 
+std::unique_ptr<Expression> Parser::ParseMatchExpression() {
+    const Token& keyword = Advance();
+    std::unique_ptr<Expression> value = ParseExpression();
+    if (value == nullptr) return nullptr;
+    if (!Consume(TokenType::LCurly, "'{' after match value")) return nullptr;
+
+    std::vector<std::unique_ptr<MatchArm>> arms;
+    while (!Check(TokenType::RCurly) && !IsAtEnd()) {
+        const Token* first =
+            Consume(TokenType::Identifier, "enum pattern or '_' in match arm");
+        if (first == nullptr) return nullptr;
+
+        const bool wildcard = first->value == "_";
+        std::string enumName;
+        std::string variant;
+        source::SourceRange patternRange = first->range;
+        if (!wildcard) {
+            enumName = first->value;
+            if (_importAliases.contains(enumName) && Match(TokenType::Scope)) {
+                const Token* name = Consume(TokenType::Identifier,
+                                            "enum name after module qualifier");
+                if (name == nullptr) return nullptr;
+                enumName += "::" + name->value;
+                patternRange.end = name->range.end;
+            }
+            if (!Consume(TokenType::Dot, "'.' between enum and variant"))
+                return nullptr;
+            const Token* member =
+                Consume(TokenType::Identifier, "enum variant in match arm");
+            if (member == nullptr) return nullptr;
+            variant = member->value;
+            patternRange.end = member->range.end;
+        }
+
+        if (!Consume(TokenType::FatArrow, "'=>' after match pattern"))
+            return nullptr;
+        std::unique_ptr<Expression> result = ParseExpression();
+        if (result == nullptr) return nullptr;
+        const source::SourceRange armRange{patternRange.start,
+                                           result->Range().end};
+        arms.push_back(std::make_unique<MatchArm>(
+            armRange, wildcard, std::move(enumName), std::move(variant),
+            patternRange, std::move(result)));
+
+        if (!Match(TokenType::Comma)) {
+            if (!Check(TokenType::RCurly))
+                Consume(TokenType::Comma, "',' between match arms");
+            break;
+        }
+    }
+
+    const Token* close = Consume(TokenType::RCurly, "'}' after match arms");
+    const source::SourceLocation end =
+        close == nullptr ? value->Range().end : close->range.end;
+    return std::make_unique<MatchExpression>(
+        source::SourceRange{keyword.range.start, end}, std::move(value),
+        std::move(arms));
+}
+
 std::unique_ptr<Expression> Parser::ParsePrimaryExpression() {
     const Token& token = Current();
     switch (token.type) {
@@ -1627,6 +1685,8 @@ std::unique_ptr<Expression> Parser::ParsePrimaryExpression() {
             return std::make_unique<BuildExpression>(range, std::move(type),
                                                      std::move(body));
         }
+        case TokenType::Match:
+            return ParseMatchExpression();
         case TokenType::LBracket:
             return ParseArrayExpression();
         case TokenType::NumberLiteral:

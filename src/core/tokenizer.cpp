@@ -42,6 +42,7 @@ const KeywordMap KEYWORDS = {
     {"defer", TokenType::Defer},
     {"yield", TokenType::Yield},
     {"if", TokenType::If},
+    {"match", TokenType::Match},
     {"else", TokenType::Else},
     {"also", TokenType::Also},
     {"while", TokenType::While},
@@ -212,6 +213,7 @@ Token Tokenizer::NextToken() {
             return makeToken(Match('=') ? TokenType::DeclareAssign
                                         : TokenType::Colon);
         case '=':
+            if (Match('>')) return makeToken(TokenType::FatArrow);
             if (Match('=')) {
                 return makeToken(Match('=') ? TokenType::StrictEqual
                                             : TokenType::Equal);
