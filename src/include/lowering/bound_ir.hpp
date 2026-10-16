@@ -116,10 +116,17 @@ class BoundPlaceExpression : public BoundExpression {
 
 class BoundDefaultExpression final : public BoundExpression {
    public:
-    using BoundExpression::BoundExpression;
+    BoundDefaultExpression(source::SourceRange range,
+                           semantic::SemanticType type,
+                           bool semanticZero = false)
+        : BoundExpression(range, type), _semanticZero(semanticZero) {}
     BoundNodeKind Kind() const override {
         return BoundNodeKind::DefaultExpression;
     }
+    bool IsSemanticZero() const { return _semanticZero; }
+
+   private:
+    bool _semanticZero;
 };
 class BoundFieldExpression final : public BoundPlaceExpression {
    public:

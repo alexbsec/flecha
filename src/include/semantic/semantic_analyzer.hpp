@@ -50,6 +50,11 @@ class SemanticAnalyzer final {
     SemanticType AnalyzeStructureCall(
         const core::MemberCallExpression& expression, SemanticType receiver);
     void CheckCopy(const core::Expression& expression, SemanticType type);
+    void WarnForNontrivialDefault(SemanticType type, source::SourceRange range);
+    void RecordZeroDependency(SemanticType type);
+    void RecordCleanupEffects(SemanticType type);
+    void ValidateZeroCycles();
+    void ValidateZeroEffects();
     void CheckMethodAccess(const FunctionSymbol& function,
                            source::SourceRange range);
     const StructureType* CurrentOwner() const;
@@ -97,8 +102,18 @@ class SemanticAnalyzer final {
     const FunctionSymbol* _currentFunction = nullptr;
     std::unordered_map<std::string, source::SourceRange> _positions;
     std::unordered_set<const Symbol*> _localStringBorrows;
+    std::unordered_set<const StructureType*> _warnedDefaults;
+    std::unordered_map<const StructureType*,
+                       std::unordered_set<const StructureType*>>
+        _zeroDependencies;
+    std::unordered_map<const FunctionSymbol*,
+                       std::unordered_set<const FunctionSymbol*>>
+        _functionCalls;
+    std::unordered_set<const FunctionSymbol*> _forbiddenZeroEffects;
     std::size_t _loopDepth = 0;
     bool _inUnsafe = false;
+    bool _inZero = false;
+    std::unordered_set<const core::Expression*> _directConstructions;
     const Symbol* _buildSelf = nullptr;
     bool _allowBuildSelf = false;
     std::size_t _buildDepth = 0;

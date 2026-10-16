@@ -18,6 +18,7 @@ syntax keyword flechaJump jumpto nextgroup=flechaJumpTarget skipwhite
 syntax keyword flechaCast as
 syntax keyword flechaBoolean true false
 syntax keyword flechaConstant none null
+syntax keyword flechaSelf self
 syntax keyword flechaWordOperator and or
 
 syntax match flechaOperator /::\|->\|:=\|===\|!==\|==\|!=\|<=\|>=\|&&\|||\|[&=+*\/%^!<>-]/
@@ -42,6 +43,7 @@ syntax match flechaLineComment /\/\/.*$/ contains=flechaTodo
 syntax region flechaBlockComment start=/\/\*/ end=/\*\// contains=flechaTodo
 
 highlight default flechaImports guifg=#87CEFA ctermfg=117
+highlight default flechaSelf guifg=#5F87AF ctermfg=67
 highlight default link flechaType Type
 highlight default link flechaModifier StorageClass
 highlight default link flechaConditional Conditional

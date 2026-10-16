@@ -36,6 +36,22 @@ bool IsArrayElement(SemanticType type) {
            type.Kind() == SemanticTypeKind::Pointer;
 }
 
+bool IsRuntimeArrayStructureField(SemanticType type) {
+    if (type.IsNumeric() || type.Kind() == SemanticTypeKind::Bool ||
+        type.Kind() == SemanticTypeKind::Char ||
+        type.Kind() == SemanticTypeKind::Pointer)
+        return true;
+    if (type.Kind() == SemanticTypeKind::Array)
+        return IsRuntimeArrayStructureField(*type.Target());
+    if (type.Kind() == SemanticTypeKind::Structure) {
+        if (!type.IsCopyable() || !type.IsZeroable()) return false;
+        for (const auto& field : type.Structure()->fields)
+            if (!IsRuntimeArrayStructureField(field.type)) return false;
+        return true;
+    }
+    return false;
+}
+
 // Keep byte and bit layout arithmetic representable by the native target and
 // LLVM.
 std::optional<std::uint64_t> StorageSize(SemanticType type) {
@@ -159,6 +175,79 @@ std::optional<std::uint64_t> ConstantIndex(const core::Expression& expression) {
         }
     }
     return std::nullopt;
+}
+
+bool IsNoneLiteral(const core::Expression& expression) {
+    const core::Expression* unwrapped = &expression;
+    while (unwrapped->Kind() == core::AstNodeKind::ParenthesizedExpression)
+        unwrapped =
+            &static_cast<const core::ParenthesizedExpression&>(*unwrapped)
+                 .Inner();
+    return unwrapped->Kind() == core::AstNodeKind::LiteralExpression &&
+           static_cast<const core::LiteralExpression&>(*unwrapped)
+                   .LiteralType() == TokenType::None;
+}
+
+void MarkDirectConstruction(
+    std::unordered_set<const core::Expression*>& directConstructions,
+    const core::Expression& expression, bool direct) {
+    const core::Expression* current = &expression;
+    while (true) {
+        if (direct)
+            directConstructions.insert(current);
+        else
+            directConstructions.erase(current);
+        if (current->Kind() != core::AstNodeKind::ParenthesizedExpression)
+            return;
+        current =
+            &static_cast<const core::ParenthesizedExpression&>(*current).Inner();
+    }
+}
+
+bool IsEqualityComparable(SemanticType type) {
+    if (type.IsNumeric() || type.IsErrorValue() ||
+        type.Kind() == SemanticTypeKind::Bool ||
+        type.Kind() == SemanticTypeKind::Char ||
+        type.Kind() == SemanticTypeKind::Pointer ||
+        type.Kind() == SemanticTypeKind::String ||
+        type.Kind() == SemanticTypeKind::StringView)
+        return true;
+    if (type.Kind() == SemanticTypeKind::Array)
+        return IsEqualityComparable(*type.Target());
+    if (type.Kind() == SemanticTypeKind::Tuple) {
+        for (const auto& element : type.Elements())
+            if (!IsEqualityComparable(element)) return false;
+        return true;
+    }
+    if (type.Kind() == SemanticTypeKind::Structure) {
+        if (!type.Structure()->validLayout) return false;
+        for (const auto& field : type.Structure()->fields)
+            if (!IsEqualityComparable(field.type)) return false;
+        return true;
+    }
+    return false;
+}
+
+bool CopyMayAllocate(
+    SemanticType type,
+    std::unordered_set<const StructureType*>& visitedStructures) {
+    if (type.Kind() == SemanticTypeKind::String) return true;
+    if (type.Kind() == SemanticTypeKind::Structure) {
+        if (!visitedStructures.insert(type.Structure()).second) return false;
+        for (const auto& field : type.Structure()->fields)
+            if (CopyMayAllocate(field.type, visitedStructures)) return true;
+    }
+    if (type.Kind() == SemanticTypeKind::Array)
+        return CopyMayAllocate(*type.Target(), visitedStructures);
+    if (type.Kind() == SemanticTypeKind::Tuple)
+        for (const auto& element : type.Elements())
+            if (CopyMayAllocate(element, visitedStructures)) return true;
+    return false;
+}
+
+bool CopyMayAllocate(SemanticType type) {
+    std::unordered_set<const StructureType*> visitedStructures;
+    return CopyMayAllocate(type, visitedStructures);
 }
 
 }  // namespace
@@ -618,12 +707,14 @@ void SemanticAnalyzer::RegisterFunction(
                "reference and slice returns require a lifetime contract and "
                "are not yet supported");
     const bool lifecycle =
-        owner && (function.Name() == "init" || function.Name() == "tear");
+        owner && (function.Name() == "init" || function.Name() == "zero" ||
+                  function.Name() == "tear");
     if (function.HasModifier(core::FunctionModifier::Override) !=
         (lifecycle && !generated))
         Report(diagnostics::DiagnosticCode::InvalidLifecycle,
                function.NameRange(),
-               "override is required exactly when replacing init or tear");
+               "override is required exactly when replacing init, zero, or "
+               "tear");
     if (function.HasModifier(core::FunctionModifier::Private) && !owner)
         Report(diagnostics::DiagnosticCode::InvalidStructure,
                function.NameRange(), "private requires a structure method");
@@ -631,6 +722,17 @@ void SemanticAnalyzer::RegisterFunction(
         (receiver || returnType.WithoutConst() != SemanticType(owner)))
         Report(diagnostics::DiagnosticCode::InvalidLifecycle, function.Range(),
                "init must be static and return its structure type");
+    if (owner && function.Name() == "zero" &&
+        (function.IsUnsafe() || receiver || !parameterTypes.empty() ||
+         returnType.WithoutConst() != SemanticType(owner)))
+        Report(diagnostics::DiagnosticCode::InvalidLifecycle, function.Range(),
+               "zero must be safe, static, take no parameters, and return its "
+               "structure type");
+    if (owner && function.Name() == "zero" &&
+        function.HasModifier(core::FunctionModifier::Private))
+        Report(diagnostics::DiagnosticCode::InvalidLifecycle, function.Range(),
+               "zero cannot be private because structure default "
+               "construction is part of the type's API");
     if (owner && function.Name() == "tear" &&
         (returnType.Kind() != SemanticTypeKind::Void ||
          parameterTypes.size() != 1 || !receiver ||
@@ -652,9 +754,18 @@ void SemanticAnalyzer::RegisterFunction(
             BuiltInFunction::None, function.IsUnsafe(), owner,
             function.HasModifier(core::FunctionModifier::Private), receiver),
         function));
+    if (symbol && function.HasModifier(core::FunctionModifier::Extern))
+        _forbiddenZeroEffects.insert(symbol);
     if (owner && symbol) {
         owner->methods.emplace(function.Name(), symbol);
-        if (function.Name() == "init") owner->init = symbol;
+        if (function.Name() == "init") {
+            owner->init = symbol;
+            owner->hasCustomInit = !generated;
+        }
+        if (function.Name() == "zero") {
+            owner->zero = symbol;
+            owner->zeroIsGenerated = generated;
+        }
         if (function.Name() == "tear") owner->tear = symbol;
         for (const auto& field : owner->fields)
             if (field.name == function.Name())
@@ -675,6 +786,12 @@ SemanticModel SemanticAnalyzer::Analyze(core::CompilationUnit& unit) {
     }
     _currentFunction = nullptr;
     _inUnsafe = false;
+    _inZero = false;
+    _directConstructions.clear();
+    _warnedDefaults.clear();
+    _zeroDependencies.clear();
+    _functionCalls.clear();
+    _forbiddenZeroEffects.clear();
     _buildSelf = nullptr;
     _allowBuildSelf = false;
     _buildDepth = 0;
@@ -745,18 +862,26 @@ SemanticModel SemanticAnalyzer::Analyze(core::CompilationUnit& unit) {
                            "initializers are not yet supported");
             }
 
-    for (const auto& structure : _model._structures)
+    for (const auto& structure : _model._structures) {
+        _currentFunction = structure->init;
+        _inZero = false;
         for (const auto& field : structure->fields)
             if (field.syntax->Initializer()) {
                 SetModule(structure->syntax->moduleId);
+                MarkDirectConstruction(_directConstructions,
+                                       *field.syntax->Initializer(), true);
                 const SemanticType actual =
                     AnalyzeExpression(*field.syntax->Initializer(), field.type);
+                MarkDirectConstruction(_directConstructions,
+                                       *field.syntax->Initializer(), false);
                 if (!IsAssignable(field.type, actual))
                     Report(diagnostics::DiagnosticCode::IncompatibleType,
                            field.syntax->Initializer()->Range(),
                            TypeMismatch(field.type, actual));
                 CheckCopy(*field.syntax->Initializer(), field.type);
             }
+    }
+    _currentFunction = nullptr;
     for (const auto& function : _model._generatedFunctions)
         AnalyzeFunction(*function);
     for (const std::unique_ptr<core::Declaration>& declaration :
@@ -766,6 +891,12 @@ SemanticModel SemanticAnalyzer::Analyze(core::CompilationUnit& unit) {
                 static_cast<const core::FunctionDeclaration&>(*declaration));
         }
     }
+    for (const auto& structure : _model._structures)
+        if (SemanticType(structure.get()).IsZeroable())
+            WarnForNontrivialDefault(SemanticType(structure.get()),
+                                     structure->syntax->NameRange());
+    ValidateZeroCycles();
+    ValidateZeroEffects();
     if (!_diagnostics.HasErrors())
         AnalyzeAllocations(unit, _model, _diagnostics);
     ReportGenericOrigins(unit, _diagnostics);
@@ -787,6 +918,8 @@ void SemanticAnalyzer::AnalyzeFunction(
     } else {
         _currentFunction = nullptr;
     }
+    _inZero = _currentFunction && _currentFunction->Owner() &&
+              _currentFunction->Name().ends_with("::zero");
 
     if (_currentFunction)
         for (const auto& type : _currentFunction->ParameterTypes())
@@ -814,11 +947,19 @@ void SemanticAnalyzer::AnalyzeFunction(
     AnalyzeBlock(function.Body(), false);
     const ControlFlowGraph graph = BuildControlFlowGraph(function, _model);
     AnalyzeDefiniteAssignment(function, _model, _diagnostics, graph);
-    if (_diagnostics.Diagnostics().size() == diagnosticsBefore)
-        AnalyzeBorrows(function, _model, _diagnostics, graph);
+    bool hasNewErrors = false;
+    for (std::size_t index = diagnosticsBefore;
+         index < _diagnostics.Diagnostics().size(); ++index)
+        if (_diagnostics.Diagnostics()[index].severity ==
+            diagnostics::DiagnosticSeverity::Error) {
+            hasNewErrors = true;
+            break;
+        }
+    if (!hasNewErrors) AnalyzeBorrows(function, _model, _diagnostics, graph);
     _currentScope = previousScope;
     _currentFunction = nullptr;
     _inUnsafe = false;
+    _inZero = false;
 }
 
 void SemanticAnalyzer::CollectPositions(const core::BlockStatement& block,
@@ -921,6 +1062,11 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
         case core::AstNodeKind::BlockStatement: {
             const auto& block =
                 static_cast<const core::BlockStatement&>(statement);
+            if (_inZero && block.IsUnsafe())
+                Report(diagnostics::DiagnosticCode::InvalidLifecycle,
+                       block.Range(), "zero cannot contain unsafe operations");
+            if (block.IsUnsafe() && _currentFunction)
+                _forbiddenZeroEffects.insert(_currentFunction);
             const bool previousUnsafe = _inUnsafe;
             _inUnsafe = _inUnsafe || block.IsUnsafe();
             AnalyzeBlock(block, true);
@@ -941,8 +1087,12 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                     : SemanticType::Error();
             SemanticType initializerType = SemanticType::Error();
             if (variable.Initializer() != nullptr) {
+                MarkDirectConstruction(_directConstructions,
+                                       *variable.Initializer(), true);
                 initializerType =
                     AnalyzeExpression(*variable.Initializer(), declaredType);
+                MarkDirectConstruction(_directConstructions,
+                                       *variable.Initializer(), false);
             }
             SemanticType variableType = initializerType.WithoutConst();
             if (variable.HasExplicitType()) {
@@ -968,6 +1118,11 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             }
             if (variable.Initializer())
                 CheckCopy(*variable.Initializer(), variableType);
+            if (_currentFunction && variable.Initializer() &&
+                variableType.Kind() == SemanticTypeKind::String &&
+                initializerType.Kind() != SemanticTypeKind::String &&
+                initializerType.Kind() != SemanticTypeKind::None)
+                _forbiddenZeroEffects.insert(_currentFunction);
             if (variableType.ContainsStructure() && !variable.Initializer())
                 Report(diagnostics::DiagnosticCode::InvalidStructure,
                        variable.NameRange(),
@@ -994,6 +1149,7 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                     SymbolKind::LocalVariable, variable.Name(), variableType,
                     variable.NameRange(), !variableType.IsConst()),
                 variable);
+            if (symbol != nullptr) RecordCleanupEffects(variableType);
             if (symbol != nullptr && variable.Initializer() != nullptr &&
                 variableType.Kind() == SemanticTypeKind::StringView &&
                 BorrowsLocalString(*variable.Initializer())) {
@@ -1075,12 +1231,21 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             const SemanticType expected = _currentFunction == nullptr
                                               ? SemanticType::Error()
                                               : _currentFunction->ReturnType();
-            const SemanticType actual =
-                returnStatement.Value() == nullptr
-                    ? SemanticType(SemanticTypeKind::Void)
-                    : AnalyzeExpression(*returnStatement.Value(), expected);
+            SemanticType actual(SemanticTypeKind::Void);
+            if (returnStatement.Value()) {
+                MarkDirectConstruction(_directConstructions,
+                                       *returnStatement.Value(), true);
+                actual = AnalyzeExpression(*returnStatement.Value(), expected);
+                MarkDirectConstruction(_directConstructions,
+                                       *returnStatement.Value(), false);
+            }
             if (returnStatement.Value())
                 CheckCopy(*returnStatement.Value(), expected);
+            if (_currentFunction && returnStatement.Value() &&
+                expected.Kind() == SemanticTypeKind::String &&
+                actual.Kind() != SemanticTypeKind::String &&
+                actual.Kind() != SemanticTypeKind::None)
+                _forbiddenZeroEffects.insert(_currentFunction);
             if (_buildDepth != 0)
                 Report(diagnostics::DiagnosticCode::InvalidStructure,
                        returnStatement.Range(),
@@ -1300,6 +1465,11 @@ SemanticType SemanticAnalyzer::AnalyzeExpression(
             break;
     }
     _model._types.insert_or_assign(&expression, type);
+    if (!_directConstructions.contains(&expression) && type.OwnsStorage() &&
+        (expression.Kind() == core::AstNodeKind::CallExpression ||
+         expression.Kind() == core::AstNodeKind::MemberCallExpression ||
+         expression.Kind() == core::AstNodeKind::BuildExpression))
+        RecordCleanupEffects(type);
     return type;
 }
 
@@ -1399,10 +1569,138 @@ SemanticType SemanticAnalyzer::AnalyzeLiteral(
         case TokenType::Null:
             return SemanticType(SemanticTypeKind::Null);
         case TokenType::None:
+            if (expected.ContainsStructure() && expected.IsZeroable()) {
+                if (expected.IsImmovable()) RequireUnsafe(expression.Range());
+                WarnForNontrivialDefault(expected, expression.Range());
+                RecordZeroDependency(expected);
+                if (!_directConstructions.contains(&expression))
+                    RecordCleanupEffects(expected);
+            }
             return SemanticType(SemanticTypeKind::None);
         default:
             return SemanticType::Error();
     }
+}
+
+void SemanticAnalyzer::RecordZeroDependency(SemanticType type) {
+    if (type.Kind() == SemanticTypeKind::Array) {
+        RecordZeroDependency(*type.Target());
+        return;
+    }
+    if (type.Kind() == SemanticTypeKind::Tuple) {
+        for (const auto& element : type.Elements())
+            RecordZeroDependency(element);
+        return;
+    }
+    if (type.Kind() != SemanticTypeKind::Structure) return;
+    if (_currentFunction && type.Structure()->zero)
+        _functionCalls[_currentFunction].insert(type.Structure()->zero);
+    if (_inZero && _currentFunction && _currentFunction->Owner())
+        _zeroDependencies[_currentFunction->Owner()].insert(type.Structure());
+}
+
+void SemanticAnalyzer::RecordCleanupEffects(SemanticType type) {
+    if (!_currentFunction) return;
+    if (type.Kind() == SemanticTypeKind::Array) {
+        RecordCleanupEffects(*type.Target());
+        return;
+    }
+    if (type.Kind() == SemanticTypeKind::Tuple) {
+        for (const auto& element : type.Elements())
+            RecordCleanupEffects(element);
+        return;
+    }
+    if (type.Kind() != SemanticTypeKind::Structure) return;
+    if (type.Structure()->tear)
+        _functionCalls[_currentFunction].insert(type.Structure()->tear);
+    for (const auto& field : type.Structure()->fields)
+        if (field.type.OwnsStorage()) RecordCleanupEffects(field.type);
+}
+
+void SemanticAnalyzer::ValidateZeroCycles() {
+    enum class Visit { Unseen, Active, Complete };
+    std::unordered_map<const StructureType*, Visit> visits;
+    std::unordered_set<const StructureType*> reported;
+    std::function<void(const StructureType*)> visit =
+        [&](const StructureType* structure) {
+            visits[structure] = Visit::Active;
+            for (const StructureType* dependency :
+                 _zeroDependencies[structure]) {
+                if (visits[dependency] == Visit::Active) {
+                    if (reported.insert(structure).second)
+                        Report(diagnostics::DiagnosticCode::InvalidLifecycle,
+                               structure->syntax->NameRange(),
+                               "recursive default construction involving '" +
+                                   structure->name +
+                                   "::zero()' is not allowed");
+                    continue;
+                }
+                if (visits[dependency] == Visit::Unseen) visit(dependency);
+            }
+            visits[structure] = Visit::Complete;
+        };
+    for (const auto& structure : _model._structures)
+        if (visits[structure.get()] == Visit::Unseen) visit(structure.get());
+}
+
+void SemanticAnalyzer::ValidateZeroEffects() {
+    const auto hasMutableBorrow = [](const FunctionSymbol* function) {
+        for (SemanticType parameter : function->ParameterTypes())
+            if ((parameter.Kind() == SemanticTypeKind::Reference ||
+                 parameter.Kind() == SemanticTypeKind::Pointer) &&
+                !parameter.Target()->IsConst())
+                return true;
+        return false;
+    };
+    for (const auto& structure : _model._structures) {
+        const FunctionSymbol* zero = structure->zero;
+        if (!zero || structure->zeroIsGenerated) continue;
+        std::unordered_set<const FunctionSymbol*> visiting;
+        std::function<bool(const FunctionSymbol*)> invalid =
+            [&](const FunctionSymbol* function) {
+                if (!visiting.insert(function).second) return function == zero;
+                if (function->IsUnsafe() ||
+                    _forbiddenZeroEffects.contains(function) ||
+                    (function != zero &&
+                     !function->Name().ends_with("::tear") &&
+                     hasMutableBorrow(function)))
+                    return true;
+                for (const FunctionSymbol* callee : _functionCalls[function])
+                    if (invalid(callee)) return true;
+                return false;
+            };
+        if (invalid(zero))
+            Report(diagnostics::DiagnosticCode::InvalidLifecycle,
+                   structure->syntax->NameRange(),
+                   "zero must be non-recursive and cannot allocate, use "
+                   "unsafe operations, or cause external side effects, "
+                   "including through helper calls");
+    }
+}
+
+void SemanticAnalyzer::WarnForNontrivialDefault(SemanticType type,
+                                                source::SourceRange range) {
+    if (type.Kind() == SemanticTypeKind::Array) {
+        WarnForNontrivialDefault(*type.Target(), range);
+        return;
+    }
+    if (type.Kind() == SemanticTypeKind::Tuple) {
+        for (const auto& element : type.Elements())
+            WarnForNontrivialDefault(element, range);
+        return;
+    }
+    if (type.Kind() != SemanticTypeKind::Structure ||
+        type.IsTriviallyZeroable())
+        return;
+    if (_warnedDefaults.insert(type.Structure()).second)
+        _diagnostics.Report(
+            diagnostics::DiagnosticCode::InvalidLifecycle, range,
+            "structure '" + type.Name() +
+                "' is not trivially zeroed; default construction uses '" +
+                type.Name() + "::zero()'",
+            diagnostics::DiagnosticSeverity::Warning);
+    for (const auto& field : type.Structure()->fields)
+        WarnForNontrivialDefault(field.type, range);
 }
 
 SemanticType SemanticAnalyzer::AnalyzeCast(
@@ -1416,6 +1714,9 @@ SemanticType SemanticAnalyzer::AnalyzeCast(
                    std::string(target.Name()) + "'");
         return SemanticType::Error();
     }
+    if (_currentFunction && target.Kind() == SemanticTypeKind::String &&
+        source.Kind() != SemanticTypeKind::String)
+        _forbiddenZeroEffects.insert(_currentFunction);
     return target.WithoutConst();
 }
 
@@ -1811,14 +2112,45 @@ SemanticType SemanticAnalyzer::AnalyzeUnary(
 
 SemanticType SemanticAnalyzer::AnalyzeBinary(
     const core::BinaryExpression& expression, SemanticType expected) {
+    const TokenType operation = expression.OperatorType();
+    const bool valueEquality =
+        operation == TokenType::Equal || operation == TokenType::NotEqual;
+    const bool strictEquality = operation == TokenType::StrictEqual ||
+                                operation == TokenType::StrictNotEqual;
     SemanticType left = AnalyzeExpression(
         expression.Left(),
         expected.IsInteger() ? expected : SemanticType::Error());
-    const SemanticType right = AnalyzeExpression(
+    SemanticType right = AnalyzeExpression(
         expression.Right(), left.IsInteger() ? left : SemanticType::Error());
     if (right.IsInteger() && !expected.IsInteger() &&
         expression.Left().Kind() == core::AstNodeKind::LiteralExpression)
         left = AnalyzeExpression(expression.Left(), right);
+    if (valueEquality && left.Kind() == SemanticTypeKind::None &&
+        right.ContainsStructure())
+        left = AnalyzeExpression(expression.Left(), right);
+    if (valueEquality && right.Kind() == SemanticTypeKind::None &&
+        left.ContainsStructure())
+        right = AnalyzeExpression(expression.Right(), left);
+    const bool leftStructure = left.Kind() == SemanticTypeKind::Structure;
+    const bool rightStructure = right.Kind() == SemanticTypeKind::Structure;
+    const bool leftNone = left.Kind() == SemanticTypeKind::None;
+    const bool rightNone = right.Kind() == SemanticTypeKind::None;
+    if (strictEquality &&
+        ((leftStructure && rightNone) || (leftNone && rightStructure)))
+        return SemanticType(SemanticTypeKind::Bool);
+    if (((valueEquality || strictEquality) && leftStructure && rightStructure &&
+         left == right) ||
+        (valueEquality &&
+         ((leftStructure && rightNone && left.IsZeroable()) ||
+          (leftNone && rightStructure && right.IsZeroable())))) {
+        const SemanticType structure = leftStructure ? left : right;
+        if (IsEqualityComparable(structure))
+            return SemanticType(SemanticTypeKind::Bool);
+        Report(diagnostics::DiagnosticCode::InvalidOperand, expression.Range(),
+               "structure '" + structure.Name() +
+                   "' contains a field that cannot be compared");
+        return SemanticType::Error();
+    }
     if (left.ContainsStructure() || right.ContainsStructure() ||
         left.IsBorrowed() || right.IsBorrowed() || left.IsSequence() ||
         right.IsSequence() || left.Kind() == SemanticTypeKind::Tuple ||
@@ -1829,7 +2161,6 @@ SemanticType SemanticAnalyzer::AnalyzeBinary(
         return SemanticType::Error();
     }
     if (left.IsError() || right.IsError()) return SemanticType::Error();
-    const TokenType operation = expression.OperatorType();
     if (left.IsErrorValue() || right.IsErrorValue()) {
         const bool strict = operation == TokenType::StrictEqual ||
                             operation == TokenType::StrictNotEqual;
@@ -1879,6 +2210,7 @@ SemanticType SemanticAnalyzer::AnalyzeBinary(
     const bool rightString = right.Kind() == SemanticTypeKind::String ||
                              right.Kind() == SemanticTypeKind::StringView;
     if (operation == TokenType::Add && leftString && rightString) {
+        if (_currentFunction) _forbiddenZeroEffects.insert(_currentFunction);
         return SemanticType(SemanticTypeKind::String);
     }
     if (operation == TokenType::Add || operation == TokenType::Sub ||
@@ -1922,12 +2254,22 @@ SemanticType SemanticAnalyzer::AnalyzeAssignment(
     const core::AssignmentExpression& expression) {
     const SemanticType targetValue = AnalyzeExpression(expression.Target());
     const SemanticType target = PlaceType(expression.Target());
+    if (target.OwnsStorage()) RecordCleanupEffects(target);
     CheckCopy(expression.Value(), target);
-    if (target.ContainsStructure() && !target.IsCopyable())
+    if (target.ContainsStructure() && !target.IsCopyable() &&
+        !IsNoneLiteral(expression.Value()))
         Report(diagnostics::DiagnosticCode::NonCopyableValue,
                expression.Range(),
                "a non-copyable value cannot be replaced by assignment");
+    if (IsNoneLiteral(expression.Value()))
+        MarkDirectConstruction(_directConstructions, expression.Value(), true);
     const SemanticType value = AnalyzeExpression(expression.Value(), target);
+    if (IsNoneLiteral(expression.Value()))
+        MarkDirectConstruction(_directConstructions, expression.Value(), false);
+    if (_currentFunction && target.Kind() == SemanticTypeKind::String &&
+        value.Kind() != SemanticTypeKind::String &&
+        value.Kind() != SemanticTypeKind::None)
+        _forbiddenZeroEffects.insert(_currentFunction);
     if (targetValue.IsError()) return SemanticType::Error();
     if (target.IsError()) {
         Report(diagnostics::DiagnosticCode::SemanticInvalidAssignmentTarget,
@@ -2005,6 +2347,10 @@ bool SemanticAnalyzer::BorrowsLocalString(
 
 SemanticType SemanticAnalyzer::AnalyzeAllocationCall(
     const core::CallExpression& expression, BuiltInFunction intrinsic) {
+    if (_inZero)
+        Report(diagnostics::DiagnosticCode::InvalidLifecycle,
+               expression.Range(), "zero cannot allocate or free storage");
+    if (_currentFunction) _forbiddenZeroEffects.insert(_currentFunction);
     RequireUnsafe(expression.Range());
     const bool allocate = intrinsic == BuiltInFunction::New;
     SemanticType element = SemanticType::Error();
@@ -2022,11 +2368,18 @@ SemanticType SemanticAnalyzer::AnalyzeAllocationCall(
                 element = element.WithConst();
             if (dynamic && !(element.IsNumeric() ||
                              element.Kind() == SemanticTypeKind::Bool ||
-                             element.Kind() == SemanticTypeKind::Char))
+                             element.Kind() == SemanticTypeKind::Char ||
+                             (element.Kind() == SemanticTypeKind::Structure &&
+                              IsRuntimeArrayStructureField(element))))
                 Report(diagnostics::DiagnosticCode::InvalidAllocation,
                        expression.TypeArgument()->Range(),
-                       "runtime arrays currently require numeric, bool, or "
-                       "char elements");
+                       "runtime arrays require numeric, bool, char, or "
+                       "trivially copyable default-constructible structure "
+                       "elements with supported fields");
+            if (dynamic && element.Kind() == SemanticTypeKind::Structure &&
+                IsRuntimeArrayStructureField(element))
+                WarnForNontrivialDefault(element,
+                                         expression.TypeArgument()->Range());
             if (!element.IsError() && !StorageSize(element))
                 Report(
                     diagnostics::DiagnosticCode::InvalidAllocation,
@@ -2045,8 +2398,12 @@ SemanticType SemanticAnalyzer::AnalyzeAllocationCall(
         dynamic ? SemanticType(SemanticTypeKind::USize) : element;
     SemanticType argument = SemanticType::Error();
     for (const auto& value : expression.Arguments()) {
+        if (allocate && !dynamic)
+            MarkDirectConstruction(_directConstructions, *value, true);
         argument =
             AnalyzeExpression(*value, allocate ? input : SemanticType::Error());
+        if (allocate && !dynamic)
+            MarkDirectConstruction(_directConstructions, *value, false);
         if (allocate) {
             CheckCopy(*value, input);
             if (!IsAssignable(input, argument))
@@ -2090,6 +2447,11 @@ SemanticType SemanticAnalyzer::AnalyzeCall(
     if (expression.Callee().Kind() == core::AstNodeKind::NameExpression &&
         static_cast<const core::NameExpression&>(expression.Callee()).Name() == "take" &&
         !_currentScope->Lookup("take")) {
+        if (_inZero)
+            Report(diagnostics::DiagnosticCode::InvalidLifecycle,
+                   expression.Range(),
+                   "zero cannot perform ownership operations");
+        if (_currentFunction) _forbiddenZeroEffects.insert(_currentFunction);
         RequireUnsafe(expression.Range());
         if (expression.Arguments().size() != 1) {
             Report(diagnostics::DiagnosticCode::WrongArgumentCount,
@@ -2183,8 +2545,14 @@ SemanticType SemanticAnalyzer::AnalyzeCall(
     }
     if (function->IsUnsafe() || function->ReturnType().IsImmovable())
         RequireUnsafe(expression.Callee().Range());
+    if (_currentFunction) _functionCalls[_currentFunction].insert(function);
     if (function->BuiltIn() == BuiltInFunction::Stdout ||
         function->BuiltIn() == BuiltInFunction::StdoutLine) {
+        if (_inZero)
+            Report(diagnostics::DiagnosticCode::InvalidLifecycle,
+                   expression.Range(),
+                   "zero cannot cause external side effects");
+        if (_currentFunction) _forbiddenZeroEffects.insert(_currentFunction);
         if (argumentTypes.size() != 1) {
             Report(diagnostics::DiagnosticCode::WrongArgumentCount,
                    expression.Range(),
@@ -2320,6 +2688,8 @@ SemanticType SemanticAnalyzer::AnalyzeMemberCall(
                    std::to_string(arguments.size()));
         return result;
     }
+    if (_currentFunction && result.Kind() == SemanticTypeKind::String)
+        _forbiddenZeroEffects.insert(_currentFunction);
     for (std::size_t index = 0; index < arguments.size(); ++index) {
         if (!arguments[index].IsError() &&
             !IsStringViewIndex(arguments[index])) {
@@ -2465,10 +2835,11 @@ void SemanticAnalyzer::ResolveStructureFields() {
                 Report(diagnostics::DiagnosticCode::DuplicateDeclaration,
                        field->NameRange(),
                        "duplicate field '" + field->Name() + "'");
-            if (field->Name() == "init" || field->Name() == "tear")
+            if (field->Name() == "init" || field->Name() == "zero" ||
+                field->Name() == "tear")
                 Report(diagnostics::DiagnosticCode::InvalidLifecycle,
                        field->NameRange(),
-                       "init and tear are reserved lifecycle names");
+                       "init, zero, and tear are reserved lifecycle names");
             SemanticType type = ResolveTypeSyntax(field->Type());
             structure->fields.push_back({field->Name(), type, field.get()});
         }
@@ -2565,6 +2936,58 @@ void SemanticAnalyzer::GenerateInitializers() {
         RegisterFunction(*init, true);
         _model._generatedFunctions.push_back(std::move(init));
     }
+
+    std::unordered_map<const StructureType*, bool> zeroable;
+    std::unordered_set<const StructureType*> checking;
+    std::function<bool(SemanticType)> canGenerateZero =
+        [&](SemanticType type) -> bool {
+        if (type.Kind() == SemanticTypeKind::Array)
+            return canGenerateZero(*type.Target());
+        if (type.Kind() != SemanticTypeKind::Structure)
+            return type.IsNumeric() || type.Kind() == SemanticTypeKind::Bool ||
+                   type.Kind() == SemanticTypeKind::Char ||
+                   type.Kind() == SemanticTypeKind::Pointer;
+        const StructureType* nested = type.Structure();
+        if (nested->zero) return true;
+        if (const auto found = zeroable.find(nested); found != zeroable.end())
+            return found->second;
+        if (nested->hasCustomInit || nested->tear ||
+            !checking.insert(nested).second)
+            return false;
+        bool result = true;
+        for (const auto& field : nested->fields)
+            if (!canGenerateZero(field.type)) {
+                result = false;
+                break;
+            }
+        checking.erase(nested);
+        zeroable.emplace(nested, result);
+        return result;
+    };
+    for (const auto& structure : _model._structures)
+        (void)canGenerateZero(SemanticType(structure.get()));
+    for (const auto& structure : _model._structures) {
+        if (structure->zero || !zeroable[structure.get()]) continue;
+        const auto range = structure->syntax->Range();
+        std::vector<std::unique_ptr<core::Statement>> statements;
+        auto body = std::make_unique<core::BlockStatement>(
+            range, std::vector<std::unique_ptr<core::Statement>>{});
+        auto build = std::make_unique<core::BuildExpression>(
+            range, std::make_unique<core::TypeNode>(range, structure->name),
+            std::move(body));
+        statements.push_back(
+            std::make_unique<core::ReturnStatement>(range, std::move(build)));
+        auto zero = std::make_unique<core::FunctionDeclaration>(
+            range, std::vector<core::FunctionModifier>{},
+            std::make_unique<core::TypeNode>(range, structure->name), "zero",
+            std::vector<std::unique_ptr<core::Parameter>>{},
+            std::make_unique<core::BlockStatement>(range,
+                                                   std::move(statements)),
+            range, structure->name);
+        zero->moduleId = structure->syntax->moduleId;
+        RegisterFunction(*zero, true);
+        _model._generatedFunctions.push_back(std::move(zero));
+    }
 }
 
 void SemanticAnalyzer::CheckMethodAccess(const FunctionSymbol& function,
@@ -2581,7 +3004,19 @@ void SemanticAnalyzer::CheckMethodAccess(const FunctionSymbol& function,
 
 void SemanticAnalyzer::CheckCopy(const core::Expression& expression,
                                  SemanticType type) {
+    const core::Expression* source = &expression;
+    while (source->Kind() == core::AstNodeKind::ParenthesizedExpression)
+        source = &static_cast<const core::ParenthesizedExpression&>(*source)
+                      .Inner();
+    const bool semanticDefault = IsNoneLiteral(*source);
+    if (_currentFunction && CopyMayAllocate(type) &&
+        source->Kind() != core::AstNodeKind::BuildExpression &&
+        source->Kind() != core::AstNodeKind::CallExpression &&
+        source->Kind() != core::AstNodeKind::MemberCallExpression &&
+        !semanticDefault)
+        _forbiddenZeroEffects.insert(_currentFunction);
     if (!type.ContainsStructure() || type.IsCopyable()) return;
+    if (semanticDefault) return;
     if (expression.Kind() == core::AstNodeKind::ParenthesizedExpression) {
         CheckCopy(static_cast<const core::ParenthesizedExpression&>(expression)
                       .Inner(),
@@ -2627,12 +3062,33 @@ SemanticType SemanticAnalyzer::AnalyzeBuild(
                expression.Type().Range(), "build requires a structure type");
         return SemanticType::Error();
     }
-    if (type.IsImmovable()) RequireUnsafe(expression.Range());
+    if (type.IsImmovable() && !_inZero) RequireUnsafe(expression.Range());
+    const bool zeroBuild = _currentFunction && _currentFunction->Owner() &&
+                           _currentFunction->Name().ends_with("::zero");
+    if (zeroBuild)
+        for (const auto& field : type.Structure()->fields)
+            RecordZeroDependency(field.type);
+    if (!zeroBuild && _currentFunction && type.Structure()->init)
+        for (const auto& field : type.Structure()->fields)
+            if (field.syntax->Initializer()) {
+                _functionCalls[_currentFunction].insert(type.Structure()->init);
+                break;
+            }
     std::function<void(SemanticType)> checkDefault = [&](SemanticType field) {
-        if (field.Kind() == SemanticTypeKind::Structure &&
-            field.Structure()->init) {
-            CheckMethodAccess(*field.Structure()->init, expression.Range());
-            if (!field.Structure()->init->ParameterTypes().empty())
+        if (field.Kind() == SemanticTypeKind::Structure) {
+            const FunctionSymbol* method =
+                zeroBuild ? field.Structure()->zero : field.Structure()->init;
+            if (!method && zeroBuild)
+                Report(diagnostics::DiagnosticCode::InvalidStructure,
+                       expression.Range(),
+                       "field of type '" + field.Name() +
+                           "' has no valid default construction");
+            if (method) {
+                CheckMethodAccess(*method, expression.Range());
+                if (_currentFunction)
+                    _functionCalls[_currentFunction].insert(method);
+            }
+            if (method && !method->ParameterTypes().empty())
                 Report(diagnostics::DiagnosticCode::InvalidStructure,
                        expression.Range(),
                        "field of type '" + field.Name() +
@@ -2645,7 +3101,7 @@ SemanticType SemanticAnalyzer::AnalyzeBuild(
             for (const auto& element : field.Elements()) checkDefault(element);
     };
     for (const auto& field : type.Structure()->fields)
-        if (!field.syntax->Initializer()) checkDefault(field.type);
+        if (zeroBuild || !field.syntax->Initializer()) checkDefault(field.type);
     Scope* previousScope = _currentScope;
     const Symbol* previousSelf = _buildSelf;
     _currentScope = &AddScope(previousScope);
@@ -2707,7 +3163,12 @@ SemanticType SemanticAnalyzer::AnalyzeStructureCall(
     }
     const FunctionSymbol* function = owner->methods.at(expression.Member());
     _model._methods[&expression] = function;
+    if (_currentFunction) _functionCalls[_currentFunction].insert(function);
     CheckMethodAccess(*function, expression.MemberRange());
+    if (function == owner->zero)
+        WarnForNontrivialDefault(SemanticType(owner), expression.Range());
+    if (_inZero && function == owner->zero)
+        RecordZeroDependency(SemanticType(owner));
     if (isStatic == function->HasReceiver())
         Report(diagnostics::DiagnosticCode::InvalidMember, expression.Range(),
                "instance methods need an instance; static methods use "

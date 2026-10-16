@@ -1,0 +1,53 @@
+module structures;
+
+@imports :: lib::std::containers::raw_array;
+
+structure Token {
+    i32 kind;
+    char value;
+};
+
+Token Token::zero() override {
+    return build Token {
+        self.kind = -1;
+        self.value = '\0';
+    };
+}
+
+i32 main() {
+    unsafe {
+        tokens := raw_array::RawArray<Token>::init();
+        missing, empty := tokens.pop();
+        if empty != raw_array::ArrayError.Empty || missing != none {
+            return 1;
+        }
+
+        Token first = none;
+        first.kind = 7;
+        first.value = 'a';
+        Token second = none;
+        second.kind = 9;
+        second.value = 'b';
+
+        if tokens.push(first) != none || tokens.push(second) != none {
+            return 2;
+        }
+
+        found, err := tokens.get(0);
+        if err != none || found != first {
+            return 3;
+        }
+
+        removed, popError := tokens.pop();
+        if popError != none || removed != second {
+            return 4;
+        }
+
+        absent, bounds := tokens.get(2);
+        if bounds != raw_array::ArrayError.IndexOutOfBounds || absent != none {
+            return 5;
+        }
+    }
+
+    return 42;
+}

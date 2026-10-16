@@ -41,6 +41,16 @@ const Diagnostic* FindDiagnostic(const Analysis& analysis,
     return nullptr;
 }
 
+const Diagnostic* FindErrorDiagnostic(const Analysis& analysis,
+                                      DiagnosticCode code) {
+    for (const Diagnostic& diagnostic : analysis.diagnostics.Diagnostics()) {
+        if (diagnostic.code == code &&
+            diagnostic.severity == DiagnosticSeverity::Error)
+            return &diagnostic;
+    }
+    return nullptr;
+}
+
 const FunctionDeclaration& FunctionAt(const Analysis& analysis,
                                       std::size_t index) {
     return static_cast<const FunctionDeclaration&>(
@@ -2417,8 +2427,148 @@ TEST(SemanticStructureTests,
     ASSERT_FALSE(result.diagnostics.HasErrors());
     ASSERT_EQ(result.model.Structures().size(), 1);
     EXPECT_NE(result.model.Structures()[0]->init, nullptr);
+    EXPECT_NE(result.model.Structures()[0]->zero, nullptr);
     EXPECT_EQ(result.model.Structures()[0]->fields.size(), 2);
-    EXPECT_EQ(result.model.GeneratedFunctions().size(), 1);
+    EXPECT_EQ(result.model.GeneratedFunctions().size(), 2);
+}
+
+TEST(SemanticStructureTests, ValidatesZeroLifecycleAndContextualNone) {
+    const std::string valid =
+        "structure Position { i32 line; i32 column; }; "
+        "Position Position::zero() override { return build Position { "
+        "self.line = 1; self.column = 1; }; } "
+        "Position make() { return none; } void take(Position value) {} "
+        "void f() { Position value = none; value = none; take(none); "
+        "if value == none or none != value or value === none or "
+        "none !== value {} explicit := Position::zero(); }";
+    Analysis result = Analyze(valid);
+    EXPECT_FALSE(result.diagnostics.HasErrors());
+    std::size_t warnings = 0;
+    for (const Diagnostic& diagnostic : result.diagnostics.Diagnostics()) {
+        if (diagnostic.severity == DiagnosticSeverity::Warning) {
+            ++warnings;
+            EXPECT_NE(diagnostic.message.find("Position::zero()"),
+                      std::string::npos);
+        }
+    }
+    EXPECT_EQ(warnings, 1);
+
+    for (const std::string& method : {
+             "Position Position::zero() { return build Position {}; }",
+             "unsafe Position Position::zero() override { return build "
+             "Position {}; }",
+             "Position Position::zero(i32 n) override { return build Position "
+             "{}; }",
+             "i32 Position::zero() override { return 0; }",
+             "Position Position::zero(&self) override { return build Position "
+             "{}; }",
+         }) {
+        SCOPED_TRACE(method);
+        EXPECT_NE(FindDiagnostic(
+                      Analyze("structure Position { i32 value; }; " + method),
+                      DiagnosticCode::InvalidLifecycle),
+                  nullptr);
+    }
+}
+
+TEST(SemanticStructureTests, NoneDirectlyConstructsNonCopyableStructures) {
+    Analysis result = Analyze(
+        "structure Box { i32 value; }; "
+        "Box Box::zero() override { return build Box {}; } "
+        "void Box::tear(&self) override {} "
+        "structure Temporary { i32 value; }; "
+        "void Temporary::tear(&self) override {} "
+        "structure Factory { i32 value; }; "
+        "Factory Factory::zero() override { Temporary::init(); return build "
+        "Factory {}; } "
+        "Box make() { return none; } "
+        "void f() { Box value = none; value = none; }");
+    EXPECT_FALSE(result.diagnostics.HasErrors());
+}
+
+TEST(SemanticStructureTests, RejectsInvalidAndRecursiveZeroConstruction) {
+    EXPECT_TRUE(
+        Analyze("structure Box { i32 value; }; Box Box::init(i32 value) "
+                "override { return build Box { self.value = value; }; } "
+                "void f() { Box box = none; }")
+            .diagnostics.HasErrors());
+    EXPECT_NE(FindErrorDiagnostic(
+                  Analyze("structure Box { i32 value; }; i32 noisy() { "
+                          "stdoutln(1); return 0; } Box Box::zero() override { "
+                          "return build Box { self.value = noisy(); }; }"),
+                  DiagnosticCode::InvalidLifecycle),
+              nullptr);
+    EXPECT_NE(
+        FindErrorDiagnostic(
+            Analyze("structure Text { string value; }; string allocate() { "
+                    "return \"value\".string(); } Text Text::zero() override { "
+                    "return build Text { self.value = allocate(); }; }"),
+            DiagnosticCode::InvalidLifecycle),
+        nullptr);
+    EXPECT_NE(
+        FindErrorDiagnostic(
+            Analyze("structure A { i32 value; }; structure B { i32 value; }; "
+                    "A A::zero() override { B b = B::zero(); return build A "
+                    "{}; } B B::zero() override { A a = A::zero(); return "
+                    "build B {}; }"),
+            DiagnosticCode::InvalidLifecycle),
+        nullptr);
+    EXPECT_NE(
+        FindErrorDiagnostic(
+            Analyze("structure A { i32 value; }; structure B { i32 value; }; "
+                    "B default_b() { return none; } A default_a() { return "
+                    "none; } A A::zero() override { B b = default_b(); return "
+                    "build A {}; } B B::zero() override { A a = default_a(); "
+                    "return build B {}; }"),
+            DiagnosticCode::InvalidLifecycle),
+        nullptr);
+    EXPECT_NE(
+        FindErrorDiagnostic(
+            Analyze("structure Payload { string value = \"value\".string(); }; "
+                    "Payload make_payload() { return build Payload {}; } "
+                    "structure Box { i32 value; }; Box Box::zero() override { "
+                    "Payload payload = make_payload(); return build Box {}; "
+                    "}"),
+            DiagnosticCode::InvalidLifecycle),
+        nullptr);
+    EXPECT_NE(
+        FindErrorDiagnostic(
+            Analyze("structure Loud { i32 value; }; "
+                    "Loud Loud::zero() override { return build Loud {}; } "
+                    "void Loud::tear(&self) override { stdoutln(123); } "
+                    "structure Box { i32 value; }; "
+                    "Box Box::zero() override { Loud local = Loud::zero(); "
+                    "return build Box {}; }"),
+            DiagnosticCode::InvalidLifecycle),
+        nullptr);
+    EXPECT_NE(
+        FindErrorDiagnostic(
+            Analyze("structure Noisy { i32 value; }; "
+                    "void Noisy::tear(&self) override { stdoutln(123); } "
+                    "structure Box { i32 value; }; "
+                    "Box Box::zero() override { Noisy::init(); return build "
+                    "Box {}; }"),
+            DiagnosticCode::InvalidLifecycle),
+        nullptr);
+    EXPECT_NE(
+        FindErrorDiagnostic(
+            Analyze("structure Noisy { i32 value; }; "
+                    "void Noisy::tear(&self) override { stdoutln(123); } "
+                    "structure Box { i32 value; }; "
+                    "Box Box::zero() override { if Noisy::init() == "
+                    "Noisy::init() {} return build Box {}; }"),
+            DiagnosticCode::InvalidLifecycle),
+        nullptr);
+    EXPECT_NE(
+        FindErrorDiagnostic(
+            Analyze("structure Loud { i32 value; }; "
+                    "Loud Loud::zero() override { return build Loud {}; } "
+                    "void Loud::tear(&self) override { stdoutln(123); } "
+                    "structure Holder { Loud value; }; "
+                    "Holder Holder::zero() override { return build Holder { "
+                    "self.value = none; }; }"),
+            DiagnosticCode::InvalidLifecycle),
+        nullptr);
 }
 
 TEST(SemanticStructureTests,
@@ -3296,6 +3446,12 @@ TEST(SemanticMemoryTests,
           "unsafe void f() { p, e := new<[]i32>(-1); free(p); }",
           "unsafe void f() { p, e := new<[]string>(2); free(p); }",
           "unsafe void f() { p, e := new<[]*i32>(2); free(p); }",
+          "structure Text { string value; }; Text Text::zero() override { "
+          "return build Text {}; } unsafe void f() { p, e := "
+          "new<[]Text>(2); free(p); }",
+          "structure Owned { i32 value; }; void Owned::tear(&self) override "
+          "{} Owned Owned::zero() override { return build Owned {}; } "
+          "unsafe void f() { p, e := new<[]Owned>(2); free(p); }",
           "unsafe void f() { p, e := new<[]i32>(); }",
           "void f() { p, e := new<[]i32>(2); }"})
         EXPECT_TRUE(Analyze(source).diagnostics.HasErrors()) << source;

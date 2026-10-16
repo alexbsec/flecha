@@ -178,6 +178,7 @@ Tentative zero values are:
 | `char` | the null character, `'\0'` |
 | Pointer | `null` |
 | Error type | its designated no-error value |
+| Plain structure | recursively defaulted fields |
 
 Examples:
 
@@ -185,6 +186,7 @@ Examples:
 i32 count = none;       // i32(0)
 bool ready = none;      // false
 *u8 address = none;     // null pointer
+Position position = none; // Position::zero()
 ```
 
 After conversion, a value does not retain metadata recording that it originated from the `none` literal:
@@ -198,6 +200,12 @@ count === i32(0);   // true
 ```
 
 For primitives, `none` means the zero value rather than a separately representable absence state. Consequently, a primitive integer cannot distinguish “no integer” from integer zero. A future tagged optional type may represent that distinction when required.
+
+Plain structures receive recursively generated default construction when all
+fields support it. A structure with custom initialization or destruction must
+provide `T T::zero() override`. The override is static, parameterless, safe,
+side-effect-free, non-allocating, and non-recursive. Custom defaults produce a
+once-per-structure compilation warning. Fixed arrays default each element.
 
 ### 8.1 Initialization
 
@@ -267,6 +275,10 @@ The initial equality rule is:
 1. If both operands have the same comparable type, compare their values.
 2. If exactly one operand has type `none`, convert it to the other operand's zero value and compare.
 3. Otherwise, report a type error.
+
+Structure value equality is field-by-field for comparable fields. Operands are
+evaluated once without copying or consuming their source values. A structure
+compared strictly with `none` is unequal without invoking default construction.
 
 ### 9.2 Strict equality
 
@@ -555,8 +567,8 @@ Box Box::init() override {
 i32 Box::value(&const self) { return self->x + self->y; }
 ```
 
-Structures, public/private fields and methods, generated `init`, explicit
-`build`, and compiler-only `tear` hooks are implemented. Values use
+Structures, public/private fields and methods, generated `init` and `zero`,
+explicit `build`, and compiler-only `tear` hooks are implemented. Values use
 `box.value()` and `box.x`; references and raw pointers use `box->value()` and
 `box->x`. Static calls use `Box::method()`. Lifecycle overrides require
 `override`; custom teardown precedes reverse field destruction at scope exit.
@@ -568,9 +580,10 @@ fields, construction limits, examples, and diagnostics.
 ## 14. Memory and runtime model
 
 Flecha should not require a garbage collector. Stack allocation is the ordinary default. The implemented explicit raw allocation API is `new<T>(value)` returning `(*T, error)`, paired with unsafe `free(ptr)`. It uses the system allocation service; custom allocators remain future work.
-Runtime-sized scalar storage uses `new<[]T>(count)` and checked unsafe
-`pointer[index]` access. See [dynamic arrays](docs/dynamic_arrays.md) for the
-implemented limits and the Flecha `RawArray<T>` library.
+Runtime-sized scalar and supported trivially copyable structure storage uses
+`new<[]T>(count)` and checked unsafe `pointer[index]` access. See
+[dynamic arrays](docs/dynamic_arrays.md) for the implemented limits and the
+Flecha `RawArray<T>` library.
 On failure, new returns null and `AllocationError.OutOfMemory` without evaluating
 the initializer. Free runs typed teardown and accepts null. See
 [raw allocation](docs/raw_allocation.md) for the unsafe contract and current limits.

@@ -32,8 +32,8 @@ The declaration ends with `;`. Fields and methods are public by default.
 `private T field;` and a `private { ... }` field group are equivalent. A private
 member is accessible only inside methods belonging to its structure, including
 access through another instance. A build block does not grant private access
-by itself. Fields and methods cannot share names; `init` and `tear` are reserved
-lifecycle names. Types may refer to later structure declarations.
+by itself. Fields and methods cannot share names; `init`, `zero`, and `tear` are
+reserved lifecycle names. Types may refer to later structure declarations.
 
 Structure values use `.`, while references and pointers use `->`, for both
 fields and methods:
@@ -92,6 +92,53 @@ and tuples containing Box. Raw pointer fields need no constructor arguments;
 they default to null. Reference fields remain unsupported pending lifetime
 contracts. Additional named static factories may also accept parameters.
 
+## Default construction and `zero`
+
+`none` constructs the expected structure default in declarations,
+assignments, arguments, returns, and ordinary `==`/`!=` comparisons. A plain
+structure receives a generated `zero()` when every field can be defaulted:
+numbers become zero, booleans become false, characters become `\0`, raw
+pointers become null, fixed arrays default every element, and nested plain
+structures recursively default their fields. This is semantic initialization,
+not a bytewise memory clear.
+
+A structure with a custom `init` or `tear` must declare its default explicitly:
+
+```flecha
+structure Position {
+    i32 line;
+    i32 column;
+};
+
+Position Position::zero() override {
+    return build Position {
+        self.line = 1;
+        self.column = 1;
+    };
+}
+```
+
+`zero` is static, takes no parameters or `self`, returns its owning structure,
+and is always safe. It cannot allocate, free, enter an unsafe block, perform
+ownership operations, cause output or another external side effect, or hide
+one of those operations behind a helper call or an implicit cleanup. Recursive
+default construction, including indirect cycles, is rejected.
+`Position::zero()` may also be called explicitly. Exporting a structure exposes
+its default construction, while the override may initialize private fields.
+
+Custom defaults and plain defaults containing them are nontrivial. The compiler
+emits one warning per such structure, for example:
+
+```text
+warning: structure 'Position' is not trivially zeroed; default construction uses 'Position::zero()'
+```
+
+Structure equality is field-by-field and requires every field to be comparable.
+Each operand is evaluated once, and equality neither copies nor consumes an
+existing structure. A contextual `none` temporary follows normal destruction.
+Strict comparison keeps `none` distinct: a structure is never `=== none`, and
+that comparison does not invoke `zero`.
+
 `build Box { ... }` initializes fields in declaration order,
 then executes its block with a value named `self`, so field access there uses
 `self.field`. It does not call Box's own init again.
@@ -114,8 +161,8 @@ Build bodies allow local declarations, conditionals and local loops. `return`,
 build; validate fallible preconditions before constructing. This milestone does
 not implement partial construction or unwinding an unfinished value.
 
-Structure variables require an initializer. `none` is not a structure
-constructor. Inline recursive layouts are rejected; recursive raw pointer
+Structure variables require an initializer. Inline recursive layouts are
+rejected; recursive raw pointer
 fields such as `*Node next` are allowed. Fields support scalars, errors, raw
 pointers, owning strings, structures, fixed arrays of supported array elements,
 and tuples of supported fields. References, slices, and `stringv` fields need

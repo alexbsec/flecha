@@ -48,8 +48,12 @@ std::unique_ptr<BoundFunction> Lowerer::LowerFunction(
     }
 
     _returnType = functionSymbol.ReturnType();
-    return std::make_unique<BoundFunction>(
+    _zeroFunction =
+        functionSymbol.Owner() && functionSymbol.Name().ends_with("::zero");
+    auto result = std::make_unique<BoundFunction>(
         functionSymbol, std::move(parameters), LowerBlock(function.Body()));
+    _zeroFunction = false;
+    return result;
 }
 
 std::vector<std::unique_ptr<BoundStatement>> Lowerer::LowerStatements(
@@ -281,12 +285,12 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                 static_cast<const core::BuildExpression&>(expression);
             std::vector<std::unique_ptr<BoundExpression>> defaults;
             for (const auto& field : type.Structure()->fields) {
-                if (field.syntax->Initializer())
+                if (!_zeroFunction && field.syntax->Initializer())
                     defaults.push_back(LowerExpression(
                         *field.syntax->Initializer(), field.type));
                 else
                     defaults.push_back(std::make_unique<BoundDefaultExpression>(
-                        field.syntax->Range(), field.type));
+                        field.syntax->Range(), field.type, _zeroFunction));
             }
             return std::make_unique<BoundBuildExpression>(
                 expression.Range(), type,
@@ -340,6 +344,11 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
         case core::AstNodeKind::LiteralExpression: {
             const core::LiteralExpression& literal =
                 static_cast<const core::LiteralExpression&>(expression);
+            if (literal.LiteralType() == TokenType::None &&
+                expected.ContainsStructure()) {
+                return std::make_unique<BoundDefaultExpression>(
+                    expression.Range(), expected.WithoutConst(), true);
+            }
             if ((literal.LiteralType() == TokenType::None ||
                  (literal.LiteralType() == TokenType::Null &&
                   expected.Kind() == semantic::SemanticTypeKind::Pointer)) &&
@@ -409,6 +418,7 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                 // zero value. Strict equality retains none's distinct type.
                 if ((valueEquality &&
                      (other.IsNumeric() || other.IsErrorValue() ||
+                      other.ContainsStructure() ||
                       kind == semantic::SemanticTypeKind::Bool ||
                       kind == semantic::SemanticTypeKind::Char)) ||
                     kind == semantic::SemanticTypeKind::Pointer ||
