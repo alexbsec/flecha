@@ -1,0 +1,7 @@
+module main;
+@imports :: root::maker :: root::reader;
+i32 main() {
+    a := maker::make<i32>();
+    b := maker::make<f64>();
+    return reader::read<i32>(&a) + (reader::read<f64>(&b) as i32);
+}

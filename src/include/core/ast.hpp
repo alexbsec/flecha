@@ -3,12 +3,14 @@
 
 #include <cassert>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "source/source_range.hpp"
+#include "token.hpp"
 #include "token_type.hpp"
 
 namespace flecha::core {
@@ -76,6 +78,16 @@ class Declaration : public AstNode {
     using AstNode::AstNode;
     std::string moduleId;
     bool exported = false;
+    // Token spans let specialization preserve source ranges and parser
+    // desugaring.
+    std::vector<std::string> genericParameters;
+    std::vector<std::string> ownerParameters;
+    std::vector<Token> templateTokens;
+    std::vector<std::pair<std::size_t, std::size_t>> parameterTokenRanges;
+    std::size_t nameTokenIndex = 0;
+    std::size_t ownerTokenIndex = 0;
+    std::vector<source::SourceRange> instantiationOrigins;
+    std::string specializationName;
 };
 
 class Statement : public AstNode {
@@ -181,6 +193,8 @@ class MemberAccessExpression final : public Expression {
 
 class TypeNode final : public AstNode {
    public:
+    std::vector<std::unique_ptr<TypeNode>> typeArguments;
+
     TypeNode(source::SourceRange range, std::string name, bool isConst = false,
              source::SourceRange qualifierRange = {})
         : AstNode(range),
@@ -188,6 +202,7 @@ class TypeNode final : public AstNode {
           _name(std::move(name)),
           _isConst(isConst),
           _qualifierRange(qualifierRange) {}
+    void Rename(std::string name) { _name = std::move(name); }
     [[nodiscard]] const std::string& Name() const { return _name; }
 
     TypeNode(source::SourceRange range, PrimitiveType type,
@@ -448,6 +463,12 @@ class CompilationUnit final : public AstNode {
                     std::vector<std::unique_ptr<Declaration>> declarations)
         : AstNode(range), _declarations(std::move(declarations)) {}
 
+    std::vector<std::unique_ptr<Declaration>> genericTemplates;
+    std::map<std::string, const Declaration*> genericAliases;
+    bool genericsExpanded = false;
+    void AddDeclaration(std::unique_ptr<Declaration> declaration) {
+        _declarations.push_back(std::move(declaration));
+    }
     std::string moduleName;
     std::vector<Import> imports;
     std::vector<Module> modules;
@@ -836,12 +857,15 @@ class LiteralExpression final : public Expression {
 
 class NameExpression final : public Expression {
    public:
+    std::vector<std::unique_ptr<TypeNode>> typeArguments;
+
     NameExpression(source::SourceRange range, std::string name)
         : Expression(range), _name(std::move(name)) {}
 
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::NameExpression;
     }
+    void Rename(std::string name) { _name = std::move(name); }
     [[nodiscard]] const std::string& Name() const { return _name; }
 
    private:
@@ -976,6 +1000,8 @@ class CallExpression final : public Expression {
 
 class MemberCallExpression final : public Expression {
    public:
+    std::vector<std::unique_ptr<TypeNode>> typeArguments;
+
     MemberCallExpression(source::SourceRange range,
                          std::unique_ptr<Expression> receiver,
                          std::string member, source::SourceRange memberRange,
@@ -1001,6 +1027,7 @@ class MemberCallExpression final : public Expression {
         return _arguments;
     }
 
+    void Rename(std::string name) { _member = std::move(name); }
     TokenType Access() const { return _access; }
 
    private:

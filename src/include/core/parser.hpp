@@ -39,6 +39,9 @@ class Parser {
     [[nodiscard]] bool StartsType() const;
     [[nodiscard]] bool IsTypeToken(TokenType type) const;
     bool ScanType(std::size_t& offset) const;
+    bool ScanTypeArguments(std::size_t& offset) const;
+    std::vector<std::unique_ptr<TypeNode>> ParseTypeArguments();
+    std::vector<std::string> ParseGenericParameters();
     std::unique_ptr<StructureDeclaration> ParseStructureDeclaration();
     std::unique_ptr<ErrorDeclaration> ParseErrorDeclaration();
     std::unique_ptr<Declaration> ParseDeclaration();

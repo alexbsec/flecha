@@ -267,3 +267,80 @@ TEST_F(ModuleTests, RejectsMalformedModuleSelections) {
     }
 }
 }  // namespace
+
+TEST_F(ModuleTests, GenericDefinitionsKeepPrivateHelpersAndCallerTypeIdentity) {
+    Write("helper.fl", R"(module helper;
+        i32 secret() { return 42; }
+        export T identity<T>(T x) { secret(); return x; }
+        export structure Box<T> { T value; };
+        T Box<T>::get(&const self) { return self->value; }
+    )");
+    Write("main.fl", R"(module main; @imports :: root::helper;
+        structure Private { i32 value; };
+        i32 main() {
+            Private p = helper::identity<Private>(Private::init());
+            helper::Box<Private> b = helper::Box<Private>::init();
+            Private q = b.get();
+            return p.value + q.value;
+        }
+    )");
+    EXPECT_EQ(Check(), "");
+}
+
+TEST_F(ModuleTests, GenericDiamondImportsShareSpecializationIdentity) {
+    Write("base.fl", "module base; export structure Box<T> { T value; };");
+    Write("one.fl",
+          "module one; @imports :: root::base; export base::Box<T> make<T>() { "
+          "return base::Box<T>::init(); }");
+    Write("two.fl",
+          "module two; @imports :: root::base; export T read<T>(&const "
+          "base::Box<T> b) { return b->value; }");
+    Write("main.fl",
+          "module main; @imports :: root::one :: root::two; i32 main() { b := "
+          "one::make<i32>(); return two::read<i32>(&b); }");
+    EXPECT_EQ(Check(), "");
+}
+
+TEST_F(ModuleTests, GenericVisibilityIsCheckedAtDefinitionAndUse) {
+    Write("helper.fl", "module helper; T secret<T>(T value) { return value; }");
+    Write("main.fl",
+          "module main; @imports :: root::helper; i32 main() { return "
+          "helper::secret<i32>(42); }");
+    EXPECT_NE(Check().find("private"), std::string::npos);
+    Write("helper.fl",
+          "module helper; structure Secret { i32 value; }; export Secret "
+          "reveal<T>(T value) { return Secret::init(); }");
+    Write("main.fl", "module main; @imports :: root::helper; void main() {}");
+    EXPECT_NE(Check().find("private"), std::string::npos);
+}
+
+TEST_F(ModuleTests, OrdinaryExportsCanExposePublicSpecializations) {
+    Write("box.fl", R"(module box;
+        export structure Box<T> { T value; };
+        export Box<i32> make() { return Box<i32>::init(); }
+    )");
+    Write("main.fl", "module main; @imports :: root::box; i32 main() { box::Box<i32> b = box::make(); return b.value; }");
+    EXPECT_EQ(Check(), "");
+    Write("box.fl", R"(module box;
+        structure Secret { i32 value; };
+        export structure Box<T> { T value; };
+        export Box<Secret> make() { return Box<Secret>::init(); }
+    )");
+    EXPECT_NE(Check().find("private"), std::string::npos);
+}
+
+TEST_F(ModuleTests, PublicGenericMethodsAcceptCallerPrivateArguments) {
+    Write("box.fl", R"(module box;
+        export structure Box { i32 value; };
+        U Box::identity<U>(&const self, U value) { return value; }
+    )");
+    Write("main.fl", R"(module main; @imports :: root::box;
+        structure Private { i32 value; };
+        i32 main() {
+            b := box::Box::init();
+            p := b.identity<Private>(Private::init());
+            return p.value;
+        }
+    )");
+    EXPECT_EQ(Check(), "");
+}

@@ -1,0 +1,3 @@
+module reader;
+@imports :: root::base;
+export T read<T>(&const base::Box<T> box) { return box->get(); }

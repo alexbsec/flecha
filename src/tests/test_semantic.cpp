@@ -3398,3 +3398,222 @@ TEST(SemanticMemoryTests, MutableOwnerCallsCannotReceiveTheirFieldAliases) {
         "unsafe void Box::bad(&self) { self->change(self->p); }");
     EXPECT_TRUE(result.diagnostics.HasErrors());
 }
+
+TEST(SemanticGenericTests,
+     ReusesConcreteFunctionsAndAllowsRecursionAndReferences) {
+    auto result = Analyze(R"(
+        T identity<T>(T value) { return value; }
+        T recur<T>(T value, i32 count) {
+            if count == 0 { return value; }
+            return recur<T>(value, count - 1);
+        }
+        void change<T>(&T value) { *value = (42 as T); }
+        T read<T>(&const T value) { return *value; }
+        (A, B) pair<A, B>(A a, B b) { return (a, b); }
+        i32 main() {
+            value := identity<i32>(20);
+            change<i32>(&value);
+            a, b := pair<i32, f64>(recur<i32>(read<i32>(&value), 2), 1.0);
+            return identity<i32>(a);
+        }
+    )");
+    EXPECT_FALSE(result.diagnostics.HasErrors());
+    EXPECT_EQ(result.unit->genericTemplates.size(), 5u);
+    EXPECT_EQ(result.unit->Declarations().size(), 6u);
+}
+
+TEST(SemanticGenericTests, StructuresMethodsNestedTypesAndFieldComparisons) {
+    auto result = Analyze(R"(
+        structure Box<T> { T value; };
+        T Box<T>::get(&const self) { return self->value; }
+        U Box<T>::convert<U>(&const self) { return self->value as U; }
+        structure Nested<T> { Box<T> box; };
+        i32 main() {
+            Box<i32> a = Box<i32>::init();
+            b := Box<f64>::init();
+            nested := Nested<i32>::init();
+            if a.value < 10 { return nested.box.get() + b.convert<i32>(); }
+            return a.get();
+        }
+    )");
+    for (const auto& d : result.diagnostics.Diagnostics())
+        ADD_FAILURE() << d.message;
+}
+
+TEST(SemanticGenericTests,
+     GenericMethodsOnlyInstantiateForTheirActualReceiver) {
+    auto result = Analyze(R"(
+        structure Box<T> { T value; };
+        U Box<T>::convert<U>(&const self) { return self->value as U; }
+        structure NonNumeric { i32 value; };
+        Box<i32> make() { return Box<i32>::init(); }
+        i32 main() {
+            unused := Box<NonNumeric>::init();
+            value := make();
+            return value.convert<i32>() + (&value)->convert<i32>();
+        }
+    )");
+    for (const auto& d : result.diagnostics.Diagnostics())
+        ADD_FAILURE() << d.message;
+}
+
+TEST(SemanticGenericTests,
+     RejectsDifferentArgumentsAndDeclarationsAsDifferentTypes) {
+    for (const auto& source :
+         {"structure Box<T> { T n; }; void main() { Box<i32> a = "
+          "Box<f64>::init(); }",
+          "structure Box<T> { T n; }; structure Other<T> { T n; }; void main() "
+          "{ Box<i32> a = Other<i32>::init(); }"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+}
+
+TEST(SemanticGenericTests,
+     RequiresExplicitArgumentsAndRejectsInvalidTemplates) {
+    for (const auto& source :
+         {"T id<T>(T x) { return x; } void main() { id(1); }",
+          "T id<T>(T x) { return x; } void main() { id<i32, f64>(1); }",
+          "i32 id(i32 x) { return x; } void main() { id<i32>(1); }",
+          "structure Box<T> { T value; }; void main() { Box value; }",
+          "T id<T>(T T) { return T; }", "T id<T, T>(T x) { return x; }",
+          "structure Box<T> { T value; }; void Box<U>::method(&self) {}",
+          "structure Box<T> { T value; }; U Box<T>::method<T, U>(&self) { "
+          "return none; }",
+          "structure Box<T> { T value; }; void Box<T>::tear<U>(&self) override "
+          "{}"}) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+}
+
+TEST(SemanticGenericTests,
+     ChecksOperationsAtInstantiationAndReportsCallOrigin) {
+    auto result = Analyze(R"(
+        T plus<T>(T value) { return value + value; }
+        structure Box { i32 n; };
+        void main() { plus<Box>(Box::init()); }
+    )");
+    EXPECT_TRUE(result.diagnostics.HasErrors());
+    bool note = false;
+    for (const auto& d : result.diagnostics.Diagnostics())
+        note |= d.severity == DiagnosticSeverity::Note &&
+                d.message.find("while instantiating") != std::string::npos;
+    EXPECT_TRUE(note);
+    EXPECT_FALSE(
+        Analyze("T plus<T>(T value) { return value + value; } void main() {}")
+            .diagnostics.HasErrors());
+}
+
+TEST(SemanticGenericTests, BoundsExpandingRecursion) {
+    auto result =
+        Analyze("void grow<T>() { grow<*T>(); } void main() { grow<i32>(); }");
+    EXPECT_TRUE(result.diagnostics.HasErrors());
+    bool budget = false;
+    for (const auto& d : result.diagnostics.Diagnostics())
+        budget |= d.message.find("budget") != std::string::npos;
+    EXPECT_TRUE(budget);
+}
+
+TEST(SemanticGenericTests, PreservesReferenceStorageAndOwnershipRules) {
+    EXPECT_TRUE(Analyze("structure Box<T> { T value; }; void main() { "
+                        "Box<&const i32> b = Box<&const i32>::init(); }")
+                    .diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze(R"(
+        unsafe void consume<T>(own *T p) { free(p); }
+        unsafe void main() {
+            p, e := new<i32>(42);
+            if e != none { return; }
+            consume<i32>(p);
+            free(p);
+        }
+    )")
+                    .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze(R"(
+        unsafe void consume<T>(own *T p) { free(p); }
+        unsafe void main() {
+            p, e := new<i32>(42);
+            if e != none { return; }
+            consume<i32>(p);
+        }
+    )")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticGenericTests, MethodsResolveHeapTupleArrayAndSliceReceivers) {
+    auto result = Analyze(R"(
+        structure Box<T> { T n; };
+        U Box<T>::convert<U>(&const self) { return self->n as U; }
+        (Box<T>, Box<T>) boxes<T>() { return (Box<T>::init(), Box<T>::init()); }
+        unsafe i32 main() {
+            a, b := boxes<i32>();
+            array := [a, b];
+            first := array[0].convert<i32>();
+            slice := array[0:2];
+            p, e := new<Box<i32>>(Box<i32>::init());
+            if e != none { return 0; }
+            defer free(p);
+            return p->convert<i32>() + a.convert<i32>() + first + slice[0].convert<i32>();
+        }
+    )");
+    for (const auto& d : result.diagnostics.Diagnostics())
+        ADD_FAILURE() << d.message;
+}
+
+TEST(SemanticGenericTests, GenericLifecycleKeepsUnsafeTearRestrictions) {
+    const std::string prefix = R"(
+        structure Box<T> { T value; };
+        unsafe void Box<T>::tear(&self) override {}
+    )";
+    EXPECT_TRUE(Analyze(prefix +
+                        "unsafe void main() { a := Box<i32>::init(); b := a; }")
+                    .diagnostics.HasErrors());
+    EXPECT_TRUE(
+        Analyze(prefix +
+                "unsafe void main() { a := Box<i32>::init(); a.tear(); }")
+            .diagnostics.HasErrors());
+    EXPECT_FALSE(
+        Analyze(prefix + "unsafe void main() { a := Box<i32>::init(); }")
+            .diagnostics.HasErrors());
+}
+
+TEST(SemanticGenericTests, GenericMethodsResolveMixedTuplesAndBuildSelfFields) {
+    auto result = Analyze(R"(
+        structure Box<T> { T n; };
+        U Box<T>::convert<U>(&const self) { return self->n as U; }
+        structure Outer<T> { Box<T> box; i32 n; };
+        Outer<T> Outer<T>::init() override {
+            return build Outer<T> {
+                self.box = Box<T>::init();
+                self.n = self.box.convert<i32>();
+            };
+        }
+        i32 main() {
+            box, count := (Box<i32>::init(), 42);
+            outer := Outer<i32>::init();
+            return box.convert<i32>() + count + outer.n;
+        }
+    )");
+    for (const auto& d : result.diagnostics.Diagnostics())
+        ADD_FAILURE() << d.message;
+}
+
+TEST(SemanticGenericTests, SupportsRecursivePointerTypesAndRejectsMemberCollisions) {
+    EXPECT_FALSE(Analyze(R"(
+        structure Node<T> { T value; *Node<T> next; };
+        void main() { node := Node<i32>::init(); }
+    )").diagnostics.HasErrors());
+    EXPECT_TRUE(Analyze(R"(
+        structure Box { i32 value; };
+        T Box::value<T>(&const self) { return none; }
+        void main() {}
+    )").diagnostics.HasErrors());
+}
+
+TEST(SemanticGenericTests, TypeArgumentsRespectLocalShadowing) {
+    EXPECT_TRUE(Analyze(R"(
+        structure Box { i32 n; };
+        void use<T>() {}
+        void main() { i32 Box = 0; use<Box>(); }
+    )").diagnostics.HasErrors());
+}

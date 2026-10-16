@@ -1,0 +1,7 @@
+module maker;
+@imports :: root::base;
+export base::Box<T> make<T>() {
+    result := base::Box<T>::init();
+    result.value = base::answer<T>();
+    return result;
+}
