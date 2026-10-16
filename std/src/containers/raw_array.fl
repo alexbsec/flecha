@@ -1,9 +1,6 @@
 module raw_array;
 
-export error ArrayError {
-    Empty,
-    IndexOutOfBounds
-}
+@imports :: root::containers::errors;
 
 export structure RawArray<T> {
     private own *T storage;
@@ -11,12 +8,14 @@ export structure RawArray<T> {
     private usize allocated;
 };
 
-unsafe RawArray<T> RawArray<T>::init() override {
+RawArray<T> RawArray<T>::init() override {
     return build RawArray<T> {};
 }
 
-unsafe void RawArray<T>::tear(&self) override {
-    free(self->storage);
+void RawArray<T>::tear(&self) override {
+    unsafe {
+        free(self->storage);
+    }
 }
 
 usize RawArray<T>::len(&const self) {
@@ -79,7 +78,7 @@ unsafe error RawArray<T>::push(&self, T value) {
 
 unsafe (T, error) RawArray<T>::get(&const self, usize index) {
     if index >= self->length {
-        return (none, ArrayError.IndexOutOfBounds);
+        return (none, errors::ArrayError.IndexOutOfBounds);
     }
 
     return (self->storage[index], none);
@@ -87,7 +86,7 @@ unsafe (T, error) RawArray<T>::get(&const self, usize index) {
 
 unsafe error RawArray<T>::set(&self, usize index, T value) {
     if index >= self->length {
-        return ArrayError.IndexOutOfBounds;
+        return errors::ArrayError.IndexOutOfBounds;
     }
 
     self->storage[index] = value;
@@ -96,7 +95,7 @@ unsafe error RawArray<T>::set(&self, usize index, T value) {
 
 unsafe (T, error) RawArray<T>::pop(&self) {
     if self->length == 0 {
-        return (none, ArrayError.Empty);
+        return (none, errors::ArrayError.Empty);
     }
 
     len := &self->length;

@@ -350,3 +350,30 @@ add_test(NAME NativeSemanticTests.StructureZero
         -DFLECHA_LINKER=${CMAKE_CXX_COMPILER}
         -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_unsafe_pointers.cmake)
+
+# The safe fixtures exercise the public API without unsafe caller blocks.
+foreach(case IN ITEMS main scalars structures lifecycle)
+    set(array_fail_call 0)
+    if(case STREQUAL "main")
+        set(array_fail_call 2)
+    endif()
+    add_test(NAME StandardLibraryTests.SafeArray.${case}
+        COMMAND ${CMAKE_COMMAND}
+            -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+            -DFLECHA_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dynamic_array/safe/${case}.fl
+            -DFLECHA_STD=${PROJECT_SOURCE_DIR}/std/src
+            -DFLECHA_HARNESS=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/dynamic_array/harness.cpp
+            -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/safe_array_${case}
+            -DFLECHA_RUNTIME=$<TARGET_FILE:runtime>
+            -DFLECHA_LINKER=${CMAKE_CXX_COMPILER}
+            -DFLECHA_SANITIZERS=${FLECHA_ENABLE_SANITIZERS}
+            -DFLECHA_ARRAY_FAIL_CALL=${array_fail_call}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_dynamic_array.cmake)
+endforeach()
+
+add_test(NAME CompilerDiagnostics.SafeArray
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_STD=${PROJECT_SOURCE_DIR}/std/src
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/safe_array_diagnostics
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_safe_array_diagnostics.cmake)

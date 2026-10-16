@@ -1,6 +1,8 @@
 module scalars;
 
-@imports :: lib::std::containers::raw_array;
+@imports
+    :: lib::std::containers::raw_array
+    :: lib::std::containers::errors;
 
 i32 check_array<T>(T first, T second) {
     unsafe {
@@ -10,7 +12,7 @@ i32 check_array<T>(T first, T second) {
         }
 
         missing, empty := values.pop();
-        if empty != raw_array::ArrayError.Empty || missing != none {
+        if empty != errors::ArrayError.Empty || missing != none {
             return 2;
         }
 
@@ -44,11 +46,11 @@ i32 check_array<T>(T first, T second) {
         }
 
         absent, bounds := values.get(33);
-        if bounds != raw_array::ArrayError.IndexOutOfBounds || absent != none {
+        if bounds != errors::ArrayError.IndexOutOfBounds || absent != none {
             return 8;
         }
 
-        if values.set(33, first) != raw_array::ArrayError.IndexOutOfBounds {
+        if values.set(33, first) != errors::ArrayError.IndexOutOfBounds {
             return 9;
         }
 
@@ -64,7 +66,7 @@ i32 check_array<T>(T first, T second) {
         }
 
         removed, emptyAgain := values.pop();
-        if emptyAgain != raw_array::ArrayError.Empty || removed != none {
+        if emptyAgain != errors::ArrayError.Empty || removed != none {
             return 12;
         }
 

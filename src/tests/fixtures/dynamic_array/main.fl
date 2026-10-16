@@ -1,6 +1,8 @@
 module main;
 
-@imports :: lib::std::containers::raw_array;
+@imports
+    :: lib::std::containers::raw_array
+    :: lib::std::containers::errors;
 
 i32 main() {
     unsafe {
@@ -10,16 +12,16 @@ i32 main() {
         }
 
         missing, empty := a.pop();
-        if empty != raw_array::ArrayError.Empty {
+        if empty != errors::ArrayError.Empty {
             return 2;
         }
 
         absent, bounds := a.get(0);
-        if bounds != raw_array::ArrayError.IndexOutOfBounds {
+        if bounds != errors::ArrayError.IndexOutOfBounds {
             return 3;
         }
 
-        if a.set(0, 42) != raw_array::ArrayError.IndexOutOfBounds {
+        if a.set(0, 42) != errors::ArrayError.IndexOutOfBounds {
             return 4;
         }
 
