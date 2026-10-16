@@ -75,8 +75,11 @@ add_dependencies(longbow flecha)
 
 if(UNIX AND NOT APPLE)
     # BundleUtilities places non-system shared libraries beside the installed
-    # executables. Make the Linux loader search that relocatable directory.
+    # executables. Make the Linux loader search that relocatable directory for
+    # direct and transitive dependencies.
     set_target_properties(flecha longbow PROPERTIES INSTALL_RPATH "$ORIGIN")
+    target_link_options(flecha PRIVATE -Wl,--disable-new-dtags)
+    target_link_options(longbow PRIVATE -Wl,--disable-new-dtags)
 endif()
 
 install(TARGETS flecha longbow
@@ -98,6 +101,13 @@ install(CODE "
             else()
                 set(\${type_var} local PARENT_SCOPE)
             endif()
+        elseif(UNIX AND NOT APPLE AND NOT _dependency_name MATCHES
+                \"^(ld-linux|libc[.]so|libm[.]so|libdl[.]so|libpthread[.]so|librt[.]so|libgcc_s[.]so|libstdc|libresolv[.]so|libutil[.]so)\")
+            # Linux distributions commonly install LLVM's optional runtime
+            # dependencies under /usr/lib. BundleUtilities normally labels
+            # every library there as a system component, even when it is not
+            # part of the stable base runtime (for example libedit or libffi).
+            set(\${type_var} local PARENT_SCOPE)
         endif()
     endfunction()
     function(gp_item_default_embedded_path_override item path_var)

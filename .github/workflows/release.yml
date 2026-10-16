@@ -134,6 +134,10 @@ jobs:
         run: |
           cmake --install build --prefix "$PWD/build/stage"
           cmake \
+            "-DINSTALL_ROOT=$PWD/build/stage" \
+            "-DEXECUTABLE_SUFFIX=${{ matrix.suffix }}" \
+            -P cmake/verify_bundle.cmake
+          cmake \
             "-DFLECHA_COMPILER=$PWD/build/stage/bin/flecha${{ matrix.suffix }}" \
             "-DLONGBOW=$PWD/build/stage/bin/longbow${{ matrix.suffix }}" \
             "-DSOURCE_ROOT=$PWD" \
