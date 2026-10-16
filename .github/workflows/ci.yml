@@ -15,8 +15,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  contribution-policy:
+    name: Contributor fork policy
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require pull requests to originate from a fork
+        if: github.event_name == 'pull_request'
+        env:
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association }}
+          BASE_REPOSITORY: ${{ github.repository }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          if [[ "$HEAD_REPOSITORY" == "$BASE_REPOSITORY" ]]; then
+            case "$AUTHOR_ASSOCIATION" in
+              OWNER|MEMBER|COLLABORATOR) ;;
+              *)
+                echo "Contributor pull requests must originate from a fork." >&2
+                echo "See CONTRIBUTING.md for the required workflow." >&2
+                exit 1
+                ;;
+            esac
+          fi
+
   linux-tests:
     name: Linux tests and editor checks
+    needs: contribution-policy
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +69,7 @@ jobs:
 
   sanitizers:
     name: AddressSanitizer and UBSan
+    needs: contribution-policy
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -80,6 +104,7 @@ jobs:
 
   platform-build:
     name: Build and package (${{ matrix.name }})
+    needs: contribution-policy
     strategy:
       fail-fast: false
       matrix:

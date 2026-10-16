@@ -40,6 +40,64 @@ Maintainers may ask for a contribution to be rewritten or may close it when
 its authorship is unclear or this policy is not followed. When in doubt, open
 an issue before writing code.
 
+## Required fork workflow
+
+External contributors must work in a personal fork. Pull requests from
+non-maintainers whose source branch belongs to the upstream Flecha repository
+are not accepted.
+
+1. Fork `alexbsec/flecha` on GitHub.
+2. Clone your fork and add the upstream repository as a read-only remote.
+3. Create a focused branch in your fork.
+4. Push the branch to your fork.
+5. Open a pull request from that branch into `alexbsec/flecha:master`.
+
+GitHub cannot prevent someone from making a read-only clone of a public
+repository. The project therefore enforces the part that affects repository
+integrity: contributors do not receive a direct upstream branch and CI rejects
+non-maintainer pull requests sourced from one. Only maintainers may work
+directly against the upstream repository. At present, the repository owner is
+the only person authorized to do so.
+
+## Review and merge policy
+
+Every pull request from a contributor fork requires at least one approving
+review from a Flecha maintainer before it can be merged. The author cannot
+approve their own work. New commits that materially change the reviewed diff
+may require a fresh approval, and all required CI checks must still pass.
+
+Maintainers may work directly in the upstream repository. For now, a
+maintainer's own pull request does not require a second maintainer's approval,
+although it remains subject to CI and the same authorship, testing, and quality
+rules. This exception may be tightened as the maintainer group grows.
+
+## Becoming a maintainer
+
+Maintainers are trusted stewards rather than simply frequent contributors.
+Maintainer access is granted by invitation from the repository owner; meeting
+the prerequisites makes someone eligible but does not grant access
+automatically.
+
+A prospective maintainer should have:
+
+- a sustained record of several meaningful, merged contributions across more
+  than one change, with regression tests and documentation where appropriate;
+- demonstrated understanding of at least one compiler subsystem and a working
+  understanding of how parsing, semantics, lowering, code generation, the
+  runtime, and the standard library fit together;
+- participated constructively in reviews, issue triage, or design discussions;
+- consistently followed the human-authorship, fork, licensing, and disclosure
+  policies;
+- shown sound judgment about compatibility, diagnostics, security, and when to
+  ask for broader design agreement;
+- a respectful and reliable record in the project community; and
+- two-factor authentication enabled on their GitHub account.
+
+Maintainers are expected to review contributor pull requests carefully,
+protect the human-authored areas of the project, keep CI and releases healthy,
+and disclose conflicts of interest. Access may be removed after prolonged
+inactivity, misuse, repeated policy violations, or at the maintainer's request.
+
 ## Before you begin
 
 For a bug fix, search the issue tracker and include a minimal reproduction.
@@ -94,6 +152,8 @@ See `README.md` for setup details and additional native smoke-test targets.
 Keep pull requests focused and make their intent easy to review. A good pull
 request:
 
+- originates from a branch in the contributor's fork, unless its author is a
+  maintainer;
 - explains the problem, the chosen approach, and important tradeoffs;
 - links the relevant issue or design discussion;
 - includes regression tests for changed behavior;
