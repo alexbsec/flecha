@@ -1,6 +1,0 @@
-module errors;
-
-export error ArrayError {
-    Empty,
-    IndexOutOfBounds
-}

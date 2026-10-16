@@ -1,8 +1,0 @@
-module std;
-
-@imports
-    :: root::containers::raw_array
-    :: root::containers::array
-    :: root::containers::errors
-    :: root::io::filesystem
-    :: root::io::errors;
