@@ -735,6 +735,16 @@ i32 main() {
 }
 ```
 
+## Generics
+
+Generic functions and structures use explicit type parameters and arguments:
+`T identity<T>(T value)`, `structure Box<T> { T value; };`, and
+`identity<i32>(42)`. Methods inherit owner parameters through `Box<T>::method`.
+Specializations have distinct nominal identities and are checked on use.
+References remain valid function parameters and cannot be stored in structure
+fields. Existing ownership, const, visibility, and lifecycle rules apply.
+See [generics](docs/generics.md) for the implemented rules and limits.
+
 ## 19. Open design questions
 
 The following decisions are intentionally not finalized:
@@ -743,7 +753,7 @@ The following decisions are intentionally not finalized:
 - additional declaration forms, including whether to introduce `var`;
 - string literal representation and encoding;
 - slice syntax and array-to-slice conversion;
-- union, enum, and generic syntax;
+- union and enum syntax;
 - ownership, borrowing, and deterministic cleanup;
 - allocator interfaces;
 - arithmetic overflow behavior;

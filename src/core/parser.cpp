@@ -182,9 +182,56 @@ bool Parser::ScanType(std::size_t& offset) const {
             Peek(offset).type == TokenType::Scope &&
             Peek(offset + 1).type == TokenType::Identifier)
             offset += 2;
+        if (token == TokenType::Identifier &&
+            Peek(offset).type == TokenType::Less)
+            return ScanTypeArguments(offset);
         return true;
     }
     return false;
+}
+
+bool Parser::ScanTypeArguments(std::size_t& offset) const {
+    if (Peek(offset).type != TokenType::Less) return false;
+    ++offset;
+    if (!ScanType(offset)) return false;
+    while (Peek(offset).type == TokenType::Comma) {
+        ++offset;
+        if (!ScanType(offset)) return false;
+    }
+    if (Peek(offset).type != TokenType::Greater) return false;
+    ++offset;
+    return true;
+}
+
+std::vector<std::unique_ptr<TypeNode>> Parser::ParseTypeArguments() {
+    std::vector<std::unique_ptr<TypeNode>> arguments;
+    if (!Match(TokenType::Less)) return arguments;
+    do {
+        auto argument = ParseType();
+        if (!argument) break;
+        arguments.push_back(std::move(argument));
+    } while (Match(TokenType::Comma));
+    Consume(TokenType::Greater, "'>' after type arguments");
+    return arguments;
+}
+
+std::vector<std::string> Parser::ParseGenericParameters() {
+    std::vector<std::string> parameters;
+    if (!Match(TokenType::Less)) return parameters;
+    do {
+        const auto* parameter =
+            Consume(TokenType::Identifier, "type parameter name");
+        if (!parameter) break;
+        if (std::find(parameters.begin(), parameters.end(), parameter->value) !=
+            parameters.end())
+            _diagnostics.Report(
+                diagnostics::DiagnosticCode::DuplicateDeclaration,
+                parameter->range,
+                "duplicate generic type parameter '" + parameter->value + "'");
+        parameters.push_back(parameter->value);
+    } while (Match(TokenType::Comma));
+    Consume(TokenType::Greater, "'>' after type parameters");
+    return parameters;
 }
 
 const Token* Parser::Consume(TokenType type, std::string_view expectation) {
@@ -300,8 +347,11 @@ std::unique_ptr<TypeNode> Parser::ParseType(bool allowOwn, bool allowLend,
             name += "::" + member->value;
             end = member->range.end;
         }
-        return std::make_unique<TypeNode>(source::SourceRange{start, end}, name,
-                                          explicitConst, qualifierRange);
+        auto type =
+            std::make_unique<TypeNode>(source::SourceRange{start, end}, name,
+                                       explicitConst, qualifierRange);
+        if (Check(TokenType::Less)) type->typeArguments = ParseTypeArguments();
+        return type;
     }
     PrimitiveType type;
 
@@ -390,6 +440,15 @@ std::unique_ptr<Parameter> Parser::ParseParameter() {
 }
 
 std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
+    const auto tokenStart = _position;
+    std::vector<std::pair<std::size_t, std::size_t>> erased;
+    auto parametersAtName = [&](Parser& parser) {
+        const auto begin = _position;
+        auto parameters = parser.ParseGenericParameters();
+        if (_position != begin)
+            erased.emplace_back(begin - tokenStart, _position - tokenStart);
+        return parameters;
+    };
     const source::SourceLocation start = Current().range.start;
     std::vector<FunctionModifier> modifiers;
     while (Check(TokenType::Unsafe) || Check(TokenType::Private)) {
@@ -410,11 +469,17 @@ std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
     if (name == nullptr) {
         return nullptr;
     }
+    const auto ownerToken =
+        static_cast<std::size_t>(name - _tokens.data()) - tokenStart;
+    auto genericParameters = parametersAtName(*this);
+    std::vector<std::string> ownerParameters;
     std::string owner;
     if (Match(TokenType::Scope)) {
+        ownerParameters = std::move(genericParameters);
         owner = name->value;
         name = Consume(TokenType::Identifier, "method name after '::'");
         if (name == nullptr) return nullptr;
+        genericParameters = parametersAtName(*this);
     }
     if (Consume(TokenType::LParen, "'(' after function name") == nullptr) {
         return nullptr;
@@ -471,10 +536,19 @@ std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
     }
     const source::SourceLocation end = body->Range().end;
 
-    return std::make_unique<FunctionDeclaration>(
+    auto declaration = std::make_unique<FunctionDeclaration>(
         source::SourceRange{start, end}, std::move(modifiers),
         std::move(returnType), name->value, std::move(parameters),
         std::move(body), name->range, std::move(owner));
+    declaration->genericParameters = std::move(genericParameters);
+    declaration->ownerParameters = std::move(ownerParameters);
+    declaration->parameterTokenRanges = std::move(erased);
+    declaration->nameTokenIndex =
+        static_cast<std::size_t>(name - _tokens.data()) - tokenStart;
+    declaration->ownerTokenIndex = ownerToken;
+    declaration->templateTokens.assign(_tokens.begin() + tokenStart,
+                                       _tokens.begin() + _position);
+    return declaration;
 }
 
 std::unique_ptr<ErrorDeclaration> Parser::ParseErrorDeclaration() {
@@ -500,8 +574,12 @@ std::unique_ptr<ErrorDeclaration> Parser::ParseErrorDeclaration() {
 }
 
 std::unique_ptr<StructureDeclaration> Parser::ParseStructureDeclaration() {
+    const auto tokenStart = _position;
     const auto start = Advance().range.start;
     const Token* name = Consume(TokenType::Identifier, "structure name");
+    const auto parameterStart = _position;
+    auto genericParameters = ParseGenericParameters();
+    const auto parameterEnd = _position;
     if (!name || !Consume(TokenType::LCurly, "'{' after structure name"))
         return nullptr;
     std::vector<std::unique_ptr<StructureField>> fields;
@@ -515,9 +593,18 @@ std::unique_ptr<StructureDeclaration> Parser::ParseStructureDeclaration() {
             const Token* end = Consume(TokenType::SemiColon,
                                        "';' after structure declaration");
             if (!end) return nullptr;
-            return std::make_unique<StructureDeclaration>(
+            auto declaration = std::make_unique<StructureDeclaration>(
                 source::SourceRange{start, end->range.end}, name->value,
                 name->range, std::move(fields));
+            declaration->genericParameters = std::move(genericParameters);
+            if (parameterStart != parameterEnd)
+                declaration->parameterTokenRanges.emplace_back(
+                    parameterStart - tokenStart, parameterEnd - tokenStart);
+            declaration->nameTokenIndex =
+                static_cast<std::size_t>(name - _tokens.data()) - tokenStart;
+            declaration->templateTokens.assign(_tokens.begin() + tokenStart,
+                                               _tokens.begin() + _position);
+            return declaration;
         }
         bool isPrivate = privateBlock;
         if (Match(TokenType::Private)) {
@@ -1247,6 +1334,17 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
                 std::move(expression), std::move(arguments), std::move(type));
             continue;
         }
+        if (expression->Kind() == AstNodeKind::NameExpression &&
+            Check(TokenType::Less)) {
+            std::size_t offset = 0;
+            if (ScanTypeArguments(offset) &&
+                (Peek(offset).type == TokenType::LParen ||
+                 Peek(offset).type == TokenType::Scope)) {
+                static_cast<NameExpression&>(*expression).typeArguments =
+                    ParseTypeArguments();
+                continue;
+            }
+        }
         if (Check(TokenType::Increment)) {
             const Token& operation = Advance();
             expression = std::make_unique<UnaryExpression>(
@@ -1289,6 +1387,11 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
                     std::move(expression), std::move(targetType));
                 continue;
             }
+            std::vector<std::unique_ptr<TypeNode>> typeArguments;
+            std::size_t argumentEnd = 0;
+            if (Check(TokenType::Less) && ScanTypeArguments(argumentEnd) &&
+                Peek(argumentEnd).type == TokenType::LParen)
+                typeArguments = ParseTypeArguments();
             if (!Match(TokenType::LParen)) {
                 expression = std::make_unique<MemberAccessExpression>(
                     source::SourceRange{expression->Range().start,
@@ -1300,10 +1403,21 @@ std::unique_ptr<Expression> Parser::ParsePostfixExpression() {
             source::SourceLocation end = member->range.end;
             std::vector<std::unique_ptr<Expression>> arguments =
                 ParseArgumentList(end);
+            // Reference member spelling shares the dereference AST, including
+            // its lvalue, borrowing, and code-generation behavior.
+            if (access == TokenType::Arrow && member->value == "deref" &&
+                typeArguments.empty() && arguments.empty()) {
+                expression = std::make_unique<UnaryExpression>(
+                    source::SourceRange{expression->Range().start, end},
+                    TokenType::Mul, std::move(expression), true);
+                continue;
+            }
             expression = std::make_unique<MemberCallExpression>(
                 source::SourceRange{expression->Range().start, end},
                 std::move(expression), member->value, member->range,
                 std::move(arguments), access);
+            static_cast<MemberCallExpression&>(*expression).typeArguments =
+                std::move(typeArguments);
             continue;
         }
 

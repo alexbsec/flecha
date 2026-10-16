@@ -1,0 +1,5 @@
+module base;
+export structure Box<T> { T value; };
+i32 hidden() { return 21; }
+export T answer<T>() { return hidden() as T; }
+T Box<T>::get(&const self) { return self->value; }

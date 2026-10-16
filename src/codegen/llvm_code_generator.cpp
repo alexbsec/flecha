@@ -1534,6 +1534,22 @@ llvm::Value* LlvmCodeGenerator::EmitBinary(
     const auto rightType = expression.Right().Type();
     const bool strict = expression.OperatorType() == TokenType::StrictEqual ||
                         expression.OperatorType() == TokenType::StrictNotEqual;
+    const bool leftNone = leftType.Kind() == semantic::SemanticTypeKind::None;
+    const bool rightNone = rightType.Kind() == semantic::SemanticTypeKind::None;
+    if ((strict && (leftNone || rightNone)) || (leftNone && rightNone)) {
+        // none has no standalone runtime representation. Its type decides
+        // strict comparisons, but the other operand must still be evaluated.
+        if (!leftNone && EmitExpression(expression.Left()) == nullptr)
+            return nullptr;
+        if (!rightNone && EmitExpression(expression.Right()) == nullptr)
+            return nullptr;
+        const bool equal = leftNone && rightNone;
+        const bool negate =
+            expression.OperatorType() == TokenType::NotEqual ||
+            expression.OperatorType() == TokenType::StrictNotEqual;
+        return llvm::ConstantInt::get(llvm::Type::getInt1Ty(_context),
+                                      negate ? !equal : equal);
+    }
     if (strict && (leftType.IsErrorValue() || rightType.IsErrorValue()) &&
         leftType != rightType) {
         // Preserve operand effects even when differing static types decide

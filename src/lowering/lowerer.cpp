@@ -400,27 +400,27 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                 _semanticModel->TypeOf(binary.Left());
             const semantic::SemanticType rightType =
                 _semanticModel->TypeOf(binary.Right());
-            const bool errorEquality =
-                (binary.OperatorType() == TokenType::Equal ||
-                 binary.OperatorType() == TokenType::NotEqual);
-            // Error success is contextual only for ordinary value equality.
+            const bool valueEquality =
+                binary.OperatorType() == TokenType::Equal ||
+                binary.OperatorType() == TokenType::NotEqual;
+            const auto comparisonContext = [&](semantic::SemanticType other) {
+                const auto kind = other.Kind();
+                // Ordinary equality interprets none as the other operand's
+                // zero value. Strict equality retains none's distinct type.
+                if ((valueEquality &&
+                     (other.IsNumeric() || other.IsErrorValue() ||
+                      kind == semantic::SemanticTypeKind::Bool ||
+                      kind == semantic::SemanticTypeKind::Char)) ||
+                    kind == semantic::SemanticTypeKind::Pointer ||
+                    kind == semantic::SemanticTypeKind::Null)
+                    return other;
+                return semantic::SemanticType::Error();
+            };
             return std::make_unique<BoundBinaryExpression>(
                 expression.Range(), type,
-                LowerExpression(
-                    binary.Left(),
-                    ((errorEquality && rightType.IsErrorValue()) ||
-                     rightType.Kind() == semantic::SemanticTypeKind::Pointer ||
-                     rightType.Kind() == semantic::SemanticTypeKind::Null)
-                        ? rightType
-                        : semantic::SemanticType::Error()),
+                LowerExpression(binary.Left(), comparisonContext(rightType)),
                 binary.OperatorType(),
-                LowerExpression(
-                    binary.Right(),
-                    ((errorEquality && leftType.IsErrorValue()) ||
-                     leftType.Kind() == semantic::SemanticTypeKind::Pointer ||
-                     leftType.Kind() == semantic::SemanticTypeKind::Null)
-                        ? leftType
-                        : semantic::SemanticType::Error()));
+                LowerExpression(binary.Right(), comparisonContext(leftType)));
         }
         case core::AstNodeKind::AssignmentExpression: {
             const core::AssignmentExpression& assignment =

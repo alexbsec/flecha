@@ -15,7 +15,7 @@ class SemanticAnalyzer final {
     explicit SemanticAnalyzer(diagnostics::DiagnosticBag& diagnostics)
         : _diagnostics(diagnostics) {}
 
-    [[nodiscard]] SemanticModel Analyze(const core::CompilationUnit& unit);
+    [[nodiscard]] SemanticModel Analyze(core::CompilationUnit& unit);
 
    private:
     void SetModule(const std::string& id);

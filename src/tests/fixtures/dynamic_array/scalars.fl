@@ -1,0 +1,142 @@
+module scalars;
+
+@imports :: lib::std::containers::array;
+
+i32 check_array<T>(T first, T second) {
+    unsafe {
+        values := array::Array<T>::init();
+        if values.reserve(0) != none || values.capacity() != 0 {
+            return 1;
+        }
+
+        missing, empty := values.pop();
+        if empty != array::ArrayError.Empty || missing != none {
+            return 2;
+        }
+
+        usize i = 0;
+        while i < 33 {
+            if values.push(first) != none {
+                return 3;
+            }
+            i++;
+        }
+
+        if values.len() != 33 || values.capacity() != 64 {
+            return 4;
+        }
+
+        i = 0;
+        while i < values.len() {
+            value, err := values.get(i);
+            if err != none || value != first {
+                return 5;
+            }
+            i++;
+        }
+
+        if values.reserve(2) != none || values.capacity() != 64 {
+            return 6;
+        }
+
+        if values.set(32, second) != none {
+            return 7;
+        }
+
+        absent, bounds := values.get(33);
+        if bounds != array::ArrayError.IndexOutOfBounds || absent != none {
+            return 8;
+        }
+
+        if values.set(33, first) != array::ArrayError.IndexOutOfBounds {
+            return 9;
+        }
+
+        last, err := values.pop();
+        if err != none || last != second || values.len() != 32 {
+            return 10;
+        }
+
+        values.clear();
+        values.clear();
+        if values.len() != 0 || values.capacity() != 64 {
+            return 11;
+        }
+
+        removed, emptyAgain := values.pop();
+        if emptyAgain != array::ArrayError.Empty || removed != none {
+            return 12;
+        }
+
+        if values.push(second) != none || values.capacity() != 64 {
+            return 13;
+        }
+
+        reused, readError := values.get(0);
+        if readError != none || reused != second || values.len() != 1 {
+            return 14;
+        }
+    }
+
+    return 42;
+}
+
+i32 main() {
+    if check_array<i8>(-128, 127) != 42 {
+        return 1;
+    }
+
+    if check_array<u8>(0, 255) != 42 {
+        return 2;
+    }
+
+    if check_array<i16>(-30000, 30000) != 42 {
+        return 3;
+    }
+
+    if check_array<u16>(0, 60000) != 42 {
+        return 4;
+    }
+
+    if check_array<i32>(-42, 42) != 42 {
+        return 5;
+    }
+
+    if check_array<u32>(0, 4000000000) != 42 {
+        return 6;
+    }
+
+    if check_array<i64>(-5000000000, 5000000000) != 42 {
+        return 7;
+    }
+
+    if check_array<u64>(0, 10000000000) != 42 {
+        return 8;
+    }
+
+    if check_array<isize>(-42, 42) != 42 {
+        return 9;
+    }
+
+    if check_array<usize>(0, 42) != 42 {
+        return 10;
+    }
+
+    if check_array<f32>(1.25 as f32, 2.5 as f32) != 42 {
+        return 11;
+    }
+
+    if check_array<f64>(1.25, 2.5) != 42 {
+        return 12;
+    }
+
+    if check_array<bool>(true, false) != 42 {
+        return 13;
+    }
+
+    if check_array<char>('a', 'z') != 42 {
+        return 14;
+    }
+
+    return 42;
+}

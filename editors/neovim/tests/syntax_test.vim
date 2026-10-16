@@ -1,4 +1,4 @@
-filetype plugin on
+filetype plugin indent on
 syntax enable
 
 execute 'edit ' . fnameescape(
@@ -103,6 +103,29 @@ call assert_equal('117', synIDattr(hlID('flechaImports'), 'fg', 'cterm'))
 
 call assert_equal('flechaStatement', s:HighlightAt('module highlighting', 0))
 call assert_equal('flechaModifier', s:HighlightAt('export i32', 0))
+
+" Exercise actual Enter/closing-brace typing, not just the '=' operator.
+enew
+setfiletype flecha
+setlocal shiftwidth=4 expandtab
+call assert_true(&l:cindent)
+call feedkeys("ii32 test() {\<CR>}\<Esc>", 'xt')
+call assert_equal(['i32 test() {', '}'], getline(1, '$'))
+
+silent %delete _
+call feedkeys("ii32 test() {\<CR>if ready {\<CR>return 1;\<CR>}\<CR>}\<Esc>", 'xt')
+call assert_equal(['i32 test() {', '    if ready {', '        return 1;', '    }', '}'], getline(1, '$'))
+
+silent %delete _
+call feedkeys("iexport structure Box<T> {\<CR>i32 value;\<CR>};\<Esc>", 'xt')
+call assert_equal(['export structure Box<T> {', '    i32 value;', '};'], getline(1, '$'))
+
+silent %delete _
+call feedkeys("ivoid test() {\<CR>value:\<Esc>", 'xt')
+call assert_equal('    value:', getline(2))
+call feedkeys("A= 42;\<CR>math::run();\<CR>part := values[0:2];\<CR>}\<Esc>", 'xt')
+call assert_equal(['void test() {', '    value:= 42;', '    math::run();', '    part := values[0:2];', '}'], getline(1, '$'))
+bwipeout!
 
 if !empty(v:errors)
     for error in v:errors

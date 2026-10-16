@@ -3,6 +3,7 @@ add_library(semantic STATIC
     borrow_checker.cpp
     control_flow_graph.cpp
     definite_assignment.cpp
+    generic_expander.cpp
     scope.cpp
     semantic_analyzer.cpp
     semantic_model.cpp

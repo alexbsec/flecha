@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 #include <utility>
+#include <vector>
 
 namespace flecha::semantic {
 namespace {
@@ -29,8 +30,21 @@ const core::Expression& Unwrap(const core::Expression& expression) {
 struct Origin final {
     const Symbol* owner;
     Symbols parents;
+    std::vector<const StructureField*> fields;
+    // Array/slice elements continue to borrow their whole containing array.
+    // Do not refine a path further after crossing an element boundary.
+    bool wholeSequence = false;
     auto operator<=>(const Origin&) const = default;
 };
+bool Overlaps(const Origin& left, const Origin& right) {
+    if (left.owner != right.owner) return false;
+    // Equal paths overlap; a prefix denotes an enclosing structure.
+    // The first differing field proves the two places disjoint.
+    const auto length = std::min(left.fields.size(), right.fields.size());
+    return std::equal(left.fields.begin(), left.fields.begin() + length,
+                      right.fields.begin());
+}
+
 using Origins = std::set<Origin>;
 struct Handle final {
     Origins origins;
@@ -365,7 +379,7 @@ class BorrowChecker final {
                     continue;
                 const bool exclusive = !symbol->Type().Target()->IsConst();
                 for (const Origin& loan : value.origins) {
-                    if (loan.owner == origin.owner && (write || exclusive)) {
+                    if (Overlaps(loan, origin) && (write || exclusive)) {
                         Report(Code::BorrowConflict, range,
                                "access to '" + origin.owner->Name() +
                                    "' conflicts with live reference '" +
@@ -376,8 +390,7 @@ class BorrowChecker final {
             for (const Loan& loan : _temporaries) {
                 if (loan.id == access.temporary) continue;
                 for (const Origin& other : loan.value.origins)
-                    if (other.owner == origin.owner &&
-                        (write || loan.exclusive))
+                    if (Overlaps(other, origin) && (write || loan.exclusive))
                         Report(Code::BorrowConflict, range,
                                "access conflicts with a borrow in the current "
                                "expression");
@@ -432,6 +445,26 @@ class BorrowChecker final {
         _active.insert(destination);
     }
 
+    Value Project(Value value, const StructureField* field) {
+        Origins projected;
+        for (Origin origin : value.origins) {
+            if (!origin.wholeSequence) origin.fields.push_back(field);
+            projected.insert(std::move(origin));
+        }
+        value.origins = std::move(projected);
+        return value;
+    }
+
+    Value Sequence(Value value) {
+        Origins origins;
+        for (Origin origin : value.origins) {
+            origin.wholeSequence = true;
+            origins.insert(std::move(origin));
+        }
+        value.origins = std::move(origins);
+        return value;
+    }
+
     Value Place(const core::Expression& expression) {
         const core::Expression& inner = Unwrap(expression);
         const Symbol* symbol = Named(inner);
@@ -444,19 +477,20 @@ class BorrowChecker final {
                 Value receiver = Evaluate(field.Receiver());
                 return _model.TypeOf(field.Receiver()).Kind() ==
                                SemanticTypeKind::Reference
-                           ? receiver
+                           ? Project(std::move(receiver),
+                                     _model.FieldFor(field))
                            : Value{};
             }
-            return Place(field.Receiver());
+            return Project(Place(field.Receiver()), _model.FieldFor(field));
         }
         if (inner.Kind() == Kind::MemberCallExpression) {
             const auto& call =
                 static_cast<const core::MemberCallExpression&>(inner);
             if (call.Member() == "front" || call.Member() == "back")
-                return _model.TypeOf(call.Receiver()).Kind() ==
-                               SemanticTypeKind::Slice
-                           ? Evaluate(call.Receiver())
-                           : Place(call.Receiver());
+                return Sequence(_model.TypeOf(call.Receiver()).Kind() ==
+                                        SemanticTypeKind::Slice
+                                    ? Evaluate(call.Receiver())
+                                    : Place(call.Receiver()));
         }
         if (inner.Kind() == Kind::IndexExpression) {
             const auto& index =
@@ -471,7 +505,7 @@ class BorrowChecker final {
                 _pinned.insert(origin.parents.begin(), origin.parents.end());
             (void)Evaluate(index.Index());
             _pinned = previousPinned;
-            return value;
+            return Sequence(std::move(value));
         }
         if (inner.Kind() == Kind::UnaryExpression) {
             const auto& unary =
@@ -515,7 +549,7 @@ class BorrowChecker final {
                 if (slice.Start() != nullptr) (void)Evaluate(*slice.Start());
                 if (slice.End() != nullptr) (void)Evaluate(*slice.End());
                 _pinned = previousPinned;
-                return Borrow(std::move(value),
+                return Borrow(Sequence(std::move(value)),
                               !_model.TypeOf(expression).Target()->IsConst(),
                               expression.Range());
             }

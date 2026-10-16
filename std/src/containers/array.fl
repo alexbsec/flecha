@@ -1,0 +1,109 @@
+module array;
+
+export error ArrayError {
+    Empty,
+    IndexOutOfBounds
+}
+
+export structure Array<T> {
+    private own *T storage;
+    private usize length;
+    private usize allocated;
+};
+
+unsafe Array<T> Array<T>::init() override {
+    return build Array<T> {};
+}
+
+unsafe void Array<T>::tear(&self) override {
+    free(self->storage);
+}
+
+usize Array<T>::len(&const self) {
+    return self->length;
+}
+
+usize Array<T>::capacity(&const self) {
+    return self->allocated;
+}
+
+unsafe error Array<T>::reserve(&self, usize capacity) {
+    if capacity <= self->allocated {
+        return none;
+    }
+
+    replacement, err := new<[]T>(capacity);
+    if err != none {
+        return err;
+    }
+
+    usize i = 0;
+    while i < self->length {
+        replacement[i] = self->storage[i];
+        i++;
+    }
+
+    previous := take(self->storage);
+    free(previous);
+
+    self->storage = replacement;
+    self->allocated = capacity;
+
+    return none;
+}
+
+unsafe error Array<T>::push(&self, T value) {
+    if self->length != self->allocated {
+        self->storage[self->length] = value;
+        self->length++;
+        return none;
+    }
+
+    const usize CAPACITY_FACTOR = 2;
+    usize capacity = 4;
+    if self->allocated != 0 {
+        capacity = self->allocated * CAPACITY_FACTOR;
+    } also capacity <= self->allocated {
+        return AllocationError.OutOfMemory;
+    }
+
+    err := self->reserve(capacity);
+    if err != none {
+        return err;
+    }
+
+    self->storage[self->length] = value;
+    self->length++;
+    return none;
+}
+
+unsafe (T, error) Array<T>::get(&const self, usize index) {
+    if index >= self->length {
+        return (none, ArrayError.IndexOutOfBounds);
+    }
+
+    return (self->storage[index], none);
+}
+
+unsafe error Array<T>::set(&self, usize index, T value) {
+    if index >= self->length {
+        return ArrayError.IndexOutOfBounds;
+    }
+
+    self->storage[index] = value;
+    return none;
+}
+
+unsafe (T, error) Array<T>::pop(&self) {
+    if self->length == 0 {
+        return (none, ArrayError.Empty);
+    }
+
+    len := &self->length;
+    *len = *len - 1;
+    return (self->storage[*len], none);
+}
+
+void Array<T>::clear(&self) {
+    self->length = 0;
+}

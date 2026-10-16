@@ -1,0 +1,61 @@
+T identity<T>(T value) { return value; }
+T recursive<T>(T value, i32 n) {
+    if n == 0 { return value; }
+    return recursive<T>(value, n - 1);
+}
+void set<T>(&T target, T value) { *target = value; }
+T read<T>(&const T target) { return *target; }
+(A, B) pair<A, B>(A a, B b) { return (a, b); }
+structure Box<T> { T value; };
+T Box<T>::get(&const self) { return self->value; }
+U Box<T>::convert<U>(&const self) { return self->value as U; }
+structure Nested<T> { Box<T> box; };
+unsafe void release<T>(own *T p) { free(p); }
+unsafe T inspect<T>(lend *T p) { return *p; }
+structure Owner<T> { own *T p; };
+unsafe Owner<T> Owner<T>::init(own *T p) override {
+    return build Owner<T> { self.p = p; };
+}
+unsafe T Owner<T>::get(&const self) { return *self->p; }
+unsafe void Owner<T>::tear(&self) override { free(self->p); }
+
+i32 generic_functions_test() {
+    value := identity<i32>(20);
+    set<i32>(&value, 21);
+    a, b := pair<i32, f64>(recursive<i32>(read<i32>(&value), 3), identity<f64>(21.0));
+    return a + (b as i32);
+}
+i32 generic_structures_test() {
+    a := Box<i32>::init();
+    a.value = 20;
+    b := Box<f64>::init();
+    b.value = 22.0;
+    nested := Nested<i32>::init();
+    if a.value < 21 { return a.get() + b.convert<i32>() + nested.box.get(); }
+    return 0;
+}
+i32 generic_ownership_test() {
+    unsafe {
+        p, e := new<i32>(42);
+        if e != none { return 1; }
+        value := inspect<i32>(p);
+        release<i32>(p);
+        q, err := new<i32>(value);
+        if err != none { return 2; }
+        owner := Owner<i32>::init(q);
+        return owner.get();
+    }
+}
+
+unsafe (own *T, error) allocate<T>(usize count) { return new<[]T>(count); }
+i32 generic_runtime_array_test() {
+    unsafe {
+        p, e := allocate<i32>(2);
+        if e != none { return 1; }
+        p[0] = 20;
+        p[1] = 22;
+        result := p[0] + p[1];
+        release<i32>(p);
+        return result;
+    }
+}

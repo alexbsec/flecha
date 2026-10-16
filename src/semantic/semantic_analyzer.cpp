@@ -15,6 +15,7 @@
 #include "semantic/allocation_checker.hpp"
 #include "semantic/borrow_checker.hpp"
 #include "semantic/definite_assignment.hpp"
+#include "semantic/generic_expander.hpp"
 
 namespace flecha::semantic {
 namespace {
@@ -219,6 +220,13 @@ void SemanticAnalyzer::BindImports(const core::CompilationUnit& unit) {
 }
 
 void SemanticAnalyzer::ValidateExports(const core::CompilationUnit& unit) {
+    // Template API visibility is checked before substitution. A caller may
+    // instantiate a public generic method with its own private argument type.
+    std::unordered_set<const Symbol*> specializedFunctions;
+    for (const auto& declaration : unit.Declarations())
+        if (declaration->Kind() == core::AstNodeKind::FunctionDeclaration &&
+            !declaration->instantiationOrigins.empty())
+            specializedFunctions.insert(_model.DeclaredSymbol(*declaration));
     std::unordered_set<const ErrorFamily*> privateErrors;
     for (const auto& declaration : unit.Declarations())
         if (declaration->Kind() == core::AstNodeKind::ErrorDeclaration &&
@@ -249,7 +257,8 @@ void SemanticAnalyzer::ValidateExports(const core::CompilationUnit& unit) {
             if (!field.syntax->IsPrivate())
                 check(field.type, field.syntax->Range());
         for (const auto& [name, method] : structure->methods) {
-            if (method->IsPrivate() || name == "tear") continue;
+            if (method->IsPrivate() || name == "tear" ||
+                specializedFunctions.contains(method)) continue;
             check(method->ReturnType(), method->DeclarationRange());
             for (const auto& parameter : method->ParameterTypes())
                 check(parameter, method->DeclarationRange());
@@ -655,8 +664,15 @@ void SemanticAnalyzer::RegisterFunction(
     }
 }
 
-SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
+SemanticModel SemanticAnalyzer::Analyze(core::CompilationUnit& unit) {
     _model = SemanticModel{};
+    const auto diagnosticsBeforeExpansion = _diagnostics.Diagnostics().size();
+    ExpandGenerics(unit, _diagnostics);
+    if (_diagnostics.Diagnostics().size() > diagnosticsBeforeExpansion &&
+        _diagnostics.HasErrors()) {
+        ReportGenericOrigins(unit, _diagnostics);
+        return std::move(_model);
+    }
     _currentFunction = nullptr;
     _inUnsafe = false;
     _buildSelf = nullptr;
@@ -698,11 +714,18 @@ SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
                                "'");
             }
     }
+    const auto bindGenericAliases = [&] {
+        for (const auto& [alias, declaration] : unit.genericAliases)
+            if (const auto* symbol = _model.DeclaredSymbol(*declaration))
+                (void)_model._scopes.front()->DeclareAs(alias, *symbol);
+    };
     RegisterErrorTypes(unit);
     RegisterStructures(unit);
+    bindGenericAliases();
     BindImports(unit);
     ResolveStructureFields();
     RegisterFunctions(unit);
+    bindGenericAliases();
     GenerateInitializers();
     BindImports(unit);
     ValidateExports(unit);
@@ -745,6 +768,7 @@ SemanticModel SemanticAnalyzer::Analyze(const core::CompilationUnit& unit) {
     }
     if (!_diagnostics.HasErrors())
         AnalyzeAllocations(unit, _model, _diagnostics);
+    ReportGenericOrigins(unit, _diagnostics);
     _currentScope = nullptr;
     _currentFunction = nullptr;
     return std::move(_model);
@@ -1687,6 +1711,13 @@ SemanticType SemanticAnalyzer::AnalyzeUnary(
                 : SemanticType::Error());
     }
     if (operand.IsError()) return operand;
+    if (expression.IsReferenceDeref() &&
+        operand.Kind() != SemanticTypeKind::Reference) {
+        Report(diagnostics::DiagnosticCode::InvalidReference,
+               expression.Range(),
+               "deref() requires a checked reference receiver");
+        return SemanticType::Error();
+    }
     if (operation == TokenType::Increment) {
         const SemanticType place = PlaceType(expression.Operand());
         if (place.IsError()) {

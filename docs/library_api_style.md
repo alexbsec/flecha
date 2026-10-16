@@ -6,6 +6,9 @@ and the future standard library. They do not govern ordinary user-defined
 Flecha functions, and they do not replace the C++ implementation rules in
 [`CODE_STYLE.md`](../CODE_STYLE.md).
 
+For Flecha source formatting in `std/`, also follow the
+[standard-library development guidelines](std_development.md).
+
 ## Member functions
 
 Member functions use `camelCase`:

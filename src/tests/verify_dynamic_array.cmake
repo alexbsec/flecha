@@ -5,12 +5,16 @@ execute_process(
 if(NOT compileResult EQUAL 0)
     message(FATAL_ERROR "dynamic array compilation failed: ${compileError}")
 endif()
+if(NOT DEFINED FLECHA_ARRAY_FAIL_CALL)
+    set(FLECHA_ARRAY_FAIL_CALL 2)
+endif()
 set(sanitizerFlags)
 if(FLECHA_SANITIZERS)
     list(APPEND sanitizerFlags -fsanitize=address,undefined)
 endif()
 execute_process(
     COMMAND "${FLECHA_LINKER}" "${FLECHA_HARNESS}" "${FLECHA_OUTPUT}.o"
+        "-DFLECHA_ARRAY_FAIL_CALL=${FLECHA_ARRAY_FAIL_CALL}"
         "${FLECHA_RUNTIME}" ${sanitizerFlags}
         -Wl,--wrap=flecha_runtime_v1_alloc_array,--wrap=flecha_runtime_v1_free
         -o "${FLECHA_OUTPUT}"

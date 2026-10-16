@@ -269,3 +269,26 @@ i32 structure_constructor_arguments_test() {
     if element.label != "tuple" or number != 4 { return 4; }
     return 42;
 }
+
+structure BorrowBuffer { [2]i32 storage; usize length; };
+(i32, error) BorrowBuffer::pop(&self) {
+    if self->length == 0 { return (none, none); }
+    len := &self->length;
+    *len = *len - 1;
+    return (self->storage[*len], none);
+}
+(i32, error) BorrowBuffer::pop_member(&self) {
+    if self->length == 0 { return (none, none); }
+    len := &self->length;
+    len->deref() = len->deref() - 1;
+    return (self->storage[len->deref()], none);
+}
+i32 structure_disjoint_borrows_test() {
+    buffer := BorrowBuffer::init();
+    buffer.storage = [20, 22];
+    buffer.length = 2;
+    first, e := buffer.pop();
+    second, err := buffer.pop_member();
+    if e != none || err != none || buffer.length != 0 { return 1; }
+    return first + second;
+}

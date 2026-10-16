@@ -114,6 +114,8 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0052";
         case DiagnosticCode::NullDereference:
             return "FLECHA-S0053";
+        case DiagnosticCode::InvalidGeneric:
+            return "FLECHA-S0054";
         case DiagnosticCode::InvalidAllocation:
             return "FLECHA-S0047";
         case DiagnosticCode::NonCopyableValue:
