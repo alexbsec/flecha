@@ -71,6 +71,14 @@ class LlvmCodeGenerator final {
     [[nodiscard]] llvm::StructType* StringType();
     [[nodiscard]] llvm::FunctionType* MapFunctionType(
         const semantic::FunctionSymbol& function);
+    [[nodiscard]] std::optional<llvm::Attribute::AttrKind>
+    ExternIntegerExtension(semantic::SemanticType type) const;
+    void ApplyExternAttributes(const semantic::FunctionSymbol& symbol,
+                               llvm::Function& function);
+    llvm::CallInst* EmitFunctionCall(
+        const semantic::FunctionSymbol& symbol,
+        const std::vector<llvm::Value*>& arguments,
+        std::string_view name = {});
     bool DeclareFunctions(const lowering::BoundProgram& program);
     bool EmitFunction(const lowering::BoundFunction& function);
     bool EmitBlock(const lowering::BoundBlockStatement& block);

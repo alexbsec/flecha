@@ -4,6 +4,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include <llvm/Target/TargetMachine.h>
 
@@ -30,10 +31,12 @@ class NativeCompiler final {
                     const std::string& moduleName,
                     const std::string& objectPath);
     bool LinkExecutable(const std::string& objectPath,
-                        const std::string& outputPath);
+                        const std::string& outputPath,
+                        const std::vector<std::string>& linkInputs = {});
     bool BuildExecutable(const lowering::BoundProgram& program,
                          const std::string& moduleName,
-                         const std::string& outputPath);
+                         const std::string& outputPath,
+                         const std::vector<std::string>& linkInputs = {});
 
    private:
     bool Fail(diagnostics::DiagnosticCode code, std::string message);

@@ -68,6 +68,11 @@ text[0];                 // checked char, equivalent to at(0)
 text.substr(0, 3);       // allocation-free stringv
 ```
 
+Unsafe runtime bridges may also call `text.data()` to obtain a borrowed
+`*const char`. The pointer is paired with the explicit byte length, may be null
+for an empty value, and must not be retained beyond the string or view's
+lifetime. This operation is intentionally unavailable in safe code.
+
 Following Flecha library API style, member names use `camelCase`. Existing
 single-word members such as `len`, `at`, and `substr` already follow that rule;
 multiword members use spellings such as `startsWith` and `isEmpty`.

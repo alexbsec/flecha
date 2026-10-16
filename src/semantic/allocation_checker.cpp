@@ -276,6 +276,7 @@ class AllocationChecker final {
     }
 
     void Register(const core::FunctionDeclaration& function) {
+        if (function.IsExtern()) return;
         const auto* symbol =
             static_cast<const FunctionSymbol*>(_model.DeclaredSymbol(function));
         if (!symbol) return;
@@ -707,6 +708,15 @@ class AllocationChecker final {
         for (const Value& argument : arguments)
             CheckUse(state, argument, expression);
         InvalidateMutableFields(state, function, expression, arguments);
+        if (function && function->IsExtern()) {
+            for (const Value& argument : arguments)
+                if (Owns(state, argument) || Lent(state, argument))
+                    Report(DiagnosticCode::UnverifiedOwnership, expression,
+                           "extern calls cannot receive tracked allocations "
+                           "until external ownership contracts are supported",
+                           argument.identity);
+            return {{std::move(state), {}}};
+        }
         if (!Relevant(function, arguments)) return {{std::move(state), {}}};
         const auto found = _functions.find(function);
         if (found == _functions.end()) {

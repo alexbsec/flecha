@@ -451,10 +451,13 @@ std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
     };
     const source::SourceLocation start = Current().range.start;
     std::vector<FunctionModifier> modifiers;
-    while (Check(TokenType::Unsafe) || Check(TokenType::Private)) {
-        const auto modifier = Advance().type == TokenType::Unsafe
-                                  ? FunctionModifier::Unsafe
-                                  : FunctionModifier::Private;
+    while (Check(TokenType::Unsafe) || Check(TokenType::Private) ||
+           Check(TokenType::Extern)) {
+        const TokenType modifierToken = Advance().type;
+        const auto modifier =
+            modifierToken == TokenType::Unsafe    ? FunctionModifier::Unsafe
+            : modifierToken == TokenType::Private ? FunctionModifier::Private
+                                                  : FunctionModifier::Extern;
         if (std::find(modifiers.begin(), modifiers.end(), modifier) !=
             modifiers.end())
             ReportUnexpectedToken("after duplicate function modifier");
@@ -530,11 +533,21 @@ std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
 
     if (Match(TokenType::Override))
         modifiers.push_back(FunctionModifier::Override);
-    std::unique_ptr<BlockStatement> body = ParseBlockStatement();
-    if (body == nullptr) {
-        return nullptr;
+    std::unique_ptr<BlockStatement> body;
+    source::SourceLocation end;
+    if (std::find(modifiers.begin(), modifiers.end(),
+                  FunctionModifier::Extern) != modifiers.end()) {
+        const Token* semicolon =
+            Consume(TokenType::SemiColon, "';' after extern declaration");
+        if (semicolon == nullptr) return nullptr;
+        end = semicolon->range.end;
+        body = std::make_unique<BlockStatement>(
+            semicolon->range, std::vector<std::unique_ptr<Statement>>{});
+    } else {
+        body = ParseBlockStatement();
+        if (body == nullptr) return nullptr;
+        end = body->Range().end;
     }
-    const source::SourceLocation end = body->Range().end;
 
     auto declaration = std::make_unique<FunctionDeclaration>(
         source::SourceRange{start, end}, std::move(modifiers),
@@ -655,7 +668,8 @@ std::unique_ptr<Declaration> Parser::ParseDeclaration() {
     if (Check(TokenType::Error) && Peek(1).type == TokenType::Identifier &&
         Peek(2).type == TokenType::LCurly)
         return ParseErrorDeclaration();
-    if (StartsType() || Check(TokenType::Unsafe) || Check(TokenType::Private)) {
+    if (StartsType() || Check(TokenType::Unsafe) || Check(TokenType::Private) ||
+        Check(TokenType::Extern)) {
         return ParseFunctionDeclaration();
     }
 

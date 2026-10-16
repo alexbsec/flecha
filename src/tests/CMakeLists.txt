@@ -255,6 +255,21 @@ add_test(NAME LongbowTests.Projects
         -DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/longbow_projects
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_longbow.cmake)
 
+add_test(NAME NativeExternTests.CAbiAndLinking
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DLONGBOW=$<TARGET_FILE:longbow>
+        -DFLECHA_LINKER=${CMAKE_CXX_COMPILER}
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/extern_link_test
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_extern.cmake)
+
+add_test(NAME StandardLibraryTests.FilesystemReadFile
+    COMMAND ${CMAKE_COMMAND}
+        -DFLECHA_COMPILER=$<TARGET_FILE:flecha>
+        -DFLECHA_STD=${PROJECT_SOURCE_DIR}/std/src
+        -DFLECHA_OUTPUT=${CMAKE_CURRENT_BINARY_DIR}/filesystem_test
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_filesystem.cmake)
+
 add_test(NAME NativeSemanticTests.RuntimeArrays
     COMMAND ${CMAKE_COMMAND}
         -DFLECHA_COMPILER=$<TARGET_FILE:flecha>

@@ -512,6 +512,8 @@ std::unique_ptr<BoundExpression> Lowerer::LowerExpression(
                 operation = StringViewOperation::View;
             } else if (member.Member() == "copy") {
                 operation = StringViewOperation::Copy;
+            } else if (member.Member() == "data") {
+                operation = StringViewOperation::Data;
             }
             std::vector<std::unique_ptr<BoundExpression>> arguments;
             arguments.reserve(member.Arguments().size());

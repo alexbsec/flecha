@@ -16,6 +16,16 @@ typedef struct FlechaRuntimeString {
     size_t capacity;
 } FlechaRuntimeString;
 
+typedef enum FlechaRuntimeReadFileStatus {
+    FLECHA_RUNTIME_READ_FILE_OK = 0,
+    FLECHA_RUNTIME_READ_FILE_NOT_FOUND = 1,
+    FLECHA_RUNTIME_READ_FILE_PERMISSION_DENIED = 2,
+    FLECHA_RUNTIME_READ_FILE_INVALID_PATH = 3,
+    FLECHA_RUNTIME_READ_FILE_FAILED = 4,
+    FLECHA_RUNTIME_READ_FILE_TOO_LARGE = 5,
+    FLECHA_RUNTIME_READ_FILE_OUT_OF_MEMORY = 6,
+} FlechaRuntimeReadFileStatus;
+
 // Allocates zeroed aligned storage; returns null on failure. Free accepts null.
 // Only pointers returned by this allocator may be released. The compiler tears
 // down the object before releasing storage.
@@ -86,6 +96,12 @@ void flecha_runtime_v1_string_from_bool(FlechaRuntimeString* output,
                                         uint8_t value);
 void flecha_runtime_v1_string_from_char(FlechaRuntimeString* output,
                                         uint8_t value);
+
+// Reads path as platform-native binary file contents. Paths are byte strings
+// on POSIX and UTF-8 on Windows. On success output owns a malloc-compatible,
+// null-terminated buffer. On failure output is empty.
+int32_t flecha_runtime_v1_read_file(FlechaRuntimeString* output,
+                                    const char* path, size_t path_length);
 
 #ifdef __cplusplus
 }

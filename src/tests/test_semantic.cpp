@@ -108,6 +108,59 @@ TEST(ScopeTests, InsertsLooksUpParentsShadowsAndRejectsDuplicates) {
     EXPECT_EQ(global.Lookup("missing"), nullptr);
 }
 
+TEST(SemanticExternTests, AcceptsScalarAndUnsafePointerAbiDeclarations) {
+    Analysis result = Analyze(
+        "extern i32 native_add(i32 left, i32 right); "
+        "extern unsafe i32 native_read(*const char path, usize length, "
+        "*u8 output, usize capacity); "
+        "i32 add(i32 left, i32 right) { return native_add(left, right); }");
+
+    EXPECT_FALSE(result.diagnostics.HasErrors());
+    const auto* scalar = static_cast<const FunctionSymbol*>(
+        result.model.DeclaredSymbol(FunctionAt(result, 0)));
+    ASSERT_NE(scalar, nullptr);
+    EXPECT_TRUE(scalar->IsExtern());
+    EXPECT_EQ(scalar->LinkName(), "native_add");
+}
+
+TEST(SemanticExternTests, RejectsUnsupportedAndUntrackedAbiSignatures) {
+    for (const std::string& declaration : {
+             "extern string bad(stringv value);",
+             "extern i32 bad(*u8 value);",
+             "extern unsafe error bad(i32 value);",
+             "extern unsafe own *u8 bad();",
+             "extern unsafe *string bad();",
+             "extern unsafe void arbitrary(*string output);",
+             "extern unsafe i32 bad(&i32 value);",
+             "extern i32 bad<T>(i32 value);",
+         }) {
+        Analysis result = Analyze(declaration);
+        EXPECT_NE(FindDiagnostic(result, DiagnosticCode::InvalidExtern),
+                  nullptr)
+            << declaration;
+    }
+}
+
+TEST(SemanticExternTests, RawStringDataRequiresUnsafePermission) {
+    EXPECT_NE(FindDiagnostic(Analyze("*const char bad(stringv value) { return "
+                                     "value.data(); }"),
+                             DiagnosticCode::UnsafeOperation),
+              nullptr);
+    EXPECT_FALSE(Analyze("unsafe *const char good(stringv value) { return "
+                         "value.data(); }")
+                     .diagnostics.HasErrors());
+}
+
+TEST(SemanticExternTests, DoesNotBypassTrackedAllocationContracts) {
+    Analysis result = Analyze(
+        "extern unsafe void native_use(*i32 value); "
+        "unsafe void use() { value, err := new<i32>(42); if err != none { "
+        "return; } native_use(value); free(value); }");
+
+    EXPECT_NE(FindDiagnostic(result, DiagnosticCode::UnverifiedOwnership),
+              nullptr);
+}
+
 TEST(SemanticDeclarationTests, RegistersFunctionsParametersAndLocals) {
     Analysis analysis = Analyze(
         "i32 add(i32 left, i32 right) { i32 sum = left + right; "

@@ -415,6 +415,9 @@ class FunctionDeclaration final : public Declaration {
         }
         return false;
     }
+    [[nodiscard]] bool IsExtern() const {
+        return HasModifier(FunctionModifier::Extern);
+    }
     const std::string& Owner() const { return _owner; }
     bool HasModifier(FunctionModifier modifier) const {
         for (const auto item : _modifiers)

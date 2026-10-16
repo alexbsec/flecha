@@ -94,3 +94,19 @@ project. Prebuilt library objects are not used to resolve imports.
 
 A runnable multi-module example is in `examples/modules`. From that directory,
 run `../../build/longbow run` after building the tools.
+
+## Native link inputs
+
+Programs using `extern` declarations can attach prebuilt object files or static
+libraries in a native manifest section:
+
+```toml
+[native]
+bridge = { path = "native/bridge.o" }
+```
+
+Paths are relative to `longbow.toml`. Longbow forwards every native input to
+the final system-linker invocation for `build` and `run`. It does not compile C
+or C++ sources; build those inputs with the platform toolchain first. Library
+packages emit only a Flecha object, so an application consuming such a library
+must list the corresponding native input in its own manifest.
