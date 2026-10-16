@@ -123,6 +123,32 @@ TEST(ParserTests, ParsesTypedParametersAndBareReturn) {
     EXPECT_EQ(returnStatement.Value(), nullptr);
 }
 
+TEST(ParserTests, ParsesExternDeclarationWithSemicolonAndModifiers) {
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource(
+        "extern unsafe i32 native_add(i32 left, i32 right);", diagnostics);
+
+    ASSERT_FALSE(diagnostics.HasErrors());
+    ASSERT_EQ(unit->Declarations().size(), 1);
+    const auto& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations().front());
+    EXPECT_TRUE(function.IsExtern());
+    EXPECT_TRUE(function.IsUnsafe());
+    EXPECT_EQ(function.Name(), "native_add");
+    EXPECT_EQ(function.Parameters().size(), 2);
+    EXPECT_TRUE(function.Body().Statements().empty());
+}
+
+TEST(ParserTests, ExternDeclarationRequiresSemicolonInsteadOfBody) {
+    DiagnosticBag diagnostics;
+    (void)ParseSource("extern i32 native_add(i32 value) { return value; }",
+                      diagnostics);
+
+    ASSERT_TRUE(diagnostics.HasErrors());
+    EXPECT_EQ(diagnostics.Diagnostics().front().code,
+              DiagnosticCode::ExpectedToken);
+}
+
 TEST(ParserTests, ReportsMissingSemicolonAndPreservesFunction) {
     DiagnosticBag diagnostics;
     std::vector<Token> tokens = Lex("i32 main() { return 0 }", diagnostics);

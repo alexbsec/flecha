@@ -81,6 +81,8 @@ TEST(DiagnosticTests, SemanticCodesAreStableAndContiguous) {
               "FLECHA-S0021");
     EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::BorrowRequiresInitializer),
               "FLECHA-S0022");
+    EXPECT_EQ(DiagnosticCodeName(DiagnosticCode::InvalidExtern),
+              "FLECHA-S0055");
 }
 
 TEST(DiagnosticTests, CompilerCodesAreStableAndContiguous) {

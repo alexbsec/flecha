@@ -74,6 +74,7 @@ enum class DiagnosticCode {
     InvalidFree,
     UnverifiedOwnership,
     NullDereference,
+    InvalidExtern,
     NativeTargetUnavailable,
     ObjectEmissionFailed,
     RuntimeUnavailable,

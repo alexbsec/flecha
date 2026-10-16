@@ -620,12 +620,11 @@ bool LlvmCodeGenerator::EmitDeferredCalls(const CleanupScope& scope) {
                 std::vector<llvm::Value*> invocation{result};
                 invocation.insert(invocation.end(), arguments.begin(),
                                   arguments.end());
-                _builder.CreateCall(_functions.at(&call.Function()),
-                                    invocation);
+                EmitFunctionCall(call.Function(), invocation);
                 EmitDestroyAt(result, call.Type());
             } else {
-                llvm::Value* result = _builder.CreateCall(
-                    _functions.at(&call.Function()), arguments);
+                llvm::Value* result =
+                    EmitFunctionCall(call.Function(), arguments);
                 EmitValueDestroy(result, call.Type());
             }
         }
@@ -818,6 +817,9 @@ llvm::Value* LlvmCodeGenerator::EmitStringViewOperation(
     llvm::Value* length =
         _builder.CreateExtractValue(view, 1, "stringv.length");
 
+    if (expression.Operation() == lowering::StringViewOperation::Data)
+        return data;
+
     if (expression.Operation() == lowering::StringViewOperation::Length) {
         return _builder.CreateZExtOrTrunc(
             length, llvm::Type::getInt32Ty(_context), "stringv.len");
@@ -883,6 +885,60 @@ llvm::FunctionType* LlvmCodeGenerator::MapFunctionType(
     return llvm::FunctionType::get(returnType, parameters, false);
 }
 
+std::optional<llvm::Attribute::AttrKind>
+LlvmCodeGenerator::ExternIntegerExtension(
+    semantic::SemanticType type) const {
+    using Kind = semantic::SemanticTypeKind;
+    const llvm::Triple triple(_targetTriple);
+
+    // AArch64's base PCS leaves sub-32-bit integer extension to the callee,
+    // except for Darwin's C ABI. The Windows x64 ABI does the same for C
+    // integer types, while still requiring zero extension for _Bool.
+    if (triple.isAArch64() && !triple.isOSDarwin()) return std::nullopt;
+    if (triple.getArch() == llvm::Triple::x86_64 && triple.isOSWindows() &&
+        type.Kind() != Kind::Bool)
+        return std::nullopt;
+
+    switch (type.Kind()) {
+        case Kind::I8:
+        case Kind::I16:
+            return llvm::Attribute::SExt;
+        case Kind::U8:
+        case Kind::U16:
+        case Kind::Char:
+        case Kind::Bool:
+            return llvm::Attribute::ZExt;
+        default:
+            return std::nullopt;
+    }
+}
+
+void LlvmCodeGenerator::ApplyExternAttributes(
+    const semantic::FunctionSymbol& symbol, llvm::Function& function) {
+    if (!symbol.IsExtern()) return;
+    if (const auto attribute = ExternIntegerExtension(symbol.ReturnType()))
+        function.addRetAttr(*attribute);
+    for (std::size_t index = 0; index < symbol.ParameterTypes().size(); ++index)
+        if (const auto attribute =
+                ExternIntegerExtension(symbol.ParameterTypes()[index]))
+            function.addParamAttr(index, *attribute);
+}
+
+llvm::CallInst* LlvmCodeGenerator::EmitFunctionCall(
+    const semantic::FunctionSymbol& symbol,
+    const std::vector<llvm::Value*>& arguments, std::string_view name) {
+    llvm::CallInst* call = _builder.CreateCall(
+        _functions.at(&symbol), arguments, llvm::StringRef(name));
+    if (!symbol.IsExtern()) return call;
+    if (const auto attribute = ExternIntegerExtension(symbol.ReturnType()))
+        call->addRetAttr(*attribute);
+    for (std::size_t index = 0; index < symbol.ParameterTypes().size(); ++index)
+        if (const auto attribute =
+                ExternIntegerExtension(symbol.ParameterTypes()[index]))
+            call->addParamAttr(index, *attribute);
+    return call;
+}
+
 bool LlvmCodeGenerator::DeclareFunctions(
     const lowering::BoundProgram& program) {
     for (const std::unique_ptr<lowering::BoundFunction>& boundFunction :
@@ -890,12 +946,19 @@ bool LlvmCodeGenerator::DeclareFunctions(
         const semantic::FunctionSymbol& symbol = boundFunction->Symbol();
         llvm::FunctionType* type = MapFunctionType(symbol);
         if (type == nullptr) return false;
-        llvm::Function* function = llvm::Function::Create(
-            type, llvm::Function::ExternalLinkage, symbol.Name(), *_module);
+        const std::string& linkName = symbol.LinkName();
+        llvm::Function* function = _module->getFunction(linkName);
+        if (function != nullptr && function->getFunctionType() != type)
+            return Fail("conflicting extern declarations for symbol '" +
+                        linkName + "'");
+        if (function == nullptr)
+            function = llvm::Function::Create(
+                type, llvm::Function::ExternalLinkage, linkName, *_module);
+        ApplyExternAttributes(symbol, *function);
         _functions.emplace(&symbol, function);
         // A Flecha void entry point has a defined successful process status.
         // Keep its language-level signature and synthesize the C ABI wrapper.
-        if (symbol.Name() == "main" &&
+        if (!symbol.IsExtern() && symbol.Name() == "main" &&
             symbol.ReturnType().Kind() == semantic::SemanticTypeKind::Void &&
             symbol.ParameterTypes().empty()) {
             function->setName("$flecha$main");
@@ -2232,8 +2295,8 @@ llvm::Value* LlvmCodeGenerator::EmitExpression(
                     CreateOwnedValueTemporary(call.Type(), "owned.call.result");
                 EmitValueStorageCleanup(ownedResult, call.Type());
             }
-            llvm::Value* result = _builder.CreateCall(
-                function, arguments,
+            llvm::Value* result = EmitFunctionCall(
+                call.Function(), arguments,
                 function->getReturnType()->isVoidTy() ? "" : "call");
             if (ownedResult == nullptr) return result;
             _builder.CreateStore(result, ownedResult);
@@ -2407,7 +2470,7 @@ bool LlvmCodeGenerator::EmitInto(const lowering::BoundExpression& expression,
             if (!argument) return false;
             arguments.push_back(argument);
         }
-        _builder.CreateCall(_functions.at(&call.Function()), arguments);
+        EmitFunctionCall(call.Function(), arguments);
         return true;
     }
     if (expression.Kind() == Node::TupleExpression &&
@@ -2591,6 +2654,7 @@ std::unique_ptr<llvm::Module> LlvmCodeGenerator::Generate(
     if (!DeclareFunctions(program)) return nullptr;
     for (const std::unique_ptr<lowering::BoundFunction>& function :
          program.Functions()) {
+        if (function->IsExtern()) continue;
         if (!EmitFunction(*function)) return nullptr;
     }
     const std::string verificationError = VerifyModule(*_module);

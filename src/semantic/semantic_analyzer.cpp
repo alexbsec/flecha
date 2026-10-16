@@ -52,6 +52,43 @@ bool IsRuntimeArrayStructureField(SemanticType type) {
     return false;
 }
 
+bool IsExternScalar(SemanticType type) {
+    return type.IsNumeric() || type.Kind() == SemanticTypeKind::Bool ||
+           type.Kind() == SemanticTypeKind::Char;
+}
+
+bool IsExternPointerTarget(SemanticType type) {
+    if (IsExternScalar(type) || type.Kind() == SemanticTypeKind::Void)
+        return true;
+    if (type.Kind() == SemanticTypeKind::Pointer)
+        return IsExternPointerTarget(*type.Target());
+    return false;
+}
+
+bool IsExternAbiType(SemanticType type, bool allowVoid,
+                     bool allowOpaqueHandle = false) {
+    if (type.Kind() == SemanticTypeKind::Void) return allowVoid;
+    if (type.Kind() == SemanticTypeKind::Pointer) {
+        // These two opaque handles are never passed by value or nested. Their
+        // layouts are exposed only behind a direct parameter pointer for
+        // versioned runtime bridges.
+        if (allowOpaqueHandle &&
+            (type.Target()->Kind() == SemanticTypeKind::String ||
+             type.Target()->Kind() == SemanticTypeKind::StringView))
+            return true;
+        return IsExternPointerTarget(*type.Target());
+    }
+    return IsExternScalar(type);
+}
+
+bool HasOwnershipContract(const core::TypeNode& type) {
+    if (type.Contract() != core::OwnershipContract::None) return true;
+    if (type.Target() && HasOwnershipContract(*type.Target())) return true;
+    for (const auto& element : type.Elements())
+        if (HasOwnershipContract(*element)) return true;
+    return false;
+}
+
 // Keep byte and bit layout arithmetic representable by the native target and
 // LLVM.
 std::optional<std::uint64_t> StorageSize(SemanticType type) {
@@ -706,6 +743,65 @@ void SemanticAnalyzer::RegisterFunction(
                function.ReturnType().Range(),
                "reference and slice returns require a lifetime contract and "
                "are not yet supported");
+    if (function.IsExtern()) {
+        if (!function.Owner().empty() ||
+            function.HasModifier(core::FunctionModifier::Private) ||
+            function.HasModifier(core::FunctionModifier::Override))
+            Report(diagnostics::DiagnosticCode::InvalidExtern, function.Range(),
+                   "extern declarations must be free functions and cannot "
+                   "be private or override lifecycle methods");
+        if (!function.genericParameters.empty() ||
+            !function.ownerParameters.empty())
+            Report(diagnostics::DiagnosticCode::InvalidExtern, function.Range(),
+                   "extern declarations cannot have generic parameters");
+        if (function.Name() == "main")
+            Report(diagnostics::DiagnosticCode::InvalidExtern,
+                   function.NameRange(),
+                   "the Flecha entry point cannot be an extern declaration");
+        if (!IsExternAbiType(returnType, true) ||
+            HasOwnershipContract(function.ReturnType()))
+            Report(diagnostics::DiagnosticCode::InvalidExtern,
+                   function.ReturnType().Range(),
+                   "extern results must be ABI scalars or raw pointers "
+                   "without ownership contracts");
+        bool hasPointer = returnType.Kind() == SemanticTypeKind::Pointer;
+        for (std::size_t index = 0; index < parameterTypes.size(); ++index) {
+            const auto type = parameterTypes[index];
+            hasPointer |= type.Kind() == SemanticTypeKind::Pointer;
+            if (!IsExternAbiType(type, false, true) ||
+                HasOwnershipContract(function.Parameters()[index]->Type()))
+                Report(diagnostics::DiagnosticCode::InvalidExtern,
+                       function.Parameters()[index]->Type().Range(),
+                       "extern parameters must be ABI scalars or raw "
+                       "pointers without ownership contracts");
+            if (type.Kind() == SemanticTypeKind::Pointer &&
+                (type.Target()->Kind() == SemanticTypeKind::String ||
+                 type.Target()->Kind() == SemanticTypeKind::StringView) &&
+                !function.Name().starts_with("flecha_runtime_v1_"))
+                Report(diagnostics::DiagnosticCode::InvalidExtern,
+                       function.Parameters()[index]->Type().Range(),
+                       "opaque string handles are reserved for versioned "
+                       "Flecha runtime symbols");
+            if (type.Kind() == SemanticTypeKind::Pointer &&
+                type.Target()->Kind() == SemanticTypeKind::String &&
+                type.Target()->IsConst())
+                Report(diagnostics::DiagnosticCode::InvalidExtern,
+                       function.Parameters()[index]->Type().Range(),
+                       "an opaque string pointer is an output handle and "
+                       "must be mutable");
+            if (type.Kind() == SemanticTypeKind::Pointer &&
+                type.Target()->Kind() == SemanticTypeKind::StringView &&
+                !type.Target()->IsConst())
+                Report(diagnostics::DiagnosticCode::InvalidExtern,
+                       function.Parameters()[index]->Type().Range(),
+                       "an opaque stringv pointer is an input handle and "
+                       "must point to const data");
+        }
+        if (hasPointer && !function.IsUnsafe())
+            Report(diagnostics::DiagnosticCode::InvalidExtern,
+                   function.NameRange(),
+                   "extern declarations using raw pointers must be unsafe");
+    }
     const bool lifecycle =
         owner && (function.Name() == "init" || function.Name() == "zero" ||
                   function.Name() == "tear");
@@ -752,7 +848,8 @@ void SemanticAnalyzer::RegisterFunction(
         std::make_unique<FunctionSymbol>(
             name, returnType, std::move(parameterTypes), function.NameRange(),
             BuiltInFunction::None, function.IsUnsafe(), owner,
-            function.HasModifier(core::FunctionModifier::Private), receiver),
+            function.HasModifier(core::FunctionModifier::Private), receiver,
+            function.IsExtern(), function.IsExtern() ? function.Name() : ""),
         function));
     if (symbol && function.HasModifier(core::FunctionModifier::Extern))
         _forbiddenZeroEffects.insert(symbol);
@@ -943,6 +1040,13 @@ void SemanticAnalyzer::AnalyzeFunction(
                       _currentFunction->ParameterTypes()[parameterIndex++],
                       parameter->NameRange(), !parameter->Type().IsConst()),
                   *parameter);
+    }
+    if (function.IsExtern()) {
+        _currentScope = previousScope;
+        _currentFunction = nullptr;
+        _inUnsafe = false;
+        _inZero = false;
+        return;
     }
     AnalyzeBlock(function.Body(), false);
     const ControlFlowGraph graph = BuildControlFlowGraph(function, _model);
@@ -2664,6 +2768,10 @@ SemanticType SemanticAnalyzer::AnalyzeMemberCall(
         result = SemanticType(SemanticTypeKind::StringView);
     } else if (expression.Member() == "copy" && isString) {
         result = SemanticType(SemanticTypeKind::String);
+    } else if (expression.Member() == "data" && (isView || isString)) {
+        RequireUnsafe(expression.Range());
+        result = SemanticType(SemanticTypeKind::Pointer,
+                              SemanticType(SemanticTypeKind::Char, true));
     } else if (expression.Member() == "len" && (isView || isString)) {
         result = SemanticType(SemanticTypeKind::U32);
     } else if (expression.Member() == "at" && (isView || isString)) {

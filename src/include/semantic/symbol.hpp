@@ -67,7 +67,8 @@ class FunctionSymbol final : public Symbol {
                    source::SourceRange declarationRange,
                    BuiltInFunction builtIn = BuiltInFunction::None,
                    bool isUnsafe = false, const StructureType* owner = nullptr,
-                   bool isPrivate = false, bool hasReceiver = false)
+                   bool isPrivate = false, bool hasReceiver = false,
+                   bool isExtern = false, std::string linkName = {})
         : Symbol(SymbolKind::Function, std::move(name),
                  SemanticType(SemanticTypeKind::Function), declarationRange,
                  false),
@@ -77,7 +78,9 @@ class FunctionSymbol final : public Symbol {
           _isUnsafe(isUnsafe),
           _owner(owner),
           _isPrivate(isPrivate),
-          _hasReceiver(hasReceiver) {}
+          _hasReceiver(hasReceiver),
+          _isExtern(isExtern),
+          _linkName(linkName.empty() ? Name() : std::move(linkName)) {}
 
     [[nodiscard]] SemanticType ReturnType() const { return _returnType; }
     [[nodiscard]] const std::vector<SemanticType>& ParameterTypes() const {
@@ -87,6 +90,8 @@ class FunctionSymbol final : public Symbol {
     const StructureType* Owner() const { return _owner; }
     bool IsPrivate() const { return _isPrivate; }
     bool HasReceiver() const { return _hasReceiver; }
+    bool IsExtern() const { return _isExtern; }
+    const std::string& LinkName() const { return _linkName; }
     [[nodiscard]] BuiltInFunction BuiltIn() const { return _builtIn; }
 
    private:
@@ -97,6 +102,8 @@ class FunctionSymbol final : public Symbol {
     const StructureType* _owner;
     bool _isPrivate;
     bool _hasReceiver;
+    bool _isExtern;
+    std::string _linkName;
 };
 
 struct StructureField final {

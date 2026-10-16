@@ -2,6 +2,10 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <string>
 
 #include "runtime/runtime_abi.h"
 
@@ -64,6 +68,58 @@ TEST(RuntimeStringTests, ConcatenatesIndependentOwnedStorage) {
     EXPECT_EQ(joined.capacity, 6);
     EXPECT_STREQ(joined.data, "flecha");
     flecha_runtime_v1_string_destroy(joined.data);
+}
+
+TEST(RuntimeFilesystemTests, ReadsEmptyAndBinaryFiles) {
+    const auto directory = std::filesystem::temp_directory_path();
+    const auto path = directory / "flecha_runtime_read_file_test.bin";
+    const std::string bytes{"A\0B\n", 4};
+    {
+        std::ofstream stream(path, std::ios::binary);
+        ASSERT_TRUE(stream.good());
+        stream.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    }
+
+    FlechaRuntimeString output{};
+    const std::string nativePath = path.string();
+    EXPECT_EQ(flecha_runtime_v1_read_file(&output, nativePath.data(),
+                                          nativePath.size()),
+              FLECHA_RUNTIME_READ_FILE_OK);
+    ASSERT_NE(output.data, nullptr);
+    EXPECT_EQ(output.length, bytes.size());
+    EXPECT_EQ(std::memcmp(output.data, bytes.data(), bytes.size()), 0);
+    EXPECT_EQ(output.data[output.length], '\0');
+    flecha_runtime_v1_string_destroy(output.data);
+
+    {
+        std::ofstream stream(path, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(stream.good());
+    }
+    EXPECT_EQ(flecha_runtime_v1_read_file(&output, nativePath.data(),
+                                          nativePath.size()),
+              FLECHA_RUNTIME_READ_FILE_OK);
+    ASSERT_NE(output.data, nullptr);
+    EXPECT_EQ(output.length, 0);
+    EXPECT_EQ(output.data[0], '\0');
+    flecha_runtime_v1_string_destroy(output.data);
+    EXPECT_TRUE(std::filesystem::remove(path));
+}
+
+TEST(RuntimeFilesystemTests, RejectsInvalidAndMissingPaths) {
+    FlechaRuntimeString output{reinterpret_cast<char*>(1), 1, 1};
+    const char invalid[] = {'a', '\0', 'b'};
+    EXPECT_EQ(flecha_runtime_v1_read_file(&output, invalid, sizeof(invalid)),
+              FLECHA_RUNTIME_READ_FILE_INVALID_PATH);
+    EXPECT_EQ(output.data, nullptr);
+    EXPECT_EQ(output.length, 0);
+
+    const std::string missing = (std::filesystem::temp_directory_path() /
+                                 "flecha_file_that_does_not_exist_7d12")
+                                    .string();
+    EXPECT_EQ(
+        flecha_runtime_v1_read_file(&output, missing.data(), missing.size()),
+        FLECHA_RUNTIME_READ_FILE_NOT_FOUND);
+    EXPECT_EQ(output.data, nullptr);
 }
 
 TEST(RuntimeAllocationTests, ZeroesStorageAndHonorsAlignment) {

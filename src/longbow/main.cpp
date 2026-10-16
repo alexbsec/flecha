@@ -33,6 +33,7 @@ struct Manifest {
     std::string name;
     std::string kind = "program";
     std::map<std::string, fs::path> dependencies;
+    std::map<std::string, fs::path> native;
 };
 Manifest ReadManifest(const fs::path& directory) {
     std::ifstream stream(directory / "longbow.toml");
@@ -60,7 +61,8 @@ Manifest ReadManifest(const fs::path& directory) {
         }
         line = Trim(line);
         if (line.empty()) continue;
-        if (line == "[package]" || line == "[dependencies]") {
+        if (line == "[package]" || line == "[dependencies]" ||
+            line == "[native]") {
             if (!sections.insert(line).second)
                 throw std::runtime_error("duplicate manifest section " + line);
             section = line;
@@ -81,6 +83,14 @@ Manifest ReadManifest(const fs::path& directory) {
                      .emplace(name, directory / match[2].str() / "src")
                      .second)
                 throw std::runtime_error("invalid or duplicate dependency '" +
+                                         name + "'");
+        } else if (section == "[native]" &&
+                   std::regex_match(line, match, dependency)) {
+            const std::string name = match[1];
+            if (!ValidName(name) ||
+                !manifest.native.emplace(name, directory / match[2].str())
+                     .second)
+                throw std::runtime_error("invalid or duplicate native input '" +
                                          name + "'");
         } else
             throw std::runtime_error("unsupported manifest syntax at line " +
@@ -232,6 +242,13 @@ int Run(int argc, char** argv) {
         fs::create_directories(target);
         compile.push_back("-o");
         compile.push_back(output.string());
+    }
+    if (binary && command != "check") {
+        for (const auto& [name, input] : manifest.native) {
+            (void)name;
+            compile.push_back("--link");
+            compile.push_back(input.lexically_normal().string());
+        }
     }
     const int result = Execute(compile);
     if (result != 0 || command != "run") return result;

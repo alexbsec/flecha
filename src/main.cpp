@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "codegen/llvm_code_generator.hpp"
 #include "codegen/native_compiler.hpp"
@@ -30,7 +31,8 @@ void PrintDiagnostics(const flecha::diagnostics::DiagnosticBag& diagnostics) {
 }
 int Compile(const std::string& command, const std::string& input,
             const std::string& output, const std::filesystem::path& root,
-            const std::map<std::string, std::filesystem::path>& libraries) {
+            const std::map<std::string, std::filesystem::path>& libraries,
+            const std::vector<std::string>& linkInputs) {
     flecha::diagnostics::DiagnosticBag diagnostics;
     flecha::core::ModuleLoader loader(diagnostics);
     auto unit = loader.Load(input, root, libraries);
@@ -96,7 +98,7 @@ int Compile(const std::string& command, const std::string& input,
         compiler.Ready() &&
         (command == "--emit-object"
              ? compiler.EmitObject(*program, input, output)
-             : compiler.BuildExecutable(*program, input, output));
+             : compiler.BuildExecutable(*program, input, output, linkInputs));
     if (!success && compiler.LastDiagnostic())
         PrintDiagnostic(*compiler.LastDiagnostic());
     return success ? 0 : 1;
@@ -105,7 +107,8 @@ void PrintUsage(const char* executable) {
     std::cerr
         << "usage: " << executable
         << " <check|build|--emit-llvm|--emit-object> <input.fl> [-o output]"
-           " [--root source-directory] [--lib name=source-directory ...]\n";
+           " [--root source-directory] [--lib name=source-directory ...]"
+           " [--link object-or-library ...]\n";
 }
 }  // namespace
 int main(int argc, char** argv) {
@@ -122,6 +125,7 @@ int main(int argc, char** argv) {
     std::string output;
     std::filesystem::path root;
     std::map<std::string, std::filesystem::path> libraries;
+    std::vector<std::string> linkInputs;
     for (int index = 3; index < argc; ++index) {
         const std::string option = argv[index];
         if (++index == argc) {
@@ -143,6 +147,8 @@ int main(int argc, char** argv) {
                 std::cerr << "--lib requires a unique name=source-directory\n";
                 return 1;
             }
+        } else if (option == "--link") {
+            linkInputs.push_back(value);
         } else {
             PrintUsage(argv[0]);
             return 1;
@@ -152,8 +158,12 @@ int main(int argc, char** argv) {
         PrintUsage(argv[0]);
         return 1;
     }
+    if (command != "build" && !linkInputs.empty()) {
+        std::cerr << "--link is supported only by build\n";
+        return 1;
+    }
     try {
-        return Compile(command, argv[2], output, root, libraries);
+        return Compile(command, argv[2], output, root, libraries, linkInputs);
     } catch (const std::filesystem::filesystem_error& error) {
         std::cerr << error.what() << "\n";
         return 1;

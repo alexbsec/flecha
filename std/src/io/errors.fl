@@ -1,0 +1,9 @@
+module errors;
+
+export error IoError {
+    NotFound,
+    PermissionDenied,
+    InvalidPath,
+    ReadFailed,
+    TooLarge,
+}

@@ -65,6 +65,7 @@ class Dumper final {
     }
 
     void WriteFunction(const BoundFunction& function) {
+        if (function.Symbol().IsExtern()) _stream << "extern ";
         if (function.Symbol().IsUnsafe()) _stream << "unsafe ";
         _stream << "function " << function.Symbol().Name() << "(";
         for (std::size_t index = 0; index < function.Parameters().size();
@@ -410,6 +411,8 @@ class Dumper final {
                     name = "view";
                 } else if (operation.Operation() == StringViewOperation::Copy) {
                     name = "copy";
+                } else if (operation.Operation() == StringViewOperation::Data) {
+                    name = "data";
                 }
                 _stream << "(string." << name << " ";
                 WriteExpression(operation.Receiver());

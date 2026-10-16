@@ -91,6 +91,58 @@ TEST(LlvmCodeGeneratorTests, EmitsForwardAndRecursiveCalls) {
     EXPECT_NE(ir.find("call i32 @Factorial"), std::string::npos);
 }
 
+TEST(LlvmCodeGeneratorTests, EmitsExternCallsWithoutFunctionBodies) {
+    GeneratedSource result = Generate(
+        "extern unsafe i32 native_add(i32 left, i32 right); "
+        "i32 add(i32 left, i32 right) { unsafe { return "
+        "native_add(left, right); } }");
+
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    const std::string ir = ModuleText(*result.module);
+    EXPECT_NE(ir.find("declare i32 @native_add(i32, i32)"), std::string::npos);
+    EXPECT_EQ(ir.find("define i32 @native_add"), std::string::npos);
+    EXPECT_NE(ir.find("call i32 @native_add"), std::string::npos);
+}
+
+TEST(LlvmCodeGeneratorTests, UsesTargetCAbiIntegerExtensionAttributes) {
+    GeneratedSource result = Generate(
+        "extern i8 native_i8(i8 value); "
+        "extern u16 native_u16(u16 value); "
+        "i32 use(i8 signed_value, u16 unsigned_value) { "
+        "native_i8(signed_value); native_u16(unsigned_value); return 0; }");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.boundProgram, nullptr);
+
+    LlvmCodeGenerator x86Generator;
+    x86Generator.ConfigureTarget("x86_64-unknown-linux-gnu",
+                                 llvm::DataLayout("e-p:64:64"));
+    std::unique_ptr<llvm::Module> x86Module =
+        x86Generator.Generate(*result.boundProgram, "extern_x86_abi");
+    ASSERT_NE(x86Module, nullptr) << x86Generator.Error();
+    const std::string x86Ir = ModuleText(*x86Module);
+    EXPECT_NE(x86Ir.find("declare signext i8 @native_i8(i8 signext)"),
+              std::string::npos);
+    EXPECT_NE(x86Ir.find("declare zeroext i16 @native_u16(i16 zeroext)"),
+              std::string::npos);
+    EXPECT_NE(x86Ir.find("call signext i8 @native_i8(i8 signext"),
+              std::string::npos);
+    EXPECT_NE(x86Ir.find("call zeroext i16 @native_u16(i16 zeroext"),
+              std::string::npos);
+
+    LlvmCodeGenerator aarch64Generator;
+    aarch64Generator.ConfigureTarget("aarch64-unknown-linux-gnu",
+                                     llvm::DataLayout("e-p:64:64"));
+    std::unique_ptr<llvm::Module> aarch64Module =
+        aarch64Generator.Generate(*result.boundProgram, "extern_aarch64_abi");
+    ASSERT_NE(aarch64Module, nullptr) << aarch64Generator.Error();
+    const std::string aarch64Ir = ModuleText(*aarch64Module);
+    EXPECT_NE(aarch64Ir.find("declare i8 @native_i8(i8)"),
+              std::string::npos);
+    EXPECT_NE(aarch64Ir.find("declare i16 @native_u16(i16)"),
+              std::string::npos);
+}
+
 TEST(LlvmCodeGeneratorTests, EmitsAssignmentsAndConditionalControlFlow) {
     GeneratedSource result = Generate(
         "i32 main() { value := 1; if value < 2 { value = value + 41; } "
@@ -294,7 +346,7 @@ TEST(NativeCompilerTests, EmitsObjectAndLinksExecutableForHost) {
     ASSERT_TRUE(compiler.BuildExecutable(*result.boundProgram, "native_test",
                                          executablePath.string()))
         << compiler.Error();
-    EXPECT_TRUE(std::filesystem::is_regular_file(objectPath));
+    EXPECT_FALSE(std::filesystem::exists(objectPath));
     EXPECT_TRUE(std::filesystem::is_regular_file(executablePath));
 
     const std::string executablePathText = executablePath.string();

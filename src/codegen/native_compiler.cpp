@@ -5,12 +5,15 @@
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
+#include <llvm/ADT/SmallString.h>
 #include <llvm/IR/LegacyPassManager.h>
 #include <llvm/IR/Module.h>
 #include <llvm/MC/TargetRegistry.h>
 #include <llvm/Support/CodeGen.h>
 #include <llvm/Support/FileSystem.h>
+#include <llvm/Support/FileUtilities.h>
 #include <llvm/Support/Program.h>
 #include <llvm/Support/TargetSelect.h>
 #include <llvm/Support/raw_ostream.h>
@@ -113,8 +116,9 @@ bool NativeCompiler::EmitObject(const lowering::BoundProgram& program,
     return true;
 }
 
-bool NativeCompiler::LinkExecutable(const std::string& objectPath,
-                                    const std::string& outputPath) {
+bool NativeCompiler::LinkExecutable(
+    const std::string& objectPath, const std::string& outputPath,
+    const std::vector<std::string>& linkInputs) {
     _error.clear();
     _diagnostic.reset();
     if (_runtimeLibraryPath.empty() ||
@@ -124,28 +128,33 @@ bool NativeCompiler::LinkExecutable(const std::string& objectPath,
                         _runtimeLibraryPath + "'");
     }
     const llvm::ErrorOr<std::string> linker =
-        llvm::sys::findProgramByName("cc");
+        llvm::sys::findProgramByName("c++");
     if (!linker) {
         return Fail(diagnostics::DiagnosticCode::LinkerFailed,
-                    "unable to find the system C linker driver 'cc'");
+                    "unable to find the system C++ linker driver 'c++'");
     }
 
-    const llvm::StringRef arguments[] = {*linker,
-                                         objectPath,
-                                         _runtimeLibraryPath,
+    std::vector<std::string> ownedArguments{*linker, objectPath};
+    ownedArguments.insert(ownedArguments.end(), linkInputs.begin(),
+                          linkInputs.end());
+    ownedArguments.push_back(_runtimeLibraryPath);
 #ifdef FLECHA_SANITIZED_RUNTIME
-                                         "-fsanitize=address,undefined",
+    ownedArguments.emplace_back("-fsanitize=address,undefined");
 #endif
-                                         "-o",
-                                         outputPath};
+    ownedArguments.emplace_back("-o");
+    ownedArguments.push_back(outputPath);
+    std::vector<llvm::StringRef> arguments;
+    arguments.reserve(ownedArguments.size());
+    for (const auto& argument : ownedArguments)
+        arguments.emplace_back(argument);
     std::string executionError;
     bool executionFailed = false;
-    const int result = llvm::sys::ExecuteAndWait(
-        *linker, arguments, std::nullopt, {}, 0, 0, &executionError,
-        &executionFailed);
+    const int result =
+        llvm::sys::ExecuteAndWait(*linker, arguments, std::nullopt, {}, 0, 0,
+                                  &executionError, &executionFailed);
     if (executionFailed || result != 0) {
-        std::string message = "system linker failed with exit code " +
-                              std::to_string(result);
+        std::string message =
+            "system linker failed with exit code " + std::to_string(result);
         if (!executionError.empty()) message += ": " + executionError;
         return Fail(diagnostics::DiagnosticCode::LinkerFailed,
                     std::move(message));
@@ -153,12 +162,21 @@ bool NativeCompiler::LinkExecutable(const std::string& objectPath,
     return true;
 }
 
-bool NativeCompiler::BuildExecutable(const lowering::BoundProgram& program,
-                                     const std::string& moduleName,
-                                     const std::string& outputPath) {
-    const std::string objectPath = outputPath + ".o";
-    if (!EmitObject(program, moduleName, objectPath)) return false;
-    return LinkExecutable(objectPath, outputPath);
+bool NativeCompiler::BuildExecutable(
+    const lowering::BoundProgram& program, const std::string& moduleName,
+    const std::string& outputPath, const std::vector<std::string>& linkInputs) {
+    llvm::SmallString<256> objectPath;
+    const std::error_code temporaryError = llvm::sys::fs::createUniqueFile(
+        outputPath + ".flecha-%%%%%%.o", objectPath);
+    if (temporaryError) {
+        return Fail(diagnostics::DiagnosticCode::ObjectEmissionFailed,
+                    "unable to create temporary object for '" + outputPath +
+                        "': " + temporaryError.message());
+    }
+    llvm::FileRemover removeObject(objectPath);
+    const std::string objectPathText = objectPath.str().str();
+    if (!EmitObject(program, moduleName, objectPathText)) return false;
+    return LinkExecutable(objectPathText, outputPath, linkInputs);
 }
 
 }  // namespace flecha::codegen

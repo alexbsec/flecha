@@ -335,6 +335,13 @@ class Expander {
                 concreteMethods[{owner, method->Name()}] = method;
         }
         for (auto& declaration : originals) {
+            if (declaration->Kind() == AstNodeKind::FunctionDeclaration &&
+                static_cast<const FunctionDeclaration&>(*declaration)
+                    .IsExtern() &&
+                Template(*declaration))
+                diagnostics.Report(
+                    DiagnosticCode::InvalidExtern, declaration->Range(),
+                    "extern declarations cannot have generic parameters");
             Validate(*declaration);
             if (Template(*declaration))
                 unit.genericTemplates.push_back(std::move(declaration));

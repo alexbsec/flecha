@@ -55,6 +55,7 @@ enum class StringViewOperation {
     ToString,
     View,
     Copy,
+    Data,
 };
 
 class BoundNode {
@@ -739,6 +740,7 @@ class BoundFunction final {
         return _parameters;
     }
     [[nodiscard]] const BoundBlockStatement& Body() const { return *_body; }
+    [[nodiscard]] bool IsExtern() const { return _symbol.IsExtern(); }
 
    private:
     const semantic::FunctionSymbol& _symbol;
