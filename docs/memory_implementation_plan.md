@@ -1,19 +1,19 @@
-# Memory feature implementation order
+# Memory feature implementation history and remaining work
 
 Status: const types, unsafe pointers, checked references, fixed arrays, and
 iteration, checked slices, deferred calls, and tuples/destructuring are merged.
 Named and generic error values are merged; see [error_values.md](error_values.md).
-Structures are implemented on `feat/structures`; see [structures.md](structures.md).
-Raw allocation is implemented on `feat/raw-allocation`; see [raw_allocation.md](raw_allocation.md).
-Mandatory allocation identity diagnostics and bounded visible-call analysis are
-also implemented on that branch. Explicit `own` / `lend` contracts and initial
-owning-field support are implemented; see [ownership contracts](ownership_contracts.md).
+Structures, raw allocation, mandatory allocation identity diagnostics, bounded
+visible-call analysis, explicit `own` / `lend` contracts, and initial owning-field
+support are merged in `master`; see [structures](structures.md),
+[raw allocation](raw_allocation.md), and
+[ownership contracts](ownership_contracts.md).
 
 Based on the agreed rules in [memory_model.md](memory_model.md), with the
-const-type milestone merged into `master` at `c9e6ee4`. Each milestone should be a separate feature
-branch and reviewable change, with parser, semantic, lowering/codegen, and
-native coverage appropriate to its behavior. Branch names below are proposed;
-creating this roadmap does not create branches or commits.
+const-type milestone merged into `master` at `c9e6ee4`. The numbered sections
+preserve the historical implementation order and acceptance criteria; branch
+names are historical context, not active work. Remaining proposals are labeled
+explicitly.
 
 ## Constraints carried into every milestone
 
@@ -170,8 +170,9 @@ Tuple implementation branch: `feat/tuples`. Depends on: 1 and 2; based on the
 committed defer implementation to cover aggregate cleanup and deferred captures.
 
 Tuples, multiple results, and typed/mixed destructuring are implemented; see
-[tuples.md](tuples.md). Named and generic error values are implemented on
-`feat/error-values`; see [error_values.md](error_values.md). Typed `new<T>` calls are implemented in the allocation milestone.
+[tuples.md](tuples.md). Named and generic error values are merged; see
+[error_values.md](error_values.md). Typed `new<T>` calls are implemented in the
+allocation milestone.
 
 This is a prerequisite for the agreed allocator API, not an allocator-specific
 parser shortcut.
@@ -336,11 +337,9 @@ Before completing each implementation branch, run the applicable suite:
 - `make test-neovim`, updating syntax support with new language tokens.
 - `git diff --check`; keep generated artifacts out of commits.
 
-The checked-in `examples/factorial.fl` currently contains exploratory memory
-syntax, including the now-rejected inline unsafe-call form. Treat it as design
-input, not an executable acceptance fixture; create focused fixtures for each
-milestone and reconcile that example separately.
+The checked-in examples use supported syntax. Focused fixtures under
+`src/tests/fixtures` remain the acceptance coverage for individual memory
+features and diagnostics.
 
 Growable owning arrays and explicit iterator handles remain future container
-work. The roadmap itself does not authorize committing, pushing, opening a PR,
-or merging.
+work.

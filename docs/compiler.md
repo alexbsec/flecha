@@ -1,6 +1,6 @@
 # Flecha compiler
 
-`flecha` is the language compiler shipped in the Flecha 0.1.0 distribution. It
+`flecha` is the language compiler shipped in Flecha release archives. It
 loads a `.fl` entry module and its imports, performs semantic and ownership
 checks, lowers the program, and can emit LLVM IR, a native object, or a native
 executable for the host platform.
@@ -26,8 +26,8 @@ option maps one `lib::` namespace to a source directory. `--link` adds a native
 object or library when building an executable containing `extern`
 declarations.
 
-The compiler invokes a host C++ linker driver for executable builds. Flecha
-0.1.0 release packages must validate this path on Linux, Windows, and macOS.
+The compiler invokes a host C++ linker driver for executable builds. Release
+packages validate this path on Linux, Windows, and macOS.
 Set `FLECHA_LINKER` to a driver name or full path to override automatic
 discovery. A configured override is authoritative and does not fall back to
 another driver.

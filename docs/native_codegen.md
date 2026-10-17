@@ -25,7 +25,7 @@ executable; `FLECHA_RUNTIME_LIBRARY` provides a development override. Explicit
 cross-compilation triples, sysroots, optimization levels, and debug information
 are future work.
 
-Run the native end-to-end proof with:
+Run the native end-to-end smoke test with:
 
 ```sh
 make native-poc

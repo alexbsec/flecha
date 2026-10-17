@@ -32,7 +32,9 @@ Build requirements are:
 - Ninja, or another CMake generator
 - LLVM 17 through 23 development libraries and tools
 
-LLVM's `lli` is required for the LLVM proof-of-concept target. Neovim is required only for the editor integration test. Test builds fetch GoogleTest through CMake unless a local checkout is supplied.
+LLVM's `lli` is required for the `llvm-poc` IR smoke target. Neovim is
+required only for the editor integration test. Test builds fetch GoogleTest
+through CMake unless a local checkout is supplied.
 The pinned platform packages, linkers, SDKs, and release baselines are listed
 in [`docs/toolchains.md`](docs/toolchains.md).
 
@@ -232,7 +234,7 @@ Makefile                Convenient build, test, and example targets
 - [`docs/compiler.md`](docs/compiler.md) — compiler commands, outputs, and installed layout
 - [`docs/longbow.md`](docs/longbow.md) — project manifests, commands, and local dependencies
 - [`docs/editors.md`](docs/editors.md) — VS Code and Neovim installation and packaging
-- [`docs/release_0_1.md`](docs/release_0_1.md) — v0.1.0 platform contract and release gates
+- [`docs/release_0_1.md`](docs/release_0_1.md) — 0.1 distribution contract and release gates
 - [`docs/release_0_1_1.md`](docs/release_0_1_1.md) — v0.1.1 stabilization scope and release condition
 - [`docs/toolchains.md`](docs/toolchains.md) — supported compiler, LLVM, linker, SDK, and CI versions
 - [`docs/semantic_analysis.md`](docs/semantic_analysis.md) — name binding, types, scopes, and analysis pipeline
@@ -247,7 +249,10 @@ Makefile                Convenient build, test, and example targets
 - [`editors/vscode/README.md`](editors/vscode/README.md) — Visual Studio Code highlighting setup
 - [`editors/neovim/README.md`](editors/neovim/README.md) — Neovim installation and usage
 
-The documentation intentionally labels proposals and proof-of-concept functionality. When behavior differs between the specification and the compiler, compiler tests and diagnostics are the most reliable description of current behavior.
+The documentation distinguishes implemented behavior from proposals and
+current limitations. When behavior differs between a design proposal and the
+compiler, the feature guide, compiler tests, and diagnostics describe the
+implemented contract.
 
 ## Development
 
@@ -255,9 +260,9 @@ Use the existing build and test targets when possible. C++ code follows the conv
 
 Pull requests run unit and native tests, sanitizers, editor checks, VSIX
 packaging, and cross-platform package smoke tests. Publishing a GitHub Release
-with a matching semantic version tag such as `v0.1.0` builds and attaches the
+with a matching semantic version tag builds and attaches the
 Linux, Windows, and macOS bundles plus the Visual Studio Code extension. See the
-[`v0.1.0 automation guide`](docs/release_0_1.md#automation).
+[`0.1 release automation guide`](docs/release_0_1.md#automation).
 
 The working tree may contain experimental language work, so changes should preserve existing diagnostics, examples, and test fixtures unless the behavior change is intentional and documented.
 

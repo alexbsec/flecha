@@ -54,8 +54,8 @@ with `stringv.cast<string>` and for generic conversion code. Both forms create
 the same immutable borrow and do not allocate or copy bytes.
 
 The view must not outlive or observe destruction or replacement of its owner.
-Until full lifetime analysis exists, the compiler will conservatively reject
-returning or otherwise escaping a view derived from a local owning string.
+The compiler conservatively rejects returning or otherwise escaping a view
+derived from a local owning string.
 
 ## Initial operations
 
@@ -103,7 +103,7 @@ program behavior.
 
 ## Runtime responsibilities
 
-The runtime will provide versioned C ABI operations for:
+The runtime provides versioned C ABI operations for:
 
 - constructing an owned string from `stringv`;
 - cloning an owned string;

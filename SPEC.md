@@ -1,6 +1,6 @@
 # Flecha Language Specification
 
-Status: early design draft  
+Status: evolving specification; implemented and proposed behavior is identified
 File extension: `.fl`  
 Compiler command: `flecha`
 
@@ -599,7 +599,7 @@ copying the backing elements. Slice returns and nested borrowed storage remain
 unsupported pending lifetime contracts. See [checked slices](docs/checked_slices.md)
 for exact rules, limitations, and diagnostics.
 
-## 13.1 Structures
+### 13.4 Structures
 
 ```flecha
 structure Box {
@@ -679,9 +679,9 @@ Layout must not be inferred solely from the behavior of a particular backend. La
 
 ## 16. Compilation model
 
-The reference compiler will initially be implemented in C++23.
+The reference compiler is implemented in C++23.
 
-The proposed bootstrap pipeline is:
+The implemented compilation pipeline is:
 
 ```text
 Flecha source
@@ -689,14 +689,19 @@ Flecha source
     -> parser
     -> abstract syntax tree
     -> semantic and type analysis
-    -> Flecha intermediate representation
-    -> C or LLVM backend
+    -> lowered bound program
+    -> LLVM backend
     -> object file
     -> native linker
     -> executable
 ```
 
-The first backend may emit portable C so the frontend and language semantics can be validated quickly. A later LLVM backend can provide native object generation, optimization, debug information, and broad target support.
+The LLVM backend emits textual IR or a host-native object. The native driver can
+link that object with the version-matched runtime and explicit native inputs.
+The compiler does not include a C source backend, optimization-level selection,
+source-level debug information, or explicit cross-compilation in the 0.1 line.
+See [LLVM code generation](docs/llvm_codegen.md) and
+[native code generation](docs/native_codegen.md).
 
 The compiler should eventually be self-hosted in Flecha, but self-hosting is not an initial milestone.
 
@@ -751,45 +756,21 @@ Important initial highlighting categories include function modifiers, control-fl
 
 ## 18. Illustrative program
 
-The following example demonstrates the current core direction. It is illustrative; not every construct shown has a finalized grammar or implementation.
+The following example uses the implemented fixed-array and checked-slice syntax:
 
 ```flecha
-error CopyError {
-    InvalidPointer,
-    DestinationTooSmall,
-}
-
-unsafe (usize, CopyError) copy(
-    []u8 destination,
-    []const u8 source
-) {
-    if destination.ptr == none || source.ptr == none {
-        return (0, CopyError.InvalidPointer);
+void fill([]u8 destination, u8 value) {
+    loop usize index = 0; index < destination.len(); index++ {
+        destination[index] = value;
     }
-
-    if destination.len < source.len {
-        return (0, CopyError.DestinationTooSmall);
-    }
-
-    memory_copy(destination.ptr, source.ptr, source.len);
-    return (source.len, none);
 }
 
 i32 main() {
-    u8[128] destination;
-    []const u8 source = "Flecha";
-
-    usize copied;
-    CopyError err;
-
-    unsafe {
-        (copied, err) = copy(destination[:], source);
-    }
-
-    if err != none {
+    [4]u8 values = none;
+    fill(values[:], 7);
+    if values.front() != 7 || values.back() != 7 {
         return 1;
     }
-
     return 0;
 }
 ```
@@ -811,9 +792,9 @@ The following decisions are intentionally not finalized:
 - re-exports, cyclic modules, and separately compiled module interfaces;
 - additional declaration forms, including whether to introduce `var`;
 - string literal representation and encoding;
-- slice syntax and array-to-slice conversion;
+- lifetime contracts for returned slices, references, and other borrowed views;
 - union syntax;
-- ownership, borrowing, and deterministic cleanup;
+- general move semantics, partial moves, and cleanup for future owning types;
 - allocator interfaces;
 - arithmetic overflow behavior;
 - floating-point equality involving NaN and signed zero;
@@ -823,27 +804,27 @@ The following decisions are intentionally not finalized:
 - error propagation syntax;
 - generator and coroutine syntax using the reserved `yield` keyword;
 - concurrency and memory-model rules;
-- supported platforms and calling conventions;
+- cross-compilation targets and stable aggregate calling conventions;
 - whether `null` remains a separate pointer spelling or is replaced entirely by `none`.
 
 These questions should be resolved by prioritizing predictable behavior, a small implementation surface, useful diagnostics, and compatibility with low-level programming.
 
-## 20. Initial implementation milestones
+## 20. Implementation status
 
-1. Recognize `.fl` files and produce source-located diagnostics.
-2. Implement tokens, comments, literals, and primitive type names.
-3. Parse functions, blocks, parameters, and `return` statements.
-4. Type-check primitive expressions and local variables.
-5. Implement calls and a minimal C backend.
-6. Implement tuples, tuple returns, and destructuring.
-7. Implement universal `none`, zero initialization, `==`, and `===`.
-8. Error types and tuple-based error handling are implemented; payloads and propagation sugar remain future work.
-9. Nominal scalar enums, defaults, discriminants, member functions, and exhaustive matching are implemented.
-10. Implement pointers, slices, and explicit unsafe blocks.
-11. Introduce a compiler-owned intermediate representation.
-12. Add an LLVM backend and native debug information.
-13. Expand platform support, tooling, and the standard library.
-14. Begin self-hosting once Flecha can express the compiler without special cases.
+The 0.1 compiler implements source-located diagnostics; the lexer, parser,
+semantic and ownership analyses; lowering; and LLVM IR, object, and native
+executable emission. Implemented language areas include functions and control
+flow, primitives and conversions, `none`, tuples, errors, enums and matching,
+strings and views, raw pointers and unsafe blocks, checked references, fixed and
+runtime-sized arrays, checked slices, structures and lifecycle hooks, modules,
+explicit generics, raw allocation, ownership contracts, and direct deferred
+calls. The linked feature documents define the exact supported forms and
+diagnostics.
+
+Near-term work can extend the standard library and tooling without implying
+that these larger milestones are complete. Stable aggregate ABIs,
+cross-compilation, debug information, a formatter and language server, package
+registries, broader resource ownership, and self-hosting remain future work.
 
 ## 21. Guiding principle
 

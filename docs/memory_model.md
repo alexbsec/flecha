@@ -1,28 +1,29 @@
-# Memory model proposal
+# Memory model and remaining proposals
 
-Status: design draft for discussion; not an implementation guarantee.
+Status: implemented behavior is identified below; broader ownership sections
+remain design proposals.
 
 The agreed `own` / `lend` contracts are now implemented as described in
 [ownership contracts](ownership_contracts.md). References never take either
 keyword. The broader move-by-default proposals below remain unimplemented;
 existing string copies and structure immovability rules are unchanged.
 
-The current agreed direction is explicit raw allocation/free in unsafe code,
-with `defer` for scheduled cleanup and compiler diagnostics for tracked resource
+The implemented model includes explicit raw allocation/free in unsafe code,
+`defer` for scheduled cleanup, and mandatory diagnostics for tracked resource
 errors. Unsafe code retains caller obligations; this is not a guarantee that
 arbitrary raw-pointer programs are memory-safe. Mutable and shared references
 use `&T` and `&const T`, with `&value` creation and `*reference` access. The
 preferred fixed-binding spellings are `constptr T` for `const *T` and
-`constref T` for `const &T`. Detailed checking rules below remain proposals.
-Existing string copy semantics remain unchanged.
+`constref T` for `const &T`. Existing string copy semantics remain unchanged.
 
-This proposal defines the contracts needed before adding pointers, arrays,
-slices, and general resource ownership. Syntax already present in `SPEC.md`
-is retained where possible. New syntax, allocator APIs, and changes to string
-copying remain proposals until accepted. The current compiler behavior is
-recorded in [definite assignment](definite_assignment.md) and
-[strings](string.md), [const declarations and types](const_types.md), and
-[checked references](checked_references.md).
+Pointers, fixed arrays, checked references and slices, raw allocation,
+ownership contracts, and deferred direct calls are implemented. Their focused
+feature guides are normative for the 0.1 compiler. The broader move-by-default,
+safe heap ownership, allocator, and borrowed-result designs in this document
+remain proposals. Current behavior is recorded in [definite assignment](definite_assignment.md),
+[strings](string.md), [const declarations and types](const_types.md),
+[checked references](checked_references.md), [checked slices](checked_slices.md),
+and [raw allocation](raw_allocation.md).
 
 ## 1. Storage, ownership, and access are separate
 
@@ -126,11 +127,11 @@ from a runtime safety failure need not unwind scopes. Structure teardown is
 implemented as described in [structures.md](structures.md).
 General moves and partial construction remain future work.
 
-## 5. Borrowed access — recommended initial checking policy
+## 5. Borrowed access — implemented conservative policy
 
-Safe borrowed access must not outlive its storage or observe invalidation.
-The first checker should use conservative lexical borrow lifetimes and reject
-cases it cannot prove safe. It need not implement last-use lifetime inference.
+Safe borrowed access must not outlive its storage or observe invalidation. The
+checker uses conservative control-flow-aware lifetimes, tracks last possible
+uses, and rejects cases it cannot prove safe.
 
 - Multiple shared read-only borrows may coexist.
 - A mutable borrow provides exclusive access to its borrowed region. Other
@@ -158,21 +159,20 @@ Returning a view derived from a parameter requires a known relationship
 between the result and that parameter's storage. Until function contracts can
 express or soundly infer that relationship, reject unsupported borrowed
 returns. Static literal views may escape. The exact contract syntax is open;
-existing borrowed string behavior must be audited during implementation.
+existing borrowed string returns follow the conservative rules in
+[strings](string.md).
 
-Uninitialized `stringv` declarations remain rejected until this analysis can
-support delayed borrow assignment safely. General mutable slices should not
-be exposed as a safe feature before their access rules are enforced.
+Uninitialized `stringv` declarations remain rejected. Mutable slices are
+implemented with the access, lifetime, reborrow, and whole-owner region rules
+described in [checked slices](checked_slices.md).
 
 ### 5.1 References for safe code
 
 Use the agreed `&T` spelling for a mutable reference, create one with `&value`,
 and access its referent with `*reference`. Use `&const T` for a shared
-read-only reference. Mutable borrowing provides exclusive access; the detailed
-lifetime checking policy remains to be implemented.
-References are borrowed handles, not owners. Reference creation does not
-allocate or copy the referent. This is language design, not implemented syntax:
-a standalone `&` is not yet supported by the lexer.
+read-only reference. Mutable borrowing provides exclusive access under the
+implemented lifetime checks. References are borrowed handles, not owners.
+Reference creation does not allocate or copy the referent.
 
 ```flecha
 u8 val = 3;
@@ -216,9 +216,8 @@ A reference to a local object cannot be returned after that object is destroyed.
 
 Shared references may be copied while preserving their restrictions. Mutable
 references cannot be copied to produce two independently usable mutable aliases;
-passing one can reborrow it for the call. The implementation must enforce the
-access and lifetime rules in section 5 before these operations are considered
-safe. Runtime null checks alone are insufficient.
+passing one reborrows it for the call. The compiler enforces the access and
+lifetime rules in section 5. Runtime null checks alone are insufficient.
 
 Raw pointers do not implicitly convert to references. Any explicit unsafe
 conversion must establish lifetime, validity, and aliasing obligations for the
@@ -261,7 +260,7 @@ Implicit dereference/member syntax and borrowed-result annotations remain open.
 
 ### 5.2 Const declarations and access qualifiers
 
-Proposed value rule: `const` on a declaration prohibits modifying that
+Implemented value rule: `const` on a declaration prohibits modifying that
 binding's stored value:
 
 ```flecha
@@ -394,17 +393,19 @@ inside a safe function does not establish that contract.
 Fixed-size arrays have inline contiguous storage and a compile-time length;
 constructing one does not implicitly allocate a backing buffer. Fixed arrays now use `[N]T` types, `[a, b]` list initializers, and `[value; N]`
 repeat initializers. Implemented rules and limits are documented in
-[fixed arrays](fixed_arrays.md). Slices remain planned.
+[fixed arrays](fixed_arrays.md). Checked slices are implemented as described in
+[checked slices](checked_slices.md).
 
 A slice has a pointer and a `usize` element count. It owns neither the elements
 nor their allocation. `[]const T` exposes read-only elements and `[]T` exposes
 mutable elements, subject to the borrowing rules. Slicing and subslicing do
 not allocate.
 
-Safe construction from an array or another slice preserves its lifetime and
-mutability restrictions. Safe construction from an owning collection must
-establish the same borrowing relationship. Construction from raw parts is
-unsafe and promises that the whole range satisfies the access contract.
+Implemented construction from an array or another slice preserves its lifetime
+and mutability restrictions. A future safe owning collection must establish the
+same borrowing relationship. Slice construction from raw parts is not part of
+the 0.1 implementation; any future form must be unsafe and require the caller to
+establish the whole range's access contract.
 
 Indices are checked against length. Subranges use half-open bounds with
 `0 <= start <= end <= length`; length and byte-offset calculations must not
@@ -467,8 +468,10 @@ Mandatory compiler analysis now tracks allocation identity, aliases, and possibl
 states across CFG edges and visible nonrecursive calls. Counting free statements
 is insufficient. Leaks, double frees, use-after-free, known invalid frees, null
 paths, and unsupported ownership escapes are compile-time errors. Bounded call
-interpretation handles local helpers and factories; recursive summaries and
-external contracts remain future work. See [raw_allocation.md](raw_allocation.md)
+interpretation handles local helpers and factories; explicit `own` / `lend`
+contracts cover annotated and recursive functions. Inferred recursive summaries
+and ownership contracts for external declarations remain future work. See
+[raw_allocation.md](raw_allocation.md)
 for exact limits. Arbitrary raw-pointer manipulation and the validity of external
 input pointers remain programmer obligations inside unsafe code; complete static
 memory safety is not promised.
@@ -484,26 +487,26 @@ The special pointer-operation syntax and naming remain to be finalized.
 ### 8.1 Deferred cleanup
 
 The direct-call implementation is documented in [defer.md](defer.md). Deferred
-`free` and bounded static allocation-effect checks are implemented; explicit
-external ownership contracts remain future work.
+`free`, bounded static allocation-effect checks, and `own` / `lend` contracts
+are implemented. External ownership contracts remain future work.
 
 A deferred call registers when execution reaches it and executes when its
 current enclosing scope exits. It is not hoisted to scope entry. Register
 cleanup before work that can exit early:
 
 ```flecha
-unsafe void perform(*const u8 ptr) {
+unsafe void perform(own *u8 ptr) {
     defer free(ptr);
     // Work with the still-live allocation.
 }
 ```
 
-This function requires an allocation it is authorized to consume. Callers must
-handle allocation failure before any use that requires a non-null pointer. It
-consumes the allocation on return; tracked caller aliases then refer to freed
-storage. The signature/annotation syntax for that contract is still open.
+The `own` parameter makes the consuming contract explicit. Callers must handle
+allocation failure before any use that requires a non-null pointer. The function
+must discharge or forward the allocation on every normal exit; tracked caller
+aliases are invalid after transfer.
 
-Deferred-call rules and planned allocator integration:
+Implemented deferred allocation-cleanup rules:
 
 - Capture the receiver and argument values when registering a deferred call.
   Rebinding the original pointer later does not change the captured allocation.
@@ -563,8 +566,8 @@ Agreed direction:
    error results; raw allocation/free require unsafe permission.
 3. Allocation obligations can cross unsafe-block and function boundaries.
 4. Explicit free and defer provide cleanup; unsafe blocks do not own allocations.
-5. Compiler resource diagnostics are desirable, without claiming arbitrary
-   unsafe code has complete memory-safety or leak guarantees.
+5. Compiler resource diagnostics are mandatory for tracked allocations, without
+   claiming arbitrary unsafe code has complete memory-safety or leak guarantees.
 6. `constptr T` is the idiomatic spelling of `const *T`; `constref T` is the
    idiomatic spelling of `const &T`. Both expanded forms remain supported.
    Read-only target access uses `*const T` and `&const T` directly.
@@ -582,7 +585,8 @@ Next proposals to settle:
 2. Reference borrowing of strings/views and nested reference storage.
 3. Lifetime contracts for returned borrowed values; local slice lifetime and
    alias checking is implemented in [checked_slices.md](checked_slices.md).
-4. Ownership-effect contracts on functions and deferred `free` calls.
+4. Ownership contracts for external declarations and more general inferred
+   recursive effects.
 5. Any migration of existing string copies to moves. No such migration is
    agreed or implemented by this document.
 
@@ -591,8 +595,10 @@ The detailed dependency order and acceptance criteria are maintained in
 implementation milestone, const declarations and compound type representation,
 is documented in [const declarations and types](const_types.md). Unsafe pointer operations are documented in [unsafe pointers](unsafe_pointers.md).
 Checked scalar and pointer-slot references are documented in
-[checked references](checked_references.md). Deferred calls are also implemented; the next stages are
-system allocation and cross-function resource effects. Named and generic
+[checked references](checked_references.md). Checked slices, system allocation,
+direct deferred calls, and explicit cross-function ownership contracts are also
+implemented. Borrowed-result contracts and more general inferred resource
+effects remain future work. Named and generic
 [error values](error_values.md) are implemented.
 [Tuples and destructuring](tuples.md) are implemented.
 
@@ -601,13 +607,9 @@ arithmetic remain outside the first safe-reference feature.
 
 ## Specification alignment
 
-`SPEC.md` section 8.1 now matches implemented definite assignment, and section
-8.2 records the const declaration rules. Remaining conflicts include:
-
-- `SPEC.md` discourages hidden allocation, but existing string assignment,
-  owning parameter passing, and some conversions allocate implicitly.
-- `SPEC.md` leaves ownership and cleanup open, while owning strings already
-  have deterministic lexical cleanup.
-
-These need an explicit reconciliation when this proposal is accepted. No
-compiler behavior or existing normative text is changed by this draft.
+`SPEC.md` identifies the implemented reference, slice, allocation, ownership,
+and cleanup subsets and links to their focused contracts. Its design goal of
+locally visible cost still has a known exception: existing string assignment,
+owning parameter passing, conversions, and deferred string/view snapshots can
+allocate implicitly. A future move-semantics proposal must preserve or
+deliberately revise that shipped behavior.

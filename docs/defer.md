@@ -88,8 +88,11 @@ sequentially. Deferred calls do not count as having already initialized or
 modified their targets.
 
 Raw pointers retain their existing unsafe contract. `defer` alone does not
-prove pointer validity, prevent double frees, or supply ownership tracking.
-The system allocator and resource-consumption analysis remain future work.
+prove arbitrary pointer validity. The mandatory allocation analysis does track
+known system allocations, pending deferred frees, double frees, leaks, and
+use-after-free paths; its contracts and conservative limits are documented in
+[raw allocation](raw_allocation.md) and
+[ownership contracts](ownership_contracts.md).
 
 ## Implementation and validation
 
