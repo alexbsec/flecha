@@ -71,6 +71,7 @@ target_link_libraries(longbow PRIVATE flecha_project_options llvm_codegen)
 target_compile_definitions(longbow PRIVATE
     FLECHA_EXECUTABLE_SUFFIX="${CMAKE_EXECUTABLE_SUFFIX}"
     FLECHA_OBJECT_SUFFIX="${CMAKE_CXX_OUTPUT_EXTENSION}"
+    FLECHA_INSTALL_DATADIR="${CMAKE_INSTALL_DATADIR}"
 )
 add_dependencies(longbow flecha)
 

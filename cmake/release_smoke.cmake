@@ -89,6 +89,10 @@ if(NOT createResult EQUAL 0)
     message(FATAL_ERROR
         "Longbow project creation failed: ${createOutput}${createError}")
 endif()
+file(WRITE "${OUTPUT_ROOT}/hello/src/main.fl"
+    "module main;\n"
+    "@imports :: lib::std::containers::array;\n"
+    "void main() { stdoutln(\"Hello from Flecha!\"); }\n")
 execute_process(
     COMMAND "${LONGBOW}" check
     WORKING_DIRECTORY "${OUTPUT_ROOT}/hello"

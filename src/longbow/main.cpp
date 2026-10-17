@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <regex>
 #include <set>
 #include <stdexcept>
@@ -20,6 +21,10 @@
 
 #ifndef FLECHA_OBJECT_SUFFIX
 #define FLECHA_OBJECT_SUFFIX ".o"
+#endif
+
+#ifndef FLECHA_INSTALL_DATADIR
+#define FLECHA_INSTALL_DATADIR "share"
 #endif
 
 namespace fs = std::filesystem;
@@ -185,6 +190,32 @@ std::string Compiler(const char* executable) {
     throw std::runtime_error(
         "cannot find flecha; place it beside longbow or set FLECHA_COMPILER");
 }
+std::optional<fs::path> StandardLibrary(const char* executable) {
+    if (const char* configured = std::getenv("FLECHA_STANDARD_LIBRARY")) {
+        fs::path source = fs::absolute(configured).lexically_normal();
+        if (!fs::is_directory(source))
+            throw std::runtime_error(
+                "FLECHA_STANDARD_LIBRARY is not a source directory: " +
+                source.string());
+        return source;
+    }
+
+    auto resolved = llvm::sys::findProgramByName(executable);
+    fs::path binary = resolved ? fs::path(*resolved) : fs::absolute(executable);
+    std::error_code error;
+    const fs::path canonical = fs::weakly_canonical(binary, error);
+    if (!error) binary = canonical;
+
+    const fs::path dataDirectory = FLECHA_INSTALL_DATADIR;
+    const fs::path source =
+        ((dataDirectory.is_absolute()
+              ? dataDirectory
+              : binary.parent_path().parent_path() / dataDirectory) /
+         "flecha" / "std" / "src")
+            .lexically_normal();
+    if (fs::is_directory(source)) return source;
+    return std::nullopt;
+}
 void Usage() {
     std::cout << "usage: longbow new NAME [--lib]\n"
                  "       longbow init [--lib]\n"
@@ -255,6 +286,12 @@ int Run(int argc, char** argv) {
                                                         : "--emit-object",
                                      entry.string(), "--root",
                                      (root / "src").string()};
+    if (!manifest.dependencies.contains("std")) {
+        if (const auto standardLibrary = StandardLibrary(argv[0])) {
+            compile.push_back("--lib");
+            compile.push_back("std=" + standardLibrary->string());
+        }
+    }
     for (const auto& [name, source] : manifest.dependencies) {
         compile.push_back("--lib");
         compile.push_back(name + "=" + source.string());

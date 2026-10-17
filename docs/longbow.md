@@ -85,16 +85,20 @@ search map. Source code imports a particular module:
 ```
 
 The call is `numbers::answer()`. An alias can shorten or distinguish this local
-namespace. `std` works the same way when an actual standard-library source tree
-is supplied; containers are not implemented by this tooling feature.
+namespace. The standard library bundled beside an installed Longbow executable
+is available automatically as `lib::std`. A `std` entry in `[dependencies]`
+overrides that bundled copy, which is useful while developing the standard
+library. `FLECHA_STANDARD_LIBRARY` can also name a standard-library source
+directory for build-tree and custom-toolchain use; an explicit manifest entry
+still takes precedence.
 
 The first manifest reader supports only the shown package string keys and local
 path dependency entries, with blank lines and comments. Unsupported TOML forms,
 unknown keys, duplicate entries, and malformed values are diagnosed. Dependency
 versions, recursive manifest resolution, registries, downloads, lockfiles,
 workspaces, release profiles, tests, and formatting commands are future work.
-Library imports currently use the source map explicitly configured by the root
-project. Prebuilt library objects are not used to resolve imports.
+Nonstandard library imports currently use the source map explicitly configured
+by the root project. Prebuilt library objects are not used to resolve imports.
 
 A runnable multi-module example is in `examples/modules`. From that directory,
 run `../../build/longbow run` after building the tools.
