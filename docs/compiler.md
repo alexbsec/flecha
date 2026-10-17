@@ -28,6 +28,9 @@ declarations.
 
 The compiler invokes a host C++ linker driver for executable builds. Flecha
 0.1.0 release packages must validate this path on Linux, Windows, and macOS.
+Set `FLECHA_LINKER` to a driver name or full path to override automatic
+discovery. A configured override is authoritative and does not fall back to
+another driver.
 
 ### Binary release requirements
 
@@ -47,6 +50,22 @@ does require a host C++ linker driver and the platform's native SDK components:
 `flecha check` and `flecha --emit-object` do not invoke the system linker.
 Building Flecha itself from source still requires the LLVM development package
 listed in the repository build requirements.
+
+### Source-build LLVM requirement
+
+Flecha supports LLVM 17 through 23. CMake reports the detected version and
+rejects missing, incomplete, older, or newer LLVM installations before
+compilation. When LLVM is installed outside the default search path, configure
+with its CMake package directory:
+
+```sh
+cmake -S . -B build -G Ninja \
+    -DLLVM_DIR="$(llvm-config --cmakedir)"
+```
+
+On macOS with Homebrew, use the `lib/cmake/llvm` directory below the selected
+`llvm` formula prefix. On Windows, use the corresponding directory in the
+MSYS2 UCRT64 LLVM installation.
 
 ## Installed layout
 
