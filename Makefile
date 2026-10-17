@@ -7,6 +7,11 @@ GTEST_SOURCE_DIR ?=
 NPM ?= npm
 VSCODE_DIR ?= editors/vscode
 VSCODE_VERIFY_DIR ?= .cache/vsix-contents
+DOCKER ?= docker
+SANDBOX_IMAGE ?= flecha-sandbox:dev
+SANDBOX_CONTAINER ?= flecha-sandbox
+SANDBOX_DOCKERFILE ?= docker/sandbox.Dockerfile
+HOST_NVIM_CONFIG ?= $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME)/nvim,$(HOME)/.config/nvim)
 
 .DEFAULT_GOAL := build
 
@@ -14,7 +19,8 @@ VSCODE_VERIFY_DIR ?= .cache/vsix-contents
 	test-semantic llvm-poc native-poc native-if-also native-functions \
 	native-while native-loop-control native-casts native-string-view \
 	native-string-view-operations native-owning-string native-stdout \
-	native-definite-assignment package-vscode test-neovim test-sanitizers clean
+	native-definite-assignment package-vscode test-neovim test-sanitizers clean \
+	sandbox enter-sandbox
 
 help:
 	@echo "Flecha build targets:"
@@ -24,6 +30,8 @@ help:
 	@echo "  make test-neovim    Test Neovim filetype and syntax support"
 	@echo "  make package-vscode Build and verify the installable VSIX"
 	@echo "  make test-sanitizers Run unit tests with ASan and UBSan"
+	@echo "  make sandbox        Build and start the current Flecha Docker sandbox"
+	@echo "  make enter-sandbox  Open an interactive shell in the sandbox"
 	@echo "  make llvm-poc       Emit and execute the LLVM proof of concept"
 	@echo "  make native-poc     Build and execute a native Flecha program"
 	@echo "  make native-if-also Build and test the if/also native example"
@@ -39,6 +47,40 @@ help:
 	@echo "  make clean          Clean generated build artifacts"
 	@echo ""
 	@echo "Overrides: CMAKE, CMAKE_GENERATOR, BUILD_DIR, TEST_BUILD_DIR, NPM, VSCODE_DIR"
+	@echo "           DOCKER, SANDBOX_IMAGE, SANDBOX_CONTAINER, SANDBOX_DOCKERFILE"
+	@echo "           HOST_NVIM_CONFIG"
+
+sandbox:
+	$(DOCKER) build --file $(SANDBOX_DOCKERFILE) \
+		--tag $(SANDBOX_IMAGE) .
+	@$(DOCKER) container rm --force $(SANDBOX_CONTAINER) >/dev/null 2>&1 || true
+	$(DOCKER) run --detach \
+		--name $(SANDBOX_CONTAINER) \
+		--hostname flecha-sandbox \
+		--workdir /workspace \
+		--mount "type=bind,source=$(CURDIR),target=$(CURDIR),readonly" \
+		$(SANDBOX_IMAGE)
+	@set -e; \
+	if test -d "$(HOST_NVIM_CONFIG)"; then \
+		echo "Copying host Neovim config from $(HOST_NVIM_CONFIG)."; \
+		$(DOCKER) exec --user root $(SANDBOX_CONTAINER) \
+			rm --force /home/flecha/.config/nvim/init.vim; \
+		$(DOCKER) cp "$(HOST_NVIM_CONFIG)/." \
+			"$(SANDBOX_CONTAINER):/home/flecha/.config/nvim"; \
+		$(DOCKER) exec --user root $(SANDBOX_CONTAINER) \
+			chown --recursive flecha:flecha /home/flecha/.config/nvim; \
+	else \
+		echo "No host Neovim config found; using the minimal Flecha config."; \
+	fi
+	@echo "Sandbox '$(SANDBOX_CONTAINER)' is ready. Run 'make enter-sandbox'."
+
+enter-sandbox:
+	@$(DOCKER) container inspect $(SANDBOX_CONTAINER) >/dev/null 2>&1 || \
+		{ echo "Sandbox '$(SANDBOX_CONTAINER)' does not exist; run 'make sandbox' first."; exit 1; }
+	@$(DOCKER) start $(SANDBOX_CONTAINER) >/dev/null
+	$(DOCKER) exec --interactive --tty \
+		--workdir /workspace \
+		$(SANDBOX_CONTAINER) bash --login
 
 configure:
 	$(CMAKE) -S . -B $(BUILD_DIR) -G "$(CMAKE_GENERATOR)" \
