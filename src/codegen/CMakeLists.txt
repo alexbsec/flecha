@@ -1,8 +1,10 @@
+include(${PROJECT_SOURCE_DIR}/cmake/toolchain_policy.cmake)
 find_package(LLVM CONFIG QUIET)
 if(NOT LLVM_FOUND)
     message(FATAL_ERROR
-        "LLVM development package was not found. Flecha requires LLVM 17 "
-        "through 23. Install the LLVM development files and configure with "
+        "LLVM development package was not found. Flecha requires LLVM "
+        "${FLECHA_LLVM_MIN_MAJOR} through ${FLECHA_LLVM_MAX_MAJOR}. Install "
+        "the LLVM development files and configure with "
         "-DLLVM_DIR=/path/to/lib/cmake/llvm (use 'llvm-config --cmakedir' "
         "to locate it)."
     )

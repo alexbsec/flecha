@@ -39,8 +39,8 @@ does not require LLVM development files. Emitting and linking an executable
 does require a host C++ linker driver and the platform's native SDK components:
 
 - Linux requires `clang++`, `g++`, or `c++`, together with the system C/C++
-  development and startup files. The release smoke test installs the
-  distribution's `clang` package.
+  development and startup files. The release smoke test installs `binutils`,
+  `clang-18`, and `libc6-dev` on Ubuntu 24.04.
 - Windows packages target MSYS2 UCRT64 and require its `clang++` driver on
   `PATH`. The release smoke test installs `mingw-w64-ucrt-x86_64-clang`; it does
   not install the LLVM development package.
@@ -49,7 +49,9 @@ does require a host C++ linker driver and the platform's native SDK components:
 
 `flecha check` and `flecha --emit-object` do not invoke the system linker.
 Building Flecha itself from source still requires the LLVM development package
-listed in the repository build requirements.
+listed in the repository build requirements. The exact supported ranges,
+platform packages, and release baselines are maintained in
+[`toolchains.md`](toolchains.md).
 
 ### Source-build LLVM requirement
 
