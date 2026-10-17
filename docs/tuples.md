@@ -39,7 +39,8 @@ typed incompatible integers still need explicit casts.
 ## Destructuring
 
 ```flecha
-a, b := divide(17, 5);             // Declare both names with inferred types.
+a, err := divide(17, 5);           // Declare both names with inferred types.
+next, err := divide(20, 3);        // Declare next and assign the existing err.
 i32 q, i32 r = divide(17, 5);      // Declare both names explicitly.
 i32 quotient, remainder = divide(17, 5); // Shared i32 type.
 a, b = (b, a);                    // Assign existing names; swap their values.
@@ -47,8 +48,10 @@ a, i32 next = divide(20, 3);       // Assign a; declare next.
 _, b = divide(19, 5);             // Discard an element.
 ```
 
-- `:=` declares every non-blank binding and cannot contain explicit types.
-  It does not reuse existing bindings in the same scope.
+- `:=` declares each new non-blank binding and assigns names already declared
+  in the same lexical scope. At least one non-blank binding must be new. Names
+  from an outer scope are shadowed rather than assigned. Explicit types are not
+  allowed in a `:=` binding list.
 - Without parentheses, an explicit type applies to the following names until
   another type is written. `bool ok, changed, i32 code = ...;` declares two
   booleans and an integer. Qualifiers and compound types carry forward too.

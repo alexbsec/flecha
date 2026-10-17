@@ -598,6 +598,7 @@ void SemanticAnalyzer::AnalyzeDestructure(
     std::vector<SemanticType> expected;
     std::vector<const Symbol*> targets;
     std::unordered_set<std::string> names;
+    bool introducesBinding = false;
     for (const auto& binding : statement.Bindings()) {
         const Symbol* target = nullptr;
         SemanticType type = SemanticType::Error();
@@ -613,13 +614,19 @@ void SemanticAnalyzer::AnalyzeDestructure(
                        binding->Range(),
                        "typed destructuring bindings require '=' rather than "
                        "':='");
-        } else if (!statement.IsInferred() && binding->Name() != "_") {
-            target = _currentScope->Lookup(binding->Name());
-            if (target == nullptr)
-                Report(diagnostics::DiagnosticCode::UnknownName,
-                       binding->Range(),
-                       "unknown name '" + binding->Name() + "'");
-            else {
+        } else if (binding->Name() != "_") {
+            target = statement.IsInferred()
+                         ? _currentScope->LookupLocal(binding->Name())
+                         : _currentScope->Lookup(binding->Name());
+            if (statement.IsInferred() && target == nullptr)
+                introducesBinding = true;
+            if (target == nullptr) {
+                if (!statement.IsInferred()) {
+                    Report(diagnostics::DiagnosticCode::UnknownName,
+                           binding->Range(),
+                           "unknown name '" + binding->Name() + "'");
+                }
+            } else {
                 type = target->Type();
                 if (target->Kind() == SymbolKind::Function ||
                     !target->Writable())
@@ -631,6 +638,11 @@ void SemanticAnalyzer::AnalyzeDestructure(
         expected.push_back(type);
         targets.push_back(target);
     }
+    if (statement.IsInferred() && !introducesBinding)
+        Report(diagnostics::DiagnosticCode::InvalidDestructure,
+               statement.Range(),
+               "short destructuring declaration requires at least one new "
+               "variable");
     const SemanticType value =
         AnalyzeExpression(statement.Value(), SemanticType(expected));
     if (value.Kind() != SemanticTypeKind::Tuple) {
@@ -659,7 +671,8 @@ void SemanticAnalyzer::AnalyzeDestructure(
                    binding.Range(), TypeMismatch(type, actual));
         if (binding.Name() == "_") continue;
         const Symbol* target = targets[i];
-        if (statement.IsInferred() || binding.ExplicitType() != nullptr)
+        if ((statement.IsInferred() && target == nullptr) ||
+            binding.ExplicitType() != nullptr)
             target = AddSymbol(std::make_unique<VariableSymbol>(
                                    SymbolKind::LocalVariable, binding.Name(),
                                    type, binding.Range(), !type.IsConst()),

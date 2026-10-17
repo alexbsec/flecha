@@ -375,6 +375,8 @@ Tuples, tuple parameters/results, and flat destructuring are implemented.
 Binding-list parentheses are optional. Without parentheses, explicit types
 carry forward to subsequent names until another type is written. Mixed
 bindings such as `(existing, i32 fresh) = value;` and `_` discards are supported.
+In a `:=` binding list, names already declared in the current lexical scope are
+assigned while new names are declared; at least one non-blank name must be new.
 The right-hand side evaluates once before destination stores. Tuples use value
 semantics, including deep copies of owning strings; stored borrowed elements
 remain unsupported. The native representation is an LLVM non-packed struct,

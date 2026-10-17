@@ -2357,7 +2357,15 @@ TEST(SemanticTupleTests, PreservesInitializationAndSimultaneousBindingRules) {
           "void f() { i32 a; (i32 b, i32 c) = (a = 1, a); stdoutln(a); }",
           "void f() { a := 1; b := 2; (a, b) = (b, a); }",
           "void f() { a := 1; { (a, b) := (a, 2); stdoutln(a); } }",
-          "void f() { (_, _) := (1, 2); }"}) {
+          "void f() { (_, _) = (1, 2); }",
+          "(i32, i32) pair() { return (1, 2); } void f() { first, err := "
+          "pair(); second, err := pair(); stdoutln(first + second + err); }",
+          "(i32, i32) pair() { return (1, 2); } void f(i32 err) { value, err "
+          ":= pair(); stdoutln(value + err); }",
+          "(i32, i32) pair() { return (1, 2); } void f() { i32 err; value, "
+          "err := pair(); stdoutln(value + err); }",
+          "void f() { i32 err = 7; { value, err := (1, true); if err { "
+          "stdoutln(value); } } stdoutln(err); }"}) {
         SCOPED_TRACE(source);
         EXPECT_FALSE(Analyze(source).diagnostics.HasErrors());
     }
@@ -2368,10 +2376,23 @@ TEST(SemanticTupleTests, PreservesInitializationAndSimultaneousBindingRules) {
           "stdoutln(a); }",
           "void f() { i32 a; while true { jumpto use; (a, i32 b) = (1, 2); "
           "#use stdoutln(a); break; } }",
-          "void f() { (i32, bool) t; (a, b) := t; }"}) {
+          "void f() { (i32, bool) t; (a, b) := t; }",
+          "void f() { a, b := (1, 2); a, b := (3, 4); }",
+          "void f() { err := 0; _, err := (1, 2); }",
+          "void f() { const i32 err = 0; value, err := (1, 2); }",
+          "void f() { err := true; value, err := (1, 2); }"}) {
         SCOPED_TRACE(source);
         EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
     }
+
+    const Analysis noNew =
+        Analyze("void f() { a, b := (1, 2); a, b := (3, 4); }");
+    const Diagnostic* diagnostic =
+        FindDiagnostic(noNew, DiagnosticCode::InvalidDestructure);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(diagnostic->message,
+              "short destructuring declaration requires at least one new "
+              "variable");
 }
 
 TEST(SemanticTupleTests, DestructuringCannotWriteThroughActiveLoans) {
