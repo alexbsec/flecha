@@ -23,7 +23,8 @@ make sandbox
 This builds the compiler and tools from the current working tree, including
 uncommitted files that are not excluded by `.dockerignore`. It then replaces
 the container named `flecha-sandbox` and starts the new container in the
-background.
+background. The host Git description is embedded in both tools, so their
+`--version` output identifies the checkout used to create the sandbox.
 
 If the host has a Neovim configuration, the sandbox copies it from
 `$XDG_CONFIG_HOME/nvim`, or from `$HOME/.config/nvim` when

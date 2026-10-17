@@ -199,6 +199,7 @@ jobs:
           cmake -S . -B build -G Ninja
           -DBUILD_TESTING=OFF
           -DCMAKE_BUILD_TYPE=Release
+          -DFLECHA_RELEASE_BUILD=ON
           "-DCMAKE_C_COMPILER=${FLECHA_C_COMPILER:-clang}"
           "-DCMAKE_CXX_COMPILER=${FLECHA_CXX_COMPILER:-clang++}"
           "-DLLVM_DIR=$LLVM_DIR"

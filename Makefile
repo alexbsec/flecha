@@ -11,6 +11,7 @@ DOCKER ?= docker
 SANDBOX_IMAGE ?= flecha-sandbox:dev
 SANDBOX_CONTAINER ?= flecha-sandbox
 SANDBOX_DOCKERFILE ?= docker/sandbox.Dockerfile
+SANDBOX_BUILD_VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --long --dirty 2>/dev/null | sed -E 's/^v//; s/-0-g[0-9a-f]+$$//')
 HOST_NVIM_CONFIG ?= $(if $(XDG_CONFIG_HOME),$(XDG_CONFIG_HOME)/nvim,$(HOME)/.config/nvim)
 
 .DEFAULT_GOAL := build
@@ -48,10 +49,11 @@ help:
 	@echo ""
 	@echo "Overrides: CMAKE, CMAKE_GENERATOR, BUILD_DIR, TEST_BUILD_DIR, NPM, VSCODE_DIR"
 	@echo "           DOCKER, SANDBOX_IMAGE, SANDBOX_CONTAINER, SANDBOX_DOCKERFILE"
-	@echo "           HOST_NVIM_CONFIG"
+	@echo "           SANDBOX_BUILD_VERSION, HOST_NVIM_CONFIG"
 
 sandbox:
 	$(DOCKER) build --file $(SANDBOX_DOCKERFILE) \
+		--build-arg "FLECHA_BUILD_VERSION=$(SANDBOX_BUILD_VERSION)" \
 		--tag $(SANDBOX_IMAGE) .
 	@$(DOCKER) container rm --force $(SANDBOX_CONTAINER) >/dev/null 2>&1 || true
 	$(DOCKER) run --detach \

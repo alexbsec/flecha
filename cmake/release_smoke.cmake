@@ -24,8 +24,8 @@ execute_process(
     ERROR_VARIABLE versionError
     OUTPUT_STRIP_TRAILING_WHITESPACE
 )
-if(NOT versionResult EQUAL 0 OR
-   NOT versionOutput MATCHES "^flecha [0-9]+\\.[0-9]+\\.[0-9]+$")
+if(NOT versionResult EQUAL 0 OR NOT versionOutput MATCHES
+   "^flecha [0-9]+\\.[0-9]+\\.[0-9]+(-([0-9]+|dev)-g[0-9a-f]+(-dirty)?)?$")
     message(FATAL_ERROR
         "compiler version probe failed: ${versionOutput}${versionError}")
 endif()
