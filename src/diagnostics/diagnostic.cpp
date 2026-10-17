@@ -120,6 +120,8 @@ std::string_view DiagnosticCodeName(DiagnosticCode code) {
             return "FLECHA-S0056";
         case DiagnosticCode::InvalidMatch:
             return "FLECHA-S0057";
+        case DiagnosticCode::InvalidBorrowContract:
+            return "FLECHA-S0058";
         case DiagnosticCode::InvalidGeneric:
             return "FLECHA-S0054";
         case DiagnosticCode::InvalidAllocation:

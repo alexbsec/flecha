@@ -20,6 +20,9 @@ struct FlowNode final {
     // Whole-expression actions for borrow/move analysis. These precede the
     // corresponding ordered events; each pass consumes only its own events.
     const core::Expression* evaluation = nullptr;
+    // Marks an evaluation whose value leaves through a return statement.
+    // The borrow checker uses this to validate borrowed-result contracts.
+    const core::ReturnStatement* borrowReturn = nullptr;
     const core::VariableDeclarationStatement* declaration = nullptr;
     const core::DestructureStatement* destructure = nullptr;
     const core::DeferStatement* deferRegistration = nullptr;

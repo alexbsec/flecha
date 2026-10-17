@@ -222,6 +222,7 @@ jobs:
           "-DFLECHA_COMPILER=$PWD/build/flecha${{ matrix.suffix }}"
           "-DLONGBOW=$PWD/build/longbow${{ matrix.suffix }}"
           "-DOUTPUT_ROOT=$PWD/build/release-smoke"
+          "-DSTANDARD_LIBRARY=$PWD/std/src"
           "-DEXECUTABLE_SUFFIX=${{ matrix.suffix }}"
           -P cmake/release_smoke.cmake
 

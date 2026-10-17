@@ -438,7 +438,7 @@ TEST(LoweringTests, RetainsDeferredCallInsteadOfAnImmediateExpression) {
 TEST(LoweringTests, PreservesTupleEvaluationAndDestructuringTargets) {
     auto result = Lower(
         "(i32, bool) pair() { return (42, true); } void f() { x := 0; (x, bool "
-        "ok) = pair(); (_, _) := pair(); }");
+        "ok) = pair(); first, err := (1, 2); second, err := (3, 4); }");
     ASSERT_FALSE(result.diagnostics.HasErrors());
     ASSERT_NE(result.program, nullptr);
     const auto& statement = static_cast<const BoundDestructureStatement&>(
@@ -448,5 +448,13 @@ TEST(LoweringTests, PreservesTupleEvaluationAndDestructuringTargets) {
     EXPECT_EQ(statement.Value().Kind(), BoundNodeKind::CallExpression);
     EXPECT_NE(DumpBoundProgram(*result.program)
                   .find("destructure (x: i32, local ok: bool)"),
+              std::string::npos);
+    const auto& shortDeclaration =
+        static_cast<const BoundDestructureStatement&>(
+            *result.program->Functions()[1]->Body().Statements()[3]);
+    EXPECT_TRUE(shortDeclaration.Bindings()[0].declaration);
+    EXPECT_FALSE(shortDeclaration.Bindings()[1].declaration);
+    EXPECT_NE(DumpBoundProgram(*result.program)
+                  .find("destructure (local second: i32, err: i32)"),
               std::string::npos);
 }

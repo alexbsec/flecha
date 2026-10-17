@@ -74,6 +74,17 @@ TEST(TokenizerTests, RecognizesMultiCharacterOperators) {
     EXPECT_EQ(tokens[10].type, TokenType::EOF_TOKEN);
 }
 
+TEST(TokenizerTests, RecognizesBorrowResultArrow) {
+    std::vector<Token> tokens = Tokenize("<- < -");
+
+    ASSERT_EQ(tokens.size(), 4);
+    EXPECT_EQ(tokens[0].type, TokenType::LeftArrow);
+    EXPECT_EQ(tokens[0].value, "<-");
+    EXPECT_EQ(tokens[1].type, TokenType::Less);
+    EXPECT_EQ(tokens[2].type, TokenType::Sub);
+    EXPECT_EQ(tokens[3].type, TokenType::EOF_TOKEN);
+}
+
 TEST(TokenizerTests, RecognizesTextualLogicalOperators) {
     std::vector<Token> tokens = Tokenize("true and false or true");
 

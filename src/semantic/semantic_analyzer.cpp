@@ -91,9 +91,17 @@ bool HasOwnershipContract(const core::TypeNode& type) {
     return false;
 }
 
+bool HasBorrowedResult(SemanticType type) {
+    if (type.IsBorrowed()) return true;
+    if (type.Kind() != SemanticTypeKind::Tuple) return false;
+    return std::any_of(type.Elements().begin(), type.Elements().end(),
+                       HasBorrowedResult);
+}
+
 // Keep byte and bit layout arithmetic representable by the native target and
 // LLVM.
-std::optional<std::uint64_t> StorageSize(SemanticType type) {
+std::optional<std::uint64_t> StorageSize(SemanticType type,
+                                         bool allowBorrowed = false) {
     constexpr std::uint64_t MAX_BYTES =
         std::numeric_limits<std::ptrdiff_t>::max() / 8;
     if (type.Kind() == SemanticTypeKind::Structure) {
@@ -111,7 +119,7 @@ std::optional<std::uint64_t> StorageSize(SemanticType type) {
     if (type.Kind() == SemanticTypeKind::Tuple) {
         std::uint64_t size = 0;
         for (const auto& field : type.Elements()) {
-            const auto bytes = StorageSize(field);
+            const auto bytes = StorageSize(field, allowBorrowed);
             // Conservative padding bound for the currently supported field
             // types.
             if (!bytes || *bytes > MAX_BYTES - 16 ||
@@ -158,6 +166,13 @@ std::optional<std::uint64_t> StorageSize(SemanticType type) {
         case SemanticTypeKind::USize:
         case SemanticTypeKind::Pointer:
             return sizeof(void*);
+        case SemanticTypeKind::Slice:
+            return allowBorrowed
+                       ? std::optional<std::uint64_t>(2 * sizeof(void*))
+                       : std::nullopt;
+        case SemanticTypeKind::Reference:
+            return allowBorrowed ? std::optional<std::uint64_t>(sizeof(void*))
+                                 : std::nullopt;
         default:
             return std::nullopt;
     }
@@ -494,12 +509,13 @@ SemanticType SemanticAnalyzer::ResolveTypeSyntax(const core::TypeNode& type) {
                         type.Length());
 }
 
-SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type) {
+SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type,
+                                           bool allowBorrowedTuple) {
     const core::TypeNode* leaf = &type;
     while (leaf->Target() != nullptr) leaf = leaf->Target();
     if (leaf->TypeForm() == core::TypeKind::Tuple)
         for (const auto& element : leaf->Elements())
-            (void)ResolveType(*element);
+            (void)ResolveType(*element, allowBorrowedTuple);
     const SemanticType result = ResolveTypeSyntax(type);
     const SemanticType* layer = &result;
     if (layer->Kind() == SemanticTypeKind::Slice) {
@@ -534,7 +550,7 @@ SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type) {
         layer = layer->Target();
     }
     if (layer->Kind() == SemanticTypeKind::Tuple)
-        ValidateTupleType(*layer, type.Range());
+        ValidateTupleType(*layer, type.Range(), allowBorrowedTuple);
     if (result.Kind() == SemanticTypeKind::Reference &&
         result.Target()->Kind() == SemanticTypeKind::Tuple &&
         result.Target()->OwnsStorage())
@@ -545,13 +561,14 @@ SemanticType SemanticAnalyzer::ResolveType(const core::TypeNode& type) {
 }
 
 void SemanticAnalyzer::ValidateTupleType(SemanticType type,
-                                         source::SourceRange range) {
-    if (!StorageSize(type).has_value())
+                                         source::SourceRange range,
+                                         bool allowBorrowed) {
+    if (!StorageSize(type, allowBorrowed).has_value())
         Report(diagnostics::DiagnosticCode::InvalidTuple, range,
                "tuple has unsupported elements or its storage is too large");
     for (const SemanticType& element : type.Elements()) {
         if (element.Kind() == SemanticTypeKind::Tuple)
-            ValidateTupleType(element, range);
+            ValidateTupleType(element, range, allowBorrowed);
         else if (element.Kind() == SemanticTypeKind::Array)
             ValidateArrayType(element, range);
         else if (!element.IsError() && !element.IsErrorValue() &&
@@ -561,7 +578,8 @@ void SemanticAnalyzer::ValidateTupleType(SemanticType type,
                  element.Kind() != SemanticTypeKind::Bool &&
                  element.Kind() != SemanticTypeKind::Char &&
                  element.Kind() != SemanticTypeKind::Pointer &&
-                 element.Kind() != SemanticTypeKind::String)
+                 element.Kind() != SemanticTypeKind::String &&
+                 !(allowBorrowed && element.IsBorrowed()))
             Report(diagnostics::DiagnosticCode::InvalidTuple, range,
                    "tuple elements must be owned values: scalars, enums, error "
                    "values, raw "
@@ -589,7 +607,8 @@ SemanticType SemanticAnalyzer::AnalyzeTuple(
         elements.push_back(target.IsError() ? actual.WithoutConst() : target);
     }
     SemanticType result(std::move(elements));
-    ValidateTupleType(result, expression.Range());
+    ValidateTupleType(result, expression.Range(),
+                      contextual && HasBorrowedResult(expected));
     return result;
 }
 
@@ -598,6 +617,7 @@ void SemanticAnalyzer::AnalyzeDestructure(
     std::vector<SemanticType> expected;
     std::vector<const Symbol*> targets;
     std::unordered_set<std::string> names;
+    bool introducesBinding = false;
     for (const auto& binding : statement.Bindings()) {
         const Symbol* target = nullptr;
         SemanticType type = SemanticType::Error();
@@ -613,13 +633,19 @@ void SemanticAnalyzer::AnalyzeDestructure(
                        binding->Range(),
                        "typed destructuring bindings require '=' rather than "
                        "':='");
-        } else if (!statement.IsInferred() && binding->Name() != "_") {
-            target = _currentScope->Lookup(binding->Name());
-            if (target == nullptr)
-                Report(diagnostics::DiagnosticCode::UnknownName,
-                       binding->Range(),
-                       "unknown name '" + binding->Name() + "'");
-            else {
+        } else if (binding->Name() != "_") {
+            target = statement.IsInferred()
+                         ? _currentScope->LookupLocal(binding->Name())
+                         : _currentScope->Lookup(binding->Name());
+            if (statement.IsInferred() && target == nullptr)
+                introducesBinding = true;
+            if (target == nullptr) {
+                if (!statement.IsInferred()) {
+                    Report(diagnostics::DiagnosticCode::UnknownName,
+                           binding->Range(),
+                           "unknown name '" + binding->Name() + "'");
+                }
+            } else {
                 type = target->Type();
                 if (target->Kind() == SymbolKind::Function ||
                     !target->Writable())
@@ -631,6 +657,11 @@ void SemanticAnalyzer::AnalyzeDestructure(
         expected.push_back(type);
         targets.push_back(target);
     }
+    if (statement.IsInferred() && !introducesBinding)
+        Report(diagnostics::DiagnosticCode::InvalidDestructure,
+               statement.Range(),
+               "short destructuring declaration requires at least one new "
+               "variable");
     const SemanticType value =
         AnalyzeExpression(statement.Value(), SemanticType(expected));
     if (value.Kind() != SemanticTypeKind::Tuple) {
@@ -659,7 +690,8 @@ void SemanticAnalyzer::AnalyzeDestructure(
                    binding.Range(), TypeMismatch(type, actual));
         if (binding.Name() == "_") continue;
         const Symbol* target = targets[i];
-        if (statement.IsInferred() || binding.ExplicitType() != nullptr)
+        if ((statement.IsInferred() && target == nullptr) ||
+            binding.ExplicitType() != nullptr)
             target = AddSymbol(std::make_unique<VariableSymbol>(
                                    SymbolKind::LocalVariable, binding.Name(),
                                    type, binding.Range(), !type.IsConst()),
@@ -947,12 +979,49 @@ void SemanticAnalyzer::RegisterFunction(
         }
         parameterTypes.push_back(type);
     }
-    const SemanticType returnType = ResolveType(function.ReturnType());
-    if (returnType.IsBorrowed())
-        Report(diagnostics::DiagnosticCode::ReferenceEscape,
+    const SemanticType returnType = ResolveType(function.ReturnType(), true);
+    const bool hasBorrowedResult = HasBorrowedResult(returnType);
+    std::optional<std::size_t> borrowSourceIndex;
+    if (returnType.Kind() == SemanticTypeKind::Tuple &&
+        std::any_of(returnType.Elements().begin(), returnType.Elements().end(),
+                    [](SemanticType element) {
+                        return element.Kind() == SemanticTypeKind::Tuple &&
+                               HasBorrowedResult(element);
+                    }))
+        Report(diagnostics::DiagnosticCode::InvalidBorrowContract,
                function.ReturnType().Range(),
-               "reference and slice returns require a lifetime contract and "
-               "are not yet supported");
+               "borrowed multi-results must use a flat tuple");
+    if (hasBorrowedResult && !function.HasBorrowSource()) {
+        Report(diagnostics::DiagnosticCode::InvalidBorrowContract,
+               function.ReturnType().Range(),
+               "reference and slice results require a '<- parameter>' "
+               "borrow contract");
+    } else if (!hasBorrowedResult && function.HasBorrowSource()) {
+        Report(diagnostics::DiagnosticCode::InvalidBorrowContract,
+               function.BorrowSourceRange(),
+               "a borrow contract requires a reference or slice result");
+    } else if (function.HasBorrowSource()) {
+        for (std::size_t index = 0; index < function.Parameters().size();
+             ++index) {
+            if (function.Parameters()[index]->Name() ==
+                function.BorrowSource()) {
+                borrowSourceIndex = index;
+                break;
+            }
+        }
+        if (!borrowSourceIndex.has_value()) {
+            Report(diagnostics::DiagnosticCode::InvalidBorrowContract,
+                   function.BorrowSourceRange(),
+                   "borrow source '" + function.BorrowSource() +
+                       "' is not a parameter");
+        } else if (!parameterTypes[*borrowSourceIndex].IsBorrowed()) {
+            Report(diagnostics::DiagnosticCode::InvalidBorrowContract,
+                   function.BorrowSourceRange(),
+                   "borrow source '" + function.BorrowSource() +
+                       "' must be a checked reference or slice parameter");
+            borrowSourceIndex.reset();
+        }
+    }
     if (function.IsExtern()) {
         if (!function.Owner().empty() ||
             function.HasModifier(core::FunctionModifier::Private) ||
@@ -1071,7 +1140,7 @@ void SemanticAnalyzer::RegisterFunction(
             BuiltInFunction::None, function.IsUnsafe(), owner,
             function.HasModifier(core::FunctionModifier::Private), receiver,
             function.IsExtern(), function.IsExtern() ? function.Name() : "",
-            enumOwner),
+            enumOwner, borrowSourceIndex),
         function));
     if (symbol && function.HasModifier(core::FunctionModifier::Extern))
         _forbiddenZeroEffects.insert(symbol);
@@ -1471,6 +1540,12 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             }
             if (variable.Initializer())
                 CheckCopy(*variable.Initializer(), variableType);
+            if (variableType.Kind() == SemanticTypeKind::Tuple &&
+                HasBorrowedResult(variableType))
+                Report(diagnostics::DiagnosticCode::InvalidBorrowContract,
+                       variable.NameRange(),
+                       "a tuple containing references or slices must be "
+                       "immediately destructured");
             if (_currentFunction && variable.Initializer() &&
                 variableType.Kind() == SemanticTypeKind::String &&
                 initializerType.Kind() != SemanticTypeKind::String &&
@@ -1573,11 +1648,19 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
             }
             break;
         }
-        case core::AstNodeKind::ExpressionStatement:
-            AnalyzeExpression(
+        case core::AstNodeKind::ExpressionStatement: {
+            const auto& value =
                 static_cast<const core::ExpressionStatement&>(statement)
-                    .Value());
+                    .Value();
+            const SemanticType type = AnalyzeExpression(value);
+            if (type.Kind() == SemanticTypeKind::Tuple &&
+                HasBorrowedResult(type))
+                Report(diagnostics::DiagnosticCode::InvalidBorrowContract,
+                       value.Range(),
+                       "a borrowed tuple result must be immediately "
+                       "destructured");
             break;
+        }
         case core::AstNodeKind::ReturnStatement: {
             const core::ReturnStatement& returnStatement =
                 static_cast<const core::ReturnStatement&>(statement);
@@ -1604,7 +1687,8 @@ void SemanticAnalyzer::AnalyzeStatement(const core::Statement& statement) {
                        returnStatement.Range(),
                        "return cannot leave a build block; validate before "
                        "constructing");
-            if (!IsAssignable(expected, actual)) {
+            if (!IsAssignable(expected, actual) &&
+                !CanReborrow(expected, actual)) {
                 const source::SourceRange range =
                     returnStatement.Value() == nullptr
                         ? returnStatement.Range()

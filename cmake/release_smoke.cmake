@@ -8,6 +8,15 @@ if(NOT DEFINED EXECUTABLE_SUFFIX)
     set(EXECUTABLE_SUFFIX "")
 endif()
 
+if(DEFINED STANDARD_LIBRARY)
+    get_filename_component(STANDARD_LIBRARY "${STANDARD_LIBRARY}" ABSOLUTE)
+    if(NOT IS_DIRECTORY "${STANDARD_LIBRARY}")
+        message(FATAL_ERROR
+            "STANDARD_LIBRARY is not a directory: ${STANDARD_LIBRARY}")
+    endif()
+    set(ENV{FLECHA_STANDARD_LIBRARY} "${STANDARD_LIBRARY}")
+endif()
+
 execute_process(
     COMMAND "${FLECHA_COMPILER}" --version
     RESULT_VARIABLE versionResult
@@ -89,6 +98,10 @@ if(NOT createResult EQUAL 0)
     message(FATAL_ERROR
         "Longbow project creation failed: ${createOutput}${createError}")
 endif()
+file(WRITE "${OUTPUT_ROOT}/hello/src/main.fl"
+    "module main;\n"
+    "@imports :: lib::std::containers::array;\n"
+    "void main() { stdoutln(\"Hello from Flecha!\"); }\n")
 execute_process(
     COMMAND "${LONGBOW}" check
     WORKING_DIRECTORY "${OUTPUT_ROOT}/hello"

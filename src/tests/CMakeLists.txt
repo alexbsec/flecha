@@ -296,6 +296,7 @@ add_test(NAME NativeSemanticTests.Modules
 add_test(NAME LongbowTests.Projects
     COMMAND ${CMAKE_COMMAND}
         -DLONGBOW=$<TARGET_FILE:longbow>
+        -DFLECHA_STD=${PROJECT_SOURCE_DIR}/std/src
         -DTEST_ROOT=${CMAKE_CURRENT_BINARY_DIR}/longbow_projects
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_longbow.cmake)
 

@@ -106,8 +106,7 @@ std::unique_ptr<BoundStatement> Lowerer::LowerStatement(
                 bindings.push_back(
                     {static_cast<const semantic::VariableSymbol*>(
                          _semanticModel->DestructureTarget(*binding)),
-                     destructure.IsInferred() ||
-                         binding->ExplicitType() != nullptr});
+                     _semanticModel->DeclaredSymbol(*binding) != nullptr});
             return std::make_unique<BoundDestructureStatement>(
                 statement.Range(), std::move(bindings),
                 LowerExpression(destructure.Value()));

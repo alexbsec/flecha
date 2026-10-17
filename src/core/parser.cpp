@@ -531,6 +531,16 @@ std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
         return nullptr;
     }
 
+    std::string borrowSource;
+    source::SourceRange borrowSourceRange;
+    if (Match(TokenType::LeftArrow)) {
+        const Token* source =
+            Consume(TokenType::Identifier, "borrow source after '<-'");
+        if (source == nullptr) return nullptr;
+        borrowSource = source->value;
+        borrowSourceRange = source->range;
+    }
+
     if (Match(TokenType::Override))
         modifiers.push_back(FunctionModifier::Override);
     std::unique_ptr<BlockStatement> body;
@@ -552,7 +562,8 @@ std::unique_ptr<FunctionDeclaration> Parser::ParseFunctionDeclaration() {
     auto declaration = std::make_unique<FunctionDeclaration>(
         source::SourceRange{start, end}, std::move(modifiers),
         std::move(returnType), name->value, std::move(parameters),
-        std::move(body), name->range, std::move(owner));
+        std::move(body), name->range, std::move(owner), std::move(borrowSource),
+        borrowSourceRange);
     declaration->genericParameters = std::move(genericParameters);
     declaration->ownerParameters = std::move(ownerParameters);
     declaration->parameterTokenRanges = std::move(erased);

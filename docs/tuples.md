@@ -39,7 +39,8 @@ typed incompatible integers still need explicit casts.
 ## Destructuring
 
 ```flecha
-a, b := divide(17, 5);             // Declare both names with inferred types.
+a, err := divide(17, 5);           // Declare both names with inferred types.
+next, err := divide(20, 3);        // Declare next and assign the existing err.
 i32 q, i32 r = divide(17, 5);      // Declare both names explicitly.
 i32 quotient, remainder = divide(17, 5); // Shared i32 type.
 a, b = (b, a);                    // Assign existing names; swap their values.
@@ -47,8 +48,10 @@ a, i32 next = divide(20, 3);       // Assign a; declare next.
 _, b = divide(19, 5);             // Discard an element.
 ```
 
-- `:=` declares every non-blank binding and cannot contain explicit types.
-  It does not reuse existing bindings in the same scope.
+- `:=` declares each new non-blank binding and assigns names already declared
+  in the same lexical scope. At least one non-blank binding must be new. Names
+  from an outer scope are shadowed rather than assigned. Explicit types are not
+  allowed in a `:=` binding list.
 - Without parentheses, an explicit type applies to the following names until
   another type is written. `bool ok, changed, i32 code = ...;` declares two
   booleans and an integer. Qualifiers and compound types carry forward too.
@@ -92,10 +95,13 @@ An expected `string` element accepts a string literal or view by copying it:
 owned := ("hello".string(), 42);
 ```
 
-Inferred `("hello", 42)` would contain `stringv`, so it is rejected. References,
-slices, and string views cannot be tuple elements yet: stored borrowed values
-need lifetime contracts. Arrays/slices of tuples are also deferred. Raw pointers
-retain their unsafe lifetime contract.
+Inferred `("hello", 42)` would contain `stringv`, so it is rejected. References
+and slices may appear in a flat function-result tuple covered by an explicit
+`<- parameter>` contract, but that result must be immediately destructured;
+see [reference and slice returns](ref_and_slice_returns.md). Stored borrowed
+tuples, nested borrowed tuples, and string-view tuple elements remain rejected.
+Arrays/slices of tuples are also deferred. Raw pointers retain their unsafe
+lifetime contract.
 
 `const (i32, bool)` fixes the tuple binding. Reading or destructuring a const
 tuple copies its values into independently writable inferred bindings; explicit

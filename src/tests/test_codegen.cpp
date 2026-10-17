@@ -508,6 +508,78 @@ TEST(NativeCompilerTests, RunsForwardAndRecursiveCalls) {
     std::filesystem::remove(objectPath);
 }
 
+TEST(NativeCompilerTests, RunsBorrowedReferenceAndSliceResults) {
+    GeneratedSource result = Generate(R"(
+        structure Pair { i32 left; i32 right; };
+        (&i32, &i32) fields(&Pair pair) <- pair {
+            return (&pair->left, &pair->right);
+        }
+        []const i32 view([]const i32 values) <- values { return values; }
+        i32 main() {
+            Pair pair = none;
+            left, right := fields(&pair);
+            *left = 20;
+            *right = 22;
+            values := [20, 22];
+            readonly := view(values[:]);
+            return pair.left + pair.right + readonly[0] - 20;
+        }
+    )");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.boundProgram, nullptr);
+
+    const std::filesystem::path executablePath =
+        std::filesystem::temp_directory_path() /
+        "flecha_native_borrowed_results_test";
+    std::filesystem::remove(executablePath);
+
+    NativeCompiler compiler;
+    ASSERT_TRUE(compiler.Ready()) << compiler.Error();
+    ASSERT_TRUE(compiler.BuildExecutable(*result.boundProgram,
+                                         "native_borrowed_results_test",
+                                         executablePath.string()))
+        << compiler.Error();
+
+    const std::string executablePathText = executablePath.string();
+    const llvm::StringRef arguments[] = {executablePathText};
+    EXPECT_EQ(llvm::sys::ExecuteAndWait(executablePathText, arguments), 42);
+
+    std::filesystem::remove(executablePath);
+}
+
+TEST(NativeCompilerTests, RunsMixedShortDestructuringDeclarations) {
+    GeneratedSource result = Generate(R"(
+        (i32, i32) pair(i32 value, i32 status) {
+            return (value, status);
+        }
+        i32 main() {
+            first, err := pair(20, 1);
+            second, err := pair(22, 0);
+            return first + second + err;
+        }
+    )");
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.boundProgram, nullptr);
+
+    const std::filesystem::path executablePath =
+        std::filesystem::temp_directory_path() /
+        "flecha_native_short_destructure_test";
+    std::filesystem::remove(executablePath);
+
+    NativeCompiler compiler;
+    ASSERT_TRUE(compiler.Ready()) << compiler.Error();
+    ASSERT_TRUE(compiler.BuildExecutable(*result.boundProgram,
+                                         "native_short_destructure_test",
+                                         executablePath.string()))
+        << compiler.Error();
+
+    const std::string executablePathText = executablePath.string();
+    const llvm::StringRef arguments[] = {executablePathText};
+    EXPECT_EQ(llvm::sys::ExecuteAndWait(executablePathText, arguments), 42);
+
+    std::filesystem::remove(executablePath);
+}
+
 TEST(NativeCompilerTests, RunsEnumMatchesInMemberFunctions) {
     GeneratedSource result = Generate(R"(
         enum TokenKind: u8 { Identifier = 2, Number = 7, End = 9, }
@@ -849,6 +921,32 @@ TEST(CodeGeneratorTests, VerifiesNestedTupleReturnsArgumentsAndDestructuring) {
     EXPECT_NE(
         ModuleText(*result.module).find("define { i32, { i1, i8 } } @pair"),
         std::string::npos);
+}
+
+TEST(CodeGeneratorTests, VerifiesReferenceAndSliceResultContracts) {
+    auto result = Generate(R"(
+        &i32 identity(&i32 value) <- value { return value; }
+        structure Pair { i32 left; i32 right; };
+        (&i32, &i32) fields(&Pair pair) <- pair {
+            return (&pair->left, &pair->right);
+        }
+        []const i32 view([]const i32 values) <- values { return values; }
+        i32 main() {
+            Pair pair = none;
+            left, right := fields(&pair);
+            *left = 21;
+            *right = 21;
+            values := [20, 22];
+            slice := values[:];
+            readonly := view(slice);
+            return pair.left + pair.right + readonly[0] + readonly[1];
+        }
+    )");
+    for (const auto& diagnostic : result.diagnostics.Diagnostics())
+        ADD_FAILURE() << diagnostic.message;
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.module, nullptr) << result.generator->Error();
+    EXPECT_TRUE(VerifyModule(*result.module).empty());
 }
 
 TEST(CodeGeneratorTests, VerifiesOwnedTupleCleanupAndDeferredCaptures) {

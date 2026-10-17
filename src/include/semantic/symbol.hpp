@@ -71,7 +71,8 @@ class FunctionSymbol final : public Symbol {
                    bool isUnsafe = false, const StructureType* owner = nullptr,
                    bool isPrivate = false, bool hasReceiver = false,
                    bool isExtern = false, std::string linkName = {},
-                   const EnumType* enumOwner = nullptr)
+                   const EnumType* enumOwner = nullptr,
+                   std::optional<std::size_t> borrowSourceIndex = std::nullopt)
         : Symbol(SymbolKind::Function, std::move(name),
                  SemanticType(SemanticTypeKind::Function), declarationRange,
                  false),
@@ -84,7 +85,8 @@ class FunctionSymbol final : public Symbol {
           _isPrivate(isPrivate),
           _hasReceiver(hasReceiver),
           _isExtern(isExtern),
-          _linkName(linkName.empty() ? Name() : std::move(linkName)) {}
+          _linkName(linkName.empty() ? Name() : std::move(linkName)),
+          _borrowSourceIndex(borrowSourceIndex) {}
 
     [[nodiscard]] SemanticType ReturnType() const { return _returnType; }
     [[nodiscard]] const std::vector<SemanticType>& ParameterTypes() const {
@@ -98,6 +100,9 @@ class FunctionSymbol final : public Symbol {
     bool HasReceiver() const { return _hasReceiver; }
     bool IsExtern() const { return _isExtern; }
     const std::string& LinkName() const { return _linkName; }
+    [[nodiscard]] std::optional<std::size_t> BorrowSourceIndex() const {
+        return _borrowSourceIndex;
+    }
     [[nodiscard]] BuiltInFunction BuiltIn() const { return _builtIn; }
 
    private:
@@ -111,6 +116,7 @@ class FunctionSymbol final : public Symbol {
     bool _hasReceiver;
     bool _isExtern;
     std::string _linkName;
+    std::optional<std::size_t> _borrowSourceIndex;
 };
 
 struct EnumVariant final {
