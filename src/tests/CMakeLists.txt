@@ -42,6 +42,7 @@ add_test(NAME EditorTests.VSCodeManifest
     COMMAND ${CMAKE_COMMAND}
         -DEDITOR_ROOT=${PROJECT_SOURCE_DIR}/editors/vscode
         -DPROJECT_VERSION=${PROJECT_VERSION}
+        -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_vscode.cmake
 )
 
@@ -63,6 +64,13 @@ add_test(NAME BuildDiagnostics.ToolchainConsistency
     COMMAND ${CMAKE_COMMAND}
         -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_toolchain_consistency.cmake
+)
+
+add_test(NAME BuildDiagnostics.WindowsToolchain
+    COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
+        -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/windows-toolchain
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_windows_toolchain.cmake
 )
 
 add_test(

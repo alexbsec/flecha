@@ -16,6 +16,26 @@ foreach(executable IN ITEMS "${compiler}" "${longbow}")
     endif()
 endforeach()
 
+foreach(editorFile IN ITEMS
+        share/flecha/editors/neovim/ftdetect/flecha.vim
+        share/flecha/editors/neovim/indent/flecha.vim
+        share/flecha/editors/neovim/syntax/flecha.vim
+        share/flecha/editors/vscode/language-configuration.json
+        share/flecha/editors/vscode/package.json
+        share/flecha/editors/vscode/syntaxes/flecha.tmLanguage.json)
+    if(NOT EXISTS "${INSTALL_ROOT}/${editorFile}")
+        message(FATAL_ERROR
+            "Installed editor support is missing ${editorFile}"
+        )
+    endif()
+endforeach()
+
+if(EXISTS "${INSTALL_ROOT}/share/flecha/editors/vscode/node_modules")
+    message(FATAL_ERROR
+        "Installed VS Code support contains development dependencies"
+    )
+endif()
+
 set(runtimeDependencyFilters)
 if(WIN32)
     # Windows system DLLs can have optional or edition-specific dependencies

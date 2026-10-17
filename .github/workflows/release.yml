@@ -30,6 +30,57 @@ jobs:
             exit 1
           fi
 
+  build-vscode-extension:
+    name: Build VS Code extension
+    needs: validate-release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install locked extension dependencies
+        run: npm ci --prefix editors/vscode --ignore-scripts
+
+      - name: Build VSIX
+        run: npm run --prefix editors/vscode package
+
+      - name: Verify release VSIX
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          version="${GITHUB_REF_NAME#v}"
+          packages=(editors/vscode/flecha-language-*.vsix)
+          if [[ ${#packages[@]} -ne 1 ]]; then
+            echo "Expected one VSIX, found ${#packages[@]}" >&2
+            exit 1
+          fi
+          cmake \
+            "-DVSIX=$PWD/${packages[0]}" \
+            "-DEDITOR_ROOT=$PWD/editors/vscode" \
+            "-DOUTPUT_ROOT=$PWD/build-vsix-contents" \
+            "-DEXPECTED_VERSION=$version" \
+            -P cmake/verify_vsix.cmake
+
+      - name: Create VSIX checksum
+        working-directory: editors/vscode
+        run: >-
+          cmake -E sha256sum flecha-language-*.vsix
+          > flecha-language.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-vscode-extension
+          path: |
+            editors/vscode/flecha-language-*.vsix
+            editors/vscode/flecha-language.sha256
+          if-no-files-found: error
+
   build-release:
     name: Build release (${{ matrix.name }})
     needs: validate-release
@@ -369,7 +420,9 @@ jobs:
 
   publish-assets:
     name: Attach bundles to GitHub Release
-    needs: clean-install
+    needs:
+      - clean-install
+      - build-vscode-extension
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
@@ -387,6 +440,7 @@ jobs:
             "${{ github.event.release.tag_name }}" \
             release-assets/*.tar.gz \
             release-assets/*.zip \
+            release-assets/*.vsix \
             release-assets/SHA256SUMS \
             --repo "$GITHUB_REPOSITORY" \
             --clobber

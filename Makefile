@@ -4,6 +4,9 @@ BUILD_DIR ?= build
 TEST_BUILD_DIR ?= build-tests
 SANITIZER_BUILD_DIR ?= build-sanitizers
 GTEST_SOURCE_DIR ?=
+NPM ?= npm
+VSCODE_DIR ?= editors/vscode
+VSCODE_VERIFY_DIR ?= .cache/vsix-contents
 
 .DEFAULT_GOAL := build
 
@@ -11,7 +14,7 @@ GTEST_SOURCE_DIR ?=
 	test-semantic llvm-poc native-poc native-if-also native-functions \
 	native-while native-loop-control native-casts native-string-view \
 	native-string-view-operations native-owning-string native-stdout \
-	native-definite-assignment test-neovim test-sanitizers clean
+	native-definite-assignment package-vscode test-neovim test-sanitizers clean
 
 help:
 	@echo "Flecha build targets:"
@@ -19,6 +22,7 @@ help:
 	@echo "  make test           Configure, build, and run all tests"
 	@echo "  make test-semantic  Run only semantic and scope tests"
 	@echo "  make test-neovim    Test Neovim filetype and syntax support"
+	@echo "  make package-vscode Build and verify the installable VSIX"
 	@echo "  make test-sanitizers Run unit tests with ASan and UBSan"
 	@echo "  make llvm-poc       Emit and execute the LLVM proof of concept"
 	@echo "  make native-poc     Build and execute a native Flecha program"
@@ -34,7 +38,7 @@ help:
 	@echo "  make native-definite-assignment Build and test delayed initialization"
 	@echo "  make clean          Clean generated build artifacts"
 	@echo ""
-	@echo "Overrides: CMAKE, CMAKE_GENERATOR, BUILD_DIR, TEST_BUILD_DIR"
+	@echo "Overrides: CMAKE, CMAKE_GENERATOR, BUILD_DIR, TEST_BUILD_DIR, NPM, VSCODE_DIR"
 
 configure:
 	$(CMAKE) -S . -B $(BUILD_DIR) -G "$(CMAKE_GENERATOR)" \
@@ -63,6 +67,18 @@ test-neovim:
 	NVIM_LOG_FILE=/dev/null nvim --headless -u NONE -i NONE -n \
 		--cmd 'set runtimepath^=$(CURDIR)/editors/neovim' \
 		-S editors/neovim/tests/syntax_test.vim
+
+package-vscode:
+	$(CMAKE) -E rm -f $(VSCODE_DIR)/flecha-language-*.vsix
+	$(NPM) ci --prefix $(VSCODE_DIR) --ignore-scripts
+	$(NPM) run --prefix $(VSCODE_DIR) package
+	@set -- $(VSCODE_DIR)/flecha-language-*.vsix; \
+		test "$$#" -eq 1; \
+		$(CMAKE) \
+			"-DVSIX=$(CURDIR)/$$1" \
+			"-DEDITOR_ROOT=$(CURDIR)/$(VSCODE_DIR)" \
+			"-DOUTPUT_ROOT=$(CURDIR)/$(VSCODE_VERIFY_DIR)" \
+			-P cmake/verify_vsix.cmake
 
 test-sanitizers:
 	$(CMAKE) -S . -B $(SANITIZER_BUILD_DIR) -G "$(CMAKE_GENERATOR)" \

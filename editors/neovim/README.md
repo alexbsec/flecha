@@ -5,8 +5,16 @@ brace-aware indentation, and basic buffer settings for the currently implemented
 
 ## Install
 
-For a development checkout, link this directory into Neovim's native package
-path:
+From an extracted Flecha release archive on Linux or macOS, copy the bundled
+runtime plugin into Neovim's native package path:
+
+```sh
+destination="${XDG_DATA_HOME:-$HOME/.local/share}/nvim/site/pack/flecha/start/flecha.nvim"
+mkdir -p "$(dirname "$destination")"
+cp -R /path/to/flecha/share/flecha/editors/neovim "$destination"
+```
+
+For a development checkout, link this directory instead:
 
 ```sh
 mkdir -p ~/.local/share/nvim/site/pack/flecha/start
@@ -21,6 +29,9 @@ opening block; indentation width follows your `shiftwidth` setting.
 
 Plugin managers that support local directories can use `editors/neovim` as a
 local plugin source instead.
+
+Windows PowerShell installation and upgrade instructions are available in
+[`docs/editors.md`](../../docs/editors.md).
 
 ## Test
 

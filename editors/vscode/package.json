@@ -5,8 +5,17 @@
   "version": "0.1.0",
   "publisher": "flecha",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/alexbsec/flecha.git"
+  },
+  "homepage": "https://github.com/alexbsec/flecha",
+  "bugs": "https://github.com/alexbsec/flecha/issues",
   "engines": {
     "vscode": "^1.85.0"
+  },
+  "scripts": {
+    "package": "vsce package --no-dependencies"
   },
   "categories": [
     "Programming Languages"
@@ -32,5 +41,8 @@
         "path": "./syntaxes/flecha.tmLanguage.json"
       }
     ]
+  },
+  "devDependencies": {
+    "@vscode/vsce": "4.0.0"
   }
 }

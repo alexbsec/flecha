@@ -5,6 +5,8 @@ build/
 build-tests/
 build-sanitizers/
 build-release/
+editors/vscode/node_modules/
+editors/vscode/*.vsix
 
 .agents/
 .codex/
