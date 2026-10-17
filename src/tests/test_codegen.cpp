@@ -3,8 +3,10 @@
 #include <llvm/Support/Program.h>
 #include <llvm/Support/raw_ostream.h>
 
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -22,6 +24,37 @@ using namespace flecha::lowering;
 using namespace flecha::semantic;
 
 namespace {
+
+void SetEnvironment(const std::string& name,
+                    const std::optional<std::string>& value) {
+#ifdef _WIN32
+    _putenv_s(name.c_str(), value.value_or("").c_str());
+#else
+    if (value.has_value())
+        setenv(name.c_str(), value->c_str(), 1);
+    else
+        unsetenv(name.c_str());
+#endif
+}
+
+class ScopedEnvironment final {
+   public:
+    ScopedEnvironment(std::string name, std::optional<std::string> value)
+        : _name(std::move(name)) {
+        if (const char* previous = std::getenv(_name.c_str()))
+            _previous = previous;
+        SetEnvironment(_name, value);
+    }
+
+    ~ScopedEnvironment() { SetEnvironment(_name, _previous); }
+
+    ScopedEnvironment(const ScopedEnvironment&) = delete;
+    ScopedEnvironment& operator=(const ScopedEnvironment&) = delete;
+
+   private:
+    std::string _name;
+    std::optional<std::string> _previous;
+};
 
 struct GeneratedSource final {
     DiagnosticBag diagnostics;
@@ -550,7 +583,51 @@ TEST(NativeCompilerTests, ReportsLinkerFailuresAsStructuredDiagnostics) {
                                          executablePath.string()));
     ASSERT_TRUE(compiler.LastDiagnostic().has_value());
     EXPECT_EQ(compiler.LastDiagnostic()->code, DiagnosticCode::LinkerFailed);
+    EXPECT_NE(compiler.Error().find("system linker '"), std::string::npos);
+    EXPECT_NE(compiler.Error().find("failed for target '"), std::string::npos);
+    EXPECT_NE(compiler.Error().find("linker output:"), std::string::npos);
+    EXPECT_NE(compiler.Error().find(missingObject.filename().string()),
+              std::string::npos);
+    EXPECT_NE(compiler.Error().find("FLECHA_LINKER"), std::string::npos);
     EXPECT_FALSE(std::filesystem::exists(executablePath));
+}
+
+TEST(NativeCompilerTests, ReportsAttemptedDriversWhenNoLinkerIsOnPath) {
+    const std::filesystem::path emptyPath =
+        std::filesystem::temp_directory_path() /
+        "flecha_linker_search_path_that_does_not_exist";
+    ScopedEnvironment linkerOverride("FLECHA_LINKER", std::nullopt);
+    ScopedEnvironment path("PATH", emptyPath.string());
+
+    const std::filesystem::path output =
+        std::filesystem::temp_directory_path() / "flecha_missing_linker_test";
+    NativeCompiler compiler;
+    EXPECT_FALSE(compiler.LinkExecutable("missing-object.o", output.string()));
+    ASSERT_TRUE(compiler.LastDiagnostic().has_value());
+    EXPECT_EQ(compiler.LastDiagnostic()->code, DiagnosticCode::LinkerFailed);
+    EXPECT_NE(compiler.Error().find("unable to find a supported system C++ "
+                                    "linker driver for target '"),
+              std::string::npos);
+    EXPECT_NE(compiler.Error().find("tried:"), std::string::npos);
+    EXPECT_NE(compiler.Error().find("FLECHA_LINKER"), std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(output));
+}
+
+TEST(NativeCompilerTests, HonorsConfiguredLinkerWithoutFallback) {
+    constexpr const char* CONFIGURED_LINKER =
+        "flecha-linker-that-does-not-exist";
+    ScopedEnvironment linkerOverride("FLECHA_LINKER", CONFIGURED_LINKER);
+
+    const std::filesystem::path output =
+        std::filesystem::temp_directory_path() / "flecha_linker_override_test";
+    NativeCompiler compiler;
+    EXPECT_FALSE(compiler.LinkExecutable("missing-object.o", output.string()));
+    ASSERT_TRUE(compiler.LastDiagnostic().has_value());
+    EXPECT_EQ(compiler.LastDiagnostic()->code, DiagnosticCode::LinkerFailed);
+    EXPECT_NE(compiler.Error().find(std::string("tried: ") + CONFIGURED_LINKER +
+                                    ". "),
+              std::string::npos);
+    EXPECT_FALSE(std::filesystem::exists(output));
 }
 
 TEST(LlvmCodeGeneratorTests,

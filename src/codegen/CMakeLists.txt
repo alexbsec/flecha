@@ -1,4 +1,14 @@
-find_package(LLVM REQUIRED CONFIG)
+find_package(LLVM CONFIG QUIET)
+if(NOT LLVM_FOUND)
+    message(FATAL_ERROR
+        "LLVM development package was not found. Flecha requires LLVM 17 "
+        "through 23. Install the LLVM development files and configure with "
+        "-DLLVM_DIR=/path/to/lib/cmake/llvm (use 'llvm-config --cmakedir' "
+        "to locate it)."
+    )
+endif()
+include(${PROJECT_SOURCE_DIR}/cmake/check_llvm_version.cmake)
+message(STATUS "Using LLVM ${LLVM_PACKAGE_VERSION} from ${LLVM_DIR}")
 
 # The top-level install rules use these directories to make release archives
 # independent of the LLVM installation present on the build runner.

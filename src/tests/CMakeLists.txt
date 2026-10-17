@@ -45,6 +45,14 @@ add_test(NAME EditorTests.VSCodeManifest
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_vscode.cmake
 )
 
+add_test(NAME BuildDiagnostics.LLVM
+    COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
+        -DOUTPUT_ROOT=${CMAKE_CURRENT_BINARY_DIR}/missing-llvm-config
+        "-DGENERATOR=${CMAKE_GENERATOR}"
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_llvm_diagnostics.cmake
+)
+
 add_test(
     NAME NativeRuntimeTests.PrintsEveryPrintableType
     COMMAND ${CMAKE_COMMAND}

@@ -15,8 +15,11 @@
 #include <llvm/TargetParser/Host.h>
 #include <llvm/TargetParser/Triple.h>
 
+#include <cctype>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -68,7 +71,23 @@ std::string DefaultRuntimeLibraryPath() {
     return buildPath.string();
 }
 
-std::optional<std::string> FindLinkerDriver() {
+struct LinkerSearchResult final {
+    std::optional<std::string> path;
+    std::vector<std::string> attempted;
+};
+
+LinkerSearchResult FindLinkerDriver() {
+    LinkerSearchResult result;
+    if (const char* configured = std::getenv("FLECHA_LINKER")) {
+        if (*configured != '\0') {
+            result.attempted.emplace_back(configured);
+            const llvm::ErrorOr<std::string> path =
+                llvm::sys::findProgramByName(configured);
+            if (path) result.path = *path;
+            return result;
+        }
+    }
+
 #ifdef _WIN32
     constexpr const char* CANDIDATES[] = {"clang++.exe", "clang++", "c++.exe",
                                           "c++"};
@@ -76,11 +95,56 @@ std::optional<std::string> FindLinkerDriver() {
     constexpr const char* CANDIDATES[] = {"c++", "clang++", "g++"};
 #endif
     for (const char* candidate : CANDIDATES) {
+        result.attempted.emplace_back(candidate);
         const llvm::ErrorOr<std::string> path =
             llvm::sys::findProgramByName(candidate);
-        if (path) return *path;
+        if (path) {
+            result.path = *path;
+            return result;
+        }
     }
-    return std::nullopt;
+    return result;
+}
+
+std::string AttemptedLinkers(const std::vector<std::string>& attempted) {
+    std::string text;
+    for (const auto& candidate : attempted) {
+        if (!text.empty()) text += ", ";
+        text += candidate;
+    }
+    return text;
+}
+
+std::string PlatformToolchainHint() {
+#ifdef _WIN32
+    return "Install the MSYS2 UCRT64 clang toolchain and add its bin directory "
+           "to PATH, or set FLECHA_LINKER to the full clang++.exe path. Verify "
+           "that the UCRT SDK and startup libraries are installed.";
+#elif defined(__APPLE__)
+    return "Install the Xcode command-line tools with 'xcode-select "
+           "--install', "
+           "verify that 'xcrun --show-sdk-path' succeeds, or set FLECHA_LINKER "
+           "to the full clang++ path.";
+#else
+    return "Install a C++ toolchain and the system development/startup files, "
+           "or set FLECHA_LINKER to the full clang++ or g++ path.";
+#endif
+}
+
+std::string ReadLinkerOutput(const llvm::SmallString<256>& path) {
+    if (path.empty()) return {};
+    std::ifstream stream(path.str().str(), std::ios::binary);
+    std::string output{std::istreambuf_iterator<char>(stream),
+                       std::istreambuf_iterator<char>()};
+    constexpr std::size_t MAX_OUTPUT = 8192;
+    if (output.size() > MAX_OUTPUT) {
+        output.resize(MAX_OUTPUT);
+        output += "\n[linker output truncated]";
+    }
+    while (!output.empty() &&
+           std::isspace(static_cast<unsigned char>(output.back())))
+        output.pop_back();
+    return output;
 }
 
 }  // namespace
@@ -198,13 +262,17 @@ bool NativeCompiler::LinkExecutable(
                     "Flecha runtime library was not found at '" +
                         _runtimeLibraryPath + "'");
     }
-    const std::optional<std::string> linker = FindLinkerDriver();
-    if (!linker.has_value()) {
+    const LinkerSearchResult linker = FindLinkerDriver();
+    if (!linker.path.has_value()) {
         return Fail(diagnostics::DiagnosticCode::LinkerFailed,
-                    "unable to find a supported system C++ linker driver");
+                    "unable to find a supported system C++ linker driver for "
+                    "target '" +
+                        _targetTriple +
+                        "'; tried: " + AttemptedLinkers(linker.attempted) +
+                        ". " + PlatformToolchainHint());
     }
 
-    std::vector<std::string> ownedArguments{linker.value(), objectPath};
+    std::vector<std::string> ownedArguments{linker.path.value(), objectPath};
     ownedArguments.insert(ownedArguments.end(), linkInputs.begin(),
                           linkInputs.end());
     ownedArguments.push_back(_runtimeLibraryPath);
@@ -217,15 +285,32 @@ bool NativeCompiler::LinkExecutable(
     arguments.reserve(ownedArguments.size());
     for (const auto& argument : ownedArguments)
         arguments.emplace_back(argument);
+
+    llvm::SmallString<256> linkerOutputPath;
+    const std::error_code captureError = llvm::sys::fs::createTemporaryFile(
+        "flecha-linker", "stderr", linkerOutputPath);
+    std::optional<llvm::StringRef> redirects[3];
+    llvm::ArrayRef<std::optional<llvm::StringRef>> redirectRefs;
+    if (!captureError) {
+        redirects[2] = linkerOutputPath.str();
+        redirectRefs = redirects;
+    }
     std::string executionError;
     bool executionFailed = false;
-    const int result =
-        llvm::sys::ExecuteAndWait(linker.value(), arguments, std::nullopt, {},
-                                  0, 0, &executionError, &executionFailed);
+    const int result = llvm::sys::ExecuteAndWait(
+        linker.path.value(), arguments, std::nullopt, redirectRefs, 0, 0,
+        &executionError, &executionFailed);
+    const std::string linkerOutput = ReadLinkerOutput(linkerOutputPath);
+    if (!linkerOutputPath.empty())
+        std::filesystem::remove(linkerOutputPath.c_str());
     if (executionFailed || result != 0) {
-        std::string message =
-            "system linker failed with exit code " + std::to_string(result);
+        std::string message = "system linker '" + linker.path.value() +
+                              "' failed for target '" + _targetTriple +
+                              "' with exit code " + std::to_string(result);
         if (!executionError.empty()) message += ": " + executionError;
+        if (!linkerOutput.empty())
+            message += "\nlinker output:\n" + linkerOutput;
+        message += "\n" + PlatformToolchainHint();
         return Fail(diagnostics::DiagnosticCode::LinkerFailed,
                     std::move(message));
     }

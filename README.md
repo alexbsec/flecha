@@ -30,7 +30,7 @@ Build requirements are:
 - CMake 3.20 or newer
 - A C++23 compiler (Clang or GCC are the primary tested choices)
 - Ninja, or another CMake generator
-- LLVM development libraries and tools
+- LLVM 17 through 23 development libraries and tools
 
 LLVM's `lli` is required for the LLVM proof-of-concept target. Neovim is required only for the editor integration test. Test builds fetch GoogleTest through CMake unless a local checkout is supplied.
 
