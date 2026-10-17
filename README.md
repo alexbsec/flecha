@@ -230,6 +230,7 @@ Makefile                Convenient build, test, and example targets
 
 ## Documentation guide
 
+- [`CHANGELOG.md`](CHANGELOG.md) — release notes and upgrade-relevant changes
 - [`SPEC.md`](SPEC.md) — language goals, syntax, types, and current specification draft
 - [`docs/compiler.md`](docs/compiler.md) — compiler commands, outputs, and installed layout
 - [`docs/longbow.md`](docs/longbow.md) — project manifests, commands, and local dependencies

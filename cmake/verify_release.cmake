@@ -5,7 +5,7 @@ foreach(variable IN ITEMS FLECHA_COMPILER RELEASE_TAG SOURCE_ROOT)
 endforeach()
 
 if(NOT RELEASE_TAG MATCHES "^v([0-9]+\\.[0-9]+\\.[0-9]+)$")
-    message(FATAL_ERROR "release tag must use the form v0.1.0")
+    message(FATAL_ERROR "release tag must use the form vX.Y.Z")
 endif()
 set(expectedVersion "${CMAKE_MATCH_1}")
 
