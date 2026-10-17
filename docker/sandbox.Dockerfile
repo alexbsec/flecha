@@ -20,10 +20,13 @@ ENV CXX=/usr/bin/g++-14
 WORKDIR /src/flecha
 COPY . .
 
+ARG FLECHA_BUILD_VERSION
+
 RUN cmake -S . -B /tmp/flecha-build -G Ninja \
         -DBUILD_TESTING=OFF \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/opt/flecha \
+        "-DFLECHA_BUILD_VERSION=${FLECHA_BUILD_VERSION}" \
     && cmake --build /tmp/flecha-build --parallel \
     && cmake --install /tmp/flecha-build
 

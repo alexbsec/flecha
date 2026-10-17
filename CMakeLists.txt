@@ -5,6 +5,7 @@ project(Flecha VERSION 0.1.1 LANGUAGES C CXX)
 include(cmake/check_compiler_version.cmake)
 include(CTest)
 include(GNUInstallDirs)
+include(cmake/flecha_version.cmake)
 
 configure_file(
     src/include/flecha/version.hpp.in

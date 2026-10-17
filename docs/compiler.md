@@ -16,6 +16,15 @@ flecha --emit-llvm INPUT [-o OUTPUT] [--root DIR] [--lib NAME=DIR ...]
 flecha --emit-object INPUT -o OUTPUT [--root DIR] [--lib NAME=DIR ...]
 ```
 
+Release builds report the package version, such as `flecha 0.1.1`. Builds from
+a Git checkout append the number of commits since the matching release tag and
+the abbreviated commit, such as `flecha 0.1.1-5-g3738687`; tracked local edits
+also append `-dirty`. A shallow checkout without the release tag uses
+`0.1.1-dev-g<commit>`. Set the CMake cache variable `FLECHA_BUILD_VERSION` to
+provide an explicit value when Git metadata is unavailable. Official release
+jobs configure with `FLECHA_RELEASE_BUILD=ON`, which always reports exactly the
+package version and never includes a Git or dirty-worktree suffix.
+
 `check` runs the complete frontend without creating an artifact. `build` emits
 and links a host-native executable with the Flecha runtime. `--emit-object`
 stops before linking. `--emit-llvm` writes textual LLVM IR, or prints it when

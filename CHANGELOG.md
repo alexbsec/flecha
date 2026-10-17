@@ -13,6 +13,11 @@
   scope, so `value, err := call()` follows Go-style mixed declaration and
   assignment semantics. At least one non-blank destination must be new.
 
+### Tooling
+
+- Development builds of Flecha and Longbow now include the commit distance,
+  abbreviated Git revision, and dirty-worktree state in `--version` output.
+
 ## 0.1.1 - 2026-10-16
 
 Flecha 0.1.1 is a stabilization release for the first installable toolchain.

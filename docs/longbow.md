@@ -5,8 +5,10 @@ projects, checks/builds local source, and runs executables. It delegates languag
 semantics and import resolution to `flecha`.
 
 Longbow and the compiler are versioned together. `longbow --version` prints the
-release version. Release packages ship both tools; keeping them together is the
-supported setup on Linux, Windows, and macOS.
+same release or Git-derived development version as `flecha --version`. Release
+packages ship both tools; keeping them together is the supported setup on
+Linux, Windows, and macOS. See the [compiler guide](compiler.md) for the
+development-version format.
 
 Build both tools with `make build`. They are produced as `build/longbow` and
 `build/flecha`. Keep them together, put `flecha` on PATH, or set `FLECHA_COMPILER`
