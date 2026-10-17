@@ -3883,6 +3883,50 @@ TEST(SemanticMemoryTests, RuntimeArrayIndexingRequiresLiveAllocationBases) {
         EXPECT_TRUE(Analyze(source).diagnostics.HasErrors()) << source;
 }
 
+TEST(SemanticMemoryTests, RuntimeArraySlicesRequireTrackedOwnershipAndUnsafe) {
+    const std::string buffer =
+        "structure Buffer { own *i32 data; usize length; }; "
+        "unsafe Buffer Buffer::init(own *i32 data, usize length) override { "
+        "return build Buffer { self.data = data; self.length = length; }; } "
+        "unsafe void Buffer::tear(&self) override { free(self->data); } ";
+    auto valid = Analyze(buffer +
+                         "unsafe []i32 Buffer::view(&self) <- self { return "
+                         "self->data[:self->length]; }");
+    for (const auto& diagnostic : valid.diagnostics.Diagnostics())
+        ADD_FAILURE() << diagnostic.message;
+
+    for (const std::string& source : {
+             "unsafe void f(*i32 p) { values := p[:1]; values[0]; }",
+             "unsafe void f(lend *i32 p) { values := p[:1]; values[0]; }",
+             "void f(lend *i32 p) { values := p[:1]; values[0]; }",
+             "unsafe void f() { i32 value = 0; p := &raw value; values := "
+             "p[:1]; values[0]; }",
+         }) {
+        SCOPED_TRACE(source);
+        EXPECT_TRUE(Analyze(source).diagnostics.HasErrors());
+    }
+}
+
+TEST(SemanticMemoryTests, RuntimeArraySlicesProtectAllocationLifetime) {
+    const std::string consume = "unsafe void consume(own *i32 p) { free(p); } ";
+    for (const std::string& action : {"free(p);", "consume(p);"}) {
+        SCOPED_TRACE(action);
+        auto result =
+            Analyze(consume +
+                    "unsafe i32 f() { p, e := new<[]i32>(2); if e != none { "
+                    "return 0; } values := p[:]; " +
+                    action + " return values[0]; }");
+        EXPECT_NE(FindDiagnostic(result, DiagnosticCode::BorrowConflict),
+                  nullptr);
+    }
+
+    auto lastUse = Analyze(
+        "unsafe i32 f() { p, e := new<[]i32>(2); if e != none { return 0; } "
+        "values := p[:]; value := values[0]; free(p); return value; }");
+    for (const auto& diagnostic : lastUse.diagnostics.Diagnostics())
+        ADD_FAILURE() << diagnostic.message;
+}
+
 TEST(SemanticMemoryTests, RuntimeArrayCountRunsBeforeAllocationFailure) {
     auto analysis = Analyze(
         "unsafe usize count(own *i32 p) { free(p); return 3; } "

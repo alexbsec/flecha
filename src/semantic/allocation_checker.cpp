@@ -112,7 +112,15 @@ class AllocationChecker final {
                                           *node.memoryExpression)
                                           .Receiver())
                                 .Kind() == SemanticTypeKind::Pointer;
-                    if (node.allocation || heapIndex ||
+                    const bool heapSlice =
+                        node.memoryExpression &&
+                        node.memoryExpression->Kind() ==
+                            AstNodeKind::SliceExpression &&
+                        _model.TypeOf(static_cast<const core::SliceExpression&>(
+                                          *node.memoryExpression)
+                                          .Receiver())
+                                .Kind() == SemanticTypeKind::Pointer;
+                    if (node.allocation || heapIndex || heapSlice ||
                         (callee &&
                          callee->BuiltIn() == BuiltInFunction::Free) ||
                         (found != _functions.end() &&
@@ -1166,7 +1174,33 @@ class AllocationChecker final {
             case AstNodeKind::SliceExpression: {
                 const auto& slice =
                     static_cast<const core::SliceExpression&>(expression);
-                if (Owns(state, Get(state, slice.Receiver())))
+                const Value receiver = Get(state, slice.Receiver());
+                if (_model.TypeOf(slice.Receiver()).Kind() ==
+                    SemanticTypeKind::Pointer) {
+                    CheckUse(state, receiver, expression, true);
+                    const auto resource =
+                        state.resources.find(receiver.identity);
+                    const core::Expression& base = Unwrap(slice.Receiver());
+                    const auto* field =
+                        base.Kind() == AstNodeKind::MemberAccessExpression
+                            ? _model.FieldFor(
+                                  static_cast<
+                                      const core::MemberAccessExpression&>(
+                                      base))
+                            : nullptr;
+                    const bool owningField =
+                        field && field->syntax->Type().Contract() ==
+                                     OwnershipContract::Own;
+                    if (receiver.kind != ValueKind::Pointer ||
+                        resource == state.resources.end() ||
+                        !resource->second.live ||
+                        (!resource->second.owned &&
+                         !(resource->second.lent && owningField)))
+                        Report(DiagnosticCode::UnverifiedOwnership, expression,
+                               "raw slicing requires a live owning allocation "
+                               "or owning field",
+                               receiver.identity);
+                } else if (Owns(state, receiver))
                     Report(DiagnosticCode::UnverifiedOwnership, expression,
                            "cannot track allocation handles through a slice");
                 return {};

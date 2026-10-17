@@ -580,6 +580,55 @@ TEST(NativeCompilerTests, RunsMixedShortDestructuringDeclarations) {
     std::filesystem::remove(executablePath);
 }
 
+TEST(NativeCompilerTests, RunsOwnerBackedCheckedSlices) {
+    GeneratedSource result = Generate(R"(
+        structure Buffer { own *i32 data; usize length; };
+        unsafe Buffer Buffer::init(own *i32 data, usize length) override {
+            return build Buffer {
+                self.data = data;
+                self.length = length;
+            };
+        }
+        unsafe void Buffer::tear(&self) override { free(self->data); }
+        unsafe []i32 Buffer::view(&self) <- self {
+            return self->data[:self->length];
+        }
+        i32 main() {
+            unsafe {
+                empty := Buffer::init(null, 0);
+                emptyValues := empty.view();
+                if emptyValues.len() != 0 { return 2; }
+                data, err := new<[]i32>(2);
+                if err != none { return 1; }
+                buffer := Buffer::init(data, 2);
+                values := buffer.view();
+                values[0] = 42;
+                return values[0];
+            }
+        }
+    )");
+    for (const auto& diagnostic : result.diagnostics.Diagnostics())
+        ADD_FAILURE() << diagnostic.message;
+    ASSERT_FALSE(result.diagnostics.HasErrors());
+    ASSERT_NE(result.boundProgram, nullptr);
+
+    const std::filesystem::path executablePath =
+        std::filesystem::temp_directory_path() /
+        "flecha_native_owner_backed_slice_test";
+    std::filesystem::remove(executablePath);
+
+    NativeCompiler compiler;
+    ASSERT_TRUE(compiler.Ready()) << compiler.Error();
+    ASSERT_TRUE(compiler.BuildExecutable(*result.boundProgram,
+                                         "native_owner_backed_slice_test",
+                                         executablePath.string()))
+        << compiler.Error();
+    const std::string executablePathText = executablePath.string();
+    const llvm::StringRef arguments[] = {executablePathText};
+    EXPECT_EQ(llvm::sys::ExecuteAndWait(executablePathText, arguments), 42);
+    std::filesystem::remove(executablePath);
+}
+
 TEST(NativeCompilerTests, RunsEnumMatchesInMemberFunctions) {
     GeneratedSource result = Generate(R"(
         enum TokenKind: u8 { Identifier = 2, Number = 7, End = 9, }

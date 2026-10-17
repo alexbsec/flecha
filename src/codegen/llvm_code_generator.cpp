@@ -2003,12 +2003,19 @@ llvm::Value* LlvmCodeGenerator::EmitSlice(
     llvm::Value* zero = llvm::ConstantInt::get(sizeType, 0);
     llvm::Value* data;
     llvm::Value* length;
-    if (expression.Receiver().Type().Kind() ==
-        semantic::SemanticTypeKind::Slice) {
+    const auto receiverKind = expression.Receiver().Type().Kind();
+    if (receiverKind == semantic::SemanticTypeKind::Slice) {
         llvm::Value* source = EmitExpression(expression.Receiver());
         if (source == nullptr) return nullptr;
         data = _builder.CreateExtractValue(source, 0);
         length = _builder.CreateExtractValue(source, 1);
+    } else if (receiverKind == semantic::SemanticTypeKind::Pointer) {
+        data = EmitExpression(expression.Receiver());
+        if (data == nullptr) return nullptr;
+        const auto getCount = _module->getOrInsertFunction(
+            "flecha_runtime_v1_allocation_count",
+            llvm::FunctionType::get(sizeType, {data->getType()}, false));
+        length = _builder.CreateCall(getCount, {data}, "allocation.count");
     } else {
         llvm::Value* storage = EmitArrayStorage(expression.Receiver());
         if (storage == nullptr) return nullptr;
@@ -2027,8 +2034,12 @@ llvm::Value* LlvmCodeGenerator::EmitSlice(
     if (end == nullptr) return nullptr;
     EmitBoundsCheck(_builder.CreateAnd(_builder.CreateICmpULE(start, end),
                                        _builder.CreateICmpULE(end, length)));
-    data = _builder.CreateInBoundsGEP(MapType(*expression.Type().Target()),
-                                      data, start, "slice.data");
+    data =
+        receiverKind == semantic::SemanticTypeKind::Pointer
+            ? _builder.CreateGEP(MapType(*expression.Type().Target()), data,
+                                 start, "slice.data")
+            : _builder.CreateInBoundsGEP(MapType(*expression.Type().Target()),
+                                         data, start, "slice.data");
     llvm::Value* result =
         llvm::Constant::getNullValue(MapType(expression.Type()));
     result = _builder.CreateInsertValue(result, data, 0);
