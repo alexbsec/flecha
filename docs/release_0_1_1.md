@@ -19,6 +19,10 @@ public release without starting another language-feature wave.
 8. Keep all existing CI, sanitizer, packaging, installed-layout, and
    portability checks green.
 
+The authoritative compiler, LLVM, linker, SDK, and release-runner matrix is
+documented in [`toolchains.md`](toolchains.md) and enforced by CMake and both
+GitHub Actions workflows.
+
 ## Non-goals
 
 Flecha 0.1.1 does not include self-hosting, a package registry, a language

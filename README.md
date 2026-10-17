@@ -28,11 +28,13 @@ The compiler is implemented in modern C++ and currently includes a tokenizer, pa
 Build requirements are:
 
 - CMake 3.20 or newer
-- A C++23 compiler (Clang or GCC are the primary tested choices)
+- A supported C++23 compiler: Clang 17-23, GCC 13-16, or Apple Clang 16-17
 - Ninja, or another CMake generator
 - LLVM 17 through 23 development libraries and tools
 
 LLVM's `lli` is required for the LLVM proof-of-concept target. Neovim is required only for the editor integration test. Test builds fetch GoogleTest through CMake unless a local checkout is supplied.
+The pinned platform packages, linkers, SDKs, and release baselines are listed
+in [`docs/toolchains.md`](docs/toolchains.md).
 
 ### Build the compiler
 
@@ -216,6 +218,7 @@ Makefile                Convenient build, test, and example targets
 - [`docs/longbow.md`](docs/longbow.md) — project manifests, commands, and local dependencies
 - [`docs/release_0_1.md`](docs/release_0_1.md) — v0.1.0 platform contract and release gates
 - [`docs/release_0_1_1.md`](docs/release_0_1_1.md) — v0.1.1 stabilization scope and release condition
+- [`docs/toolchains.md`](docs/toolchains.md) — supported compiler, LLVM, linker, SDK, and CI versions
 - [`docs/semantic_analysis.md`](docs/semantic_analysis.md) — name binding, types, scopes, and analysis pipeline
 - [`docs/llvm_codegen.md`](docs/llvm_codegen.md) — current LLVM backend scope and limitations
 - [`docs/modules.md`](docs/modules.md) — modules, imports, and package libraries

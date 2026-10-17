@@ -1,5 +1,4 @@
-set(FLECHA_LLVM_MIN_MAJOR 17)
-set(FLECHA_LLVM_MAX_MAJOR 23)
+include(${CMAKE_CURRENT_LIST_DIR}/toolchain_policy.cmake)
 
 if(NOT DEFINED LLVM_VERSION_MAJOR)
     message(FATAL_ERROR

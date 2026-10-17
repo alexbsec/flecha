@@ -40,15 +40,35 @@ jobs:
           - os: ubuntu-24.04
             name: linux-x86_64
             suffix: ""
+            llvm_major: 18
+            compiler_family: Clang
+            compiler_major: 18
+            xcode_version: ""
+            sdk_major: ""
           - os: windows-2025
             name: windows-x86_64
             suffix: .exe
+            llvm_major: 23
+            compiler_family: Clang
+            compiler_major: 23
+            xcode_version: ""
+            sdk_major: ""
           - os: macos-15-intel
             name: macos-x86_64
             suffix: ""
+            llvm_major: 18
+            compiler_family: Clang
+            compiler_major: 18
+            xcode_version: "16.4"
+            sdk_major: 15
           - os: macos-15
             name: macos-arm64
             suffix: ""
+            llvm_major: 18
+            compiler_family: Clang
+            compiler_major: 18
+            xcode_version: "16.4"
+            sdk_major: 15
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -70,14 +90,27 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y llvm-dev ninja-build
-          echo "LLVM_DIR=$(llvm-config --cmakedir)" >> "$GITHUB_ENV"
+          sudo apt-get install -y \
+            clang-${{ matrix.compiler_major }} \
+            llvm-${{ matrix.llvm_major }}-dev \
+            ninja-build
+          echo "LLVM_DIR=$(/usr/bin/llvm-config-${{ matrix.llvm_major }} --cmakedir)" >> "$GITHUB_ENV"
+          echo "FLECHA_C_COMPILER=/usr/bin/clang-${{ matrix.compiler_major }}" >> "$GITHUB_ENV"
+          echo "FLECHA_CXX_COMPILER=/usr/bin/clang++-${{ matrix.compiler_major }}" >> "$GITHUB_ENV"
+          echo "FLECHA_LLVM_CONFIG=/usr/bin/llvm-config-${{ matrix.llvm_major }}" >> "$GITHUB_ENV"
 
       - name: Select LLVM (macOS)
         if: runner.os == 'macOS'
         run: |
-          echo "$(brew --prefix llvm@18)/bin" >> "$GITHUB_PATH"
-          echo "LLVM_DIR=$(brew --prefix llvm@18)/lib/cmake/llvm" >> "$GITHUB_ENV"
+          llvm_prefix="$(brew --prefix llvm@${{ matrix.llvm_major }})"
+          xcode_root="/Applications/Xcode_${{ matrix.xcode_version }}.app/Contents/Developer"
+          test -d "$xcode_root"
+          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          echo "DEVELOPER_DIR=$xcode_root" >> "$GITHUB_ENV"
+          echo "LLVM_DIR=$llvm_prefix/lib/cmake/llvm" >> "$GITHUB_ENV"
+          echo "FLECHA_C_COMPILER=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
+          echo "FLECHA_CXX_COMPILER=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
+          echo "FLECHA_LLVM_CONFIG=$llvm_prefix/bin/llvm-config" >> "$GITHUB_ENV"
 
       - name: Select LLVM (Windows)
         if: runner.os == 'Windows'
@@ -86,12 +119,28 @@ jobs:
           $prefix = Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'ucrt64'
           $cmakePrefix = $prefix -replace '\\', '/'
           if (!(Test-Path "$prefix\lib\cmake\llvm\LLVMConfig.cmake")) {
-            throw 'MSYS2 LLVM development files were not installed'
+            throw 'MSYS2 LLVM ${{ matrix.llvm_major }} development files were not installed'
           }
           "$prefix\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
           "LLVM_DIR=$cmakePrefix/lib/cmake/llvm" | Out-File -FilePath $env:GITHUB_ENV -Append
           "FLECHA_C_COMPILER=$cmakePrefix/bin/clang.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
           "FLECHA_CXX_COMPILER=$cmakePrefix/bin/clang++.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "FLECHA_LLVM_CONFIG=$cmakePrefix/bin/llvm-config.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Report and verify the release-build toolchain
+        shell: bash
+        run: >-
+          cmake
+          "-DPOLICY_ROOT=$PWD/cmake"
+          "-DCXX_COMPILER=$FLECHA_CXX_COMPILER"
+          "-DEXPECTED_CXX_FAMILY=${{ matrix.compiler_family }}"
+          "-DEXPECTED_CXX_MAJOR=${{ matrix.compiler_major }}"
+          "-DPLATFORM=${{ runner.os }}"
+          "-DLLVM_CONFIG=$FLECHA_LLVM_CONFIG"
+          "-DEXPECTED_LLVM_MAJOR=${{ matrix.llvm_major }}"
+          "-DEXPECTED_XCODE_VERSION=${{ matrix.xcode_version }}"
+          "-DEXPECTED_SDK_MAJOR=${{ matrix.sdk_major }}"
+          -P cmake/verify_toolchain.cmake
 
       - name: Configure release build
         shell: bash
@@ -171,7 +220,9 @@ jobs:
           name: clean-install-support
           path: |
             cmake/release_smoke.cmake
+            cmake/toolchain_policy.cmake
             cmake/verify_bundle.cmake
+            cmake/verify_toolchain.cmake
           if-no-files-found: error
 
   clean-install:
@@ -187,25 +238,42 @@ jobs:
             name: linux-x86_64
             suffix: ""
             archive_suffix: .tar.gz
+            compiler_family: Clang
+            compiler_major: 18
+            xcode_version: ""
+            sdk_major: ""
           - os: windows-2025
             name: windows-x86_64
             suffix: .exe
             archive_suffix: .zip
+            compiler_family: Clang
+            compiler_major: 23
+            xcode_version: ""
+            sdk_major: ""
           - os: macos-15-intel
             name: macos-x86_64
             suffix: ""
             archive_suffix: .tar.gz
+            compiler_family: AppleClang
+            compiler_major: 17
+            xcode_version: "16.4"
+            sdk_major: 15
           - os: macos-15
             name: macos-arm64
             suffix: ""
             archive_suffix: .tar.gz
+            compiler_family: AppleClang
+            compiler_major: 17
+            xcode_version: "16.4"
+            sdk_major: 15
     runs-on: ${{ matrix.os }}
     steps:
       - name: Install host linker (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang
+          sudo apt-get install -y binutils clang-${{ matrix.compiler_major }} libc6-dev
+          echo "FLECHA_HOST_CXX=/usr/bin/clang++-${{ matrix.compiler_major }}" >> "$GITHUB_ENV"
 
       - name: Install host linker (Windows)
         if: runner.os == 'Windows'
@@ -222,12 +290,16 @@ jobs:
         run: |
           $prefix = Join-Path '${{ steps.msys2.outputs.msys2-location }}' 'ucrt64\bin'
           $prefix | Out-File -FilePath $env:GITHUB_PATH -Append
+          $cmakePrefix = $prefix -replace '\\', '/'
+          "FLECHA_HOST_CXX=$cmakePrefix/clang++.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: Verify the macOS host linker and SDK
+      - name: Select the macOS host linker and SDK
         if: runner.os == 'macOS'
         run: |
-          xcrun --find clang++
-          xcrun --show-sdk-path
+          xcode_root="/Applications/Xcode_${{ matrix.xcode_version }}.app/Contents/Developer"
+          test -d "$xcode_root"
+          echo "DEVELOPER_DIR=$xcode_root" >> "$GITHUB_ENV"
+          echo "FLECHA_HOST_CXX=/usr/bin/clang++" >> "$GITHUB_ENV"
 
       - uses: actions/download-artifact@v4
         with:
@@ -238,6 +310,19 @@ jobs:
         with:
           name: clean-install-support
           path: test-support
+
+      - name: Report and verify the clean-install toolchain
+        shell: bash
+        run: >-
+          cmake
+          "-DPOLICY_ROOT=$PWD/test-support"
+          "-DCXX_COMPILER=$FLECHA_HOST_CXX"
+          "-DEXPECTED_CXX_FAMILY=${{ matrix.compiler_family }}"
+          "-DEXPECTED_CXX_MAJOR=${{ matrix.compiler_major }}"
+          "-DPLATFORM=${{ runner.os }}"
+          "-DEXPECTED_XCODE_VERSION=${{ matrix.xcode_version }}"
+          "-DEXPECTED_SDK_MAJOR=${{ matrix.sdk_major }}"
+          -P test-support/verify_toolchain.cmake
 
       - name: Extract and relocate the release archive
         shell: bash

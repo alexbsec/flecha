@@ -53,6 +53,18 @@ add_test(NAME BuildDiagnostics.LLVM
         -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_llvm_diagnostics.cmake
 )
 
+add_test(NAME BuildDiagnostics.Compiler
+    COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_compiler_diagnostics.cmake
+)
+
+add_test(NAME BuildDiagnostics.ToolchainConsistency
+    COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_ROOT=${PROJECT_SOURCE_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/verify_toolchain_consistency.cmake
+)
+
 add_test(
     NAME NativeRuntimeTests.PrintsEveryPrintableType
     COMMAND ${CMAKE_COMMAND}
