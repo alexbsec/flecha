@@ -95,10 +95,13 @@ An expected `string` element accepts a string literal or view by copying it:
 owned := ("hello".string(), 42);
 ```
 
-Inferred `("hello", 42)` would contain `stringv`, so it is rejected. References,
-slices, and string views cannot be tuple elements yet: stored borrowed values
-need lifetime contracts. Arrays/slices of tuples are also deferred. Raw pointers
-retain their unsafe lifetime contract.
+Inferred `("hello", 42)` would contain `stringv`, so it is rejected. References
+and slices may appear in a flat function-result tuple covered by an explicit
+`<- parameter>` contract, but that result must be immediately destructured;
+see [reference and slice returns](ref_and_slice_returns.md). Stored borrowed
+tuples, nested borrowed tuples, and string-view tuple elements remain rejected.
+Arrays/slices of tuples are also deferred. Raw pointers retain their unsafe
+lifetime contract.
 
 `const (i32, bool)` fixes the tuple binding. Reading or destructuring a const
 tuple copies its values into independently writable inferred bindings; explicit

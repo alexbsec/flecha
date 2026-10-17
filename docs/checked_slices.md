@@ -124,6 +124,13 @@ array snapshot semantics.
 
 ## Scope and verification
 
+A slice may be returned when its function declares the checked-reference or
+checked-slice parameter that anchors it, for example
+`[]const i32 view([]const i32 values) <- values`. The caller retains a loan on
+the actual source for as long as the returned slice is live. See
+[reference and slice returns](ref_and_slice_returns.md) for contracts,
+multi-results, and conservative boundaries.
+
 Slices have no `push()`, `pop_back()`, `iter()`, or `stitch()` method. Growth and explicit
 iterator handles are reserved for future container types.
 

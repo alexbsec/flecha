@@ -1553,8 +1553,7 @@ TEST(SemanticReferenceTests, ChildReborrowsFreezeParentsUntilLastUse) {
 
 TEST(SemanticReferenceTests, RejectsEscapesAndUnsupportedConversions) {
     for (const std::string& source :
-         {"&i32 f(&i32 r) { return r; }",
-          "void f() { i32 x = 1; r := &x; { i32 y = 2; r = &y; } }",
+         {"void f() { i32 x = 1; r := &x; { i32 y = 2; r = &y; } }",
           "void f() { i32 x = 1; r := &x; { child := &x; r = &*child; } }",
           "unsafe void f() { i32 x = 1; r := &x; &raw r; }",
           "unsafe void f() { i32 x = 1; r := &x; &raw *r; }"}) {
@@ -1565,6 +1564,137 @@ TEST(SemanticReferenceTests, RejectsEscapesAndUnsupportedConversions) {
     }
     EXPECT_NE(FindDiagnostic(Analyze("unsafe void f(*i32 p) { r := &*p; }"),
                              DiagnosticCode::InvalidReference),
+              nullptr);
+}
+
+TEST(SemanticReferenceTests, ValidatesBorrowedResultContracts) {
+    EXPECT_FALSE(Analyze("&i32 identity(&i32 value) <- value { return value; }")
+                     .diagnostics.HasErrors());
+    EXPECT_FALSE(
+        Analyze("&const i32 shared(&i32 value) <- value { return value; }")
+            .diagnostics.HasErrors());
+    EXPECT_FALSE(Analyze("[]const i32 view([]i32 values) <- values { return "
+                         "values; }")
+                     .diagnostics.HasErrors());
+
+    for (const std::string& source : {
+             "&i32 missing(&i32 value) { return value; }",
+             "&i32 unknown(&i32 value) <- other { return value; }",
+             "&i32 owned(i32 value) <- value { return &value; }",
+             "i32 unnecessary(&i32 value) <- value { return *value; }",
+             "&i32 wrong(&i32 left, &i32 right) <- left { return right; }",
+             "&i32 local(&i32 value) <- value { i32 result = 1; return "
+             "&result; }",
+             "((&i32, &i32), i32) nested(&i32 value) <- value { return "
+             "((value, value), 0); }",
+         }) {
+        SCOPED_TRACE(source);
+        EXPECT_NE(FindDiagnostic(Analyze(source),
+                                 DiagnosticCode::InvalidBorrowContract),
+                  nullptr);
+    }
+    EXPECT_NE(FindDiagnostic(
+                  Analyze("&i32 mutable(&const i32 value) <- value { return "
+                          "value; }"),
+                  DiagnosticCode::InvalidReturnType),
+              nullptr);
+
+    const std::string unknown =
+        "&i32 invalid(&i32 value) <- missing { return value; }";
+    Analysis analysis = Analyze(unknown);
+    const Diagnostic* diagnostic =
+        FindDiagnostic(analysis, DiagnosticCode::InvalidBorrowContract);
+    ASSERT_NE(diagnostic, nullptr);
+    EXPECT_EQ(diagnostic->range.start.offset, unknown.find("missing"));
+    EXPECT_EQ(diagnostic->range.Length(), std::string("missing").size());
+}
+
+TEST(SemanticReferenceTests, PropagatesBorrowedResultsIntoCallerState) {
+    const std::string identity =
+        "&i32 identity(&i32 value) <- value { return value; } ";
+    EXPECT_NE(FindDiagnostic(
+                  Analyze(identity + "i32 f() { i32 x = 1; r := identity(&x); "
+                                     "x = 2; return *r; }"),
+                  DiagnosticCode::BorrowConflict),
+              nullptr);
+    EXPECT_FALSE(Analyze(identity + "i32 f() { i32 x = 1; r := identity(&x); "
+                                    "*r = 2; x = 3; return x; }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(
+            Analyze(identity + "void f() { i32 x = 1; i32 y = 2; r := &x; "
+                               "child := identity(r); r = &y; *child = 3; }"),
+            DiagnosticCode::BorrowConflict),
+        nullptr);
+
+    const std::string view =
+        "[]const i32 view([]const i32 values) <- values { return values; } ";
+    EXPECT_NE(
+        FindDiagnostic(Analyze(view + "i32 f() { a := [1, 2]; s := view(a[:]); "
+                                      "a[0] = 3; return s[0]; }"),
+                       DiagnosticCode::BorrowConflict),
+        nullptr);
+}
+
+TEST(SemanticReferenceTests,
+     SupportsImmediatelyDestructuredMultipleBorrowedResults) {
+    const std::string pair =
+        "(&const i32, &const i32) ends(&const [2]i32 values) <- values { "
+        "return (&(*values)[0], &(*values)[1]); } ";
+    EXPECT_FALSE(Analyze(pair +
+                         "i32 f() { a := [2, 3]; left, right := ends(&a); "
+                         "return *left + *right; }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(
+        FindDiagnostic(Analyze(pair + "i32 f() { a := [2, 3]; left, right := "
+                                      "ends(&a); a[0] = 4; return *right; }"),
+                       DiagnosticCode::BorrowConflict),
+        nullptr);
+    EXPECT_NE(FindDiagnostic(
+                  Analyze(pair + "void f() { a := [2, 3]; pair := ends(&a); "
+                                 "}"),
+                  DiagnosticCode::InvalidBorrowContract),
+              nullptr);
+    EXPECT_NE(FindDiagnostic(Analyze(pair + "void f() { a := [2, 3]; "
+                                            "ends(&a); }"),
+                             DiagnosticCode::InvalidBorrowContract),
+              nullptr);
+
+    const std::string fields =
+        "structure Pair { i32 left; i32 right; }; "
+        "(&i32, &i32) fields(&Pair value) <- value { return "
+        "(&value->left, &value->right); } "
+        "(&i32, &i32) forward_fields(&Pair value) <- value { return "
+        "fields(value); } ";
+    EXPECT_FALSE(Analyze(fields +
+                         "i32 f() { Pair pair = none; left, right := "
+                         "forward_fields(&pair); *left = 2; *right = 3; return "
+                         "pair.left + pair.right; }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(FindDiagnostic(
+                  Analyze("structure Pair { i32 value; }; "
+                          "(&i32, &i32) duplicate(&Pair pair) <- pair { return "
+                          "(&pair->value, &pair->value); }"),
+                  DiagnosticCode::InvalidBorrowContract),
+              nullptr);
+}
+
+TEST(SemanticReferenceTests, SupportsReceiverAndTransitiveContracts) {
+    const std::string source =
+        "structure Box { i32 value; }; "
+        "&i32 identity(&i32 value) <- value { return value; } "
+        "&i32 forward(&i32 value) <- value { return identity(value); } "
+        "&i32 Box::value_ref(&self) <- self { return "
+        "forward(&self->value); } ";
+    EXPECT_FALSE(Analyze(source +
+                         "i32 good() { Box box = none; r := "
+                         "box.value_ref(); *r = 4; return box.value; }")
+                     .diagnostics.HasErrors());
+    EXPECT_NE(FindDiagnostic(
+                  Analyze(source + "i32 bad() { Box box = none; r := "
+                                   "box.value_ref(); box.value = 4; return "
+                                   "*r; }"),
+                  DiagnosticCode::BorrowConflict),
               nullptr);
 }
 
@@ -3856,6 +3986,18 @@ TEST(SemanticGenericTests,
     EXPECT_FALSE(result.diagnostics.HasErrors());
     EXPECT_EQ(result.unit->genericTemplates.size(), 5u);
     EXPECT_EQ(result.unit->Declarations().size(), 6u);
+}
+
+TEST(SemanticGenericTests, PreservesBorrowedResultContracts) {
+    auto result = Analyze(R"(
+        &const T identity_ref<T>(&const T value) <- value { return value; }
+        i32 main() {
+            i32 value = 42;
+            result := identity_ref<i32>(&value);
+            return *result;
+        }
+    )");
+    EXPECT_FALSE(result.diagnostics.HasErrors());
 }
 
 TEST(SemanticGenericTests, StructuresMethodsNestedTypesAndFieldComparisons) {

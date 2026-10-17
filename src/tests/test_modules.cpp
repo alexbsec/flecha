@@ -145,6 +145,20 @@ TEST_F(ModuleTests, ImportedOwnershipContractsRejectReuseAndReportSourceFiles) {
           "module memory; export unsafe void consume(own *i32 p) {}");
     EXPECT_NE(Check().find((root / "memory.fl").string()), std::string::npos);
 }
+TEST_F(ModuleTests, BorrowedResultContractsCrossModuleBoundaries) {
+    Write("access.fl",
+          "module access; export &const i32 view(&const i32 value) <- value "
+          "{ return value; }");
+    Write("main.fl",
+          "module main; @imports :: root::access; i32 main() { i32 value = "
+          "42; result := access::view(&value); return *result; }");
+    EXPECT_EQ(Check(), "");
+
+    Write("main.fl",
+          "module main; @imports :: root::access; i32 main() { i32 value = "
+          "42; result := access::view(&value); value = 0; return *result; }");
+    EXPECT_NE(Check().find("conflicts with live reference"), std::string::npos);
+}
 TEST_F(ModuleTests, RequiresImportsBeforeDeclarationsAndRejectsWrongDirective) {
     Write("main.fl", "module main; void main() {} @imports :: root::a;");
     EXPECT_FALSE(Check().empty());

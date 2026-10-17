@@ -90,10 +90,11 @@ may have moved on any incoming path. Re-executing a declaration cannot reset
 storage that is still borrowed. Unreachable code contributes no borrow effects.
 
 The first version is conservative: an assigned reference's owners and parent
-reborrows must have enclosing or equal lexical scopes. References cannot be
-returned, even when a caller could in principle prove them valid. It does not
-use condition/value correlation to prove paths impossible. Temporary borrows
-may remain live through their entire expression. Rebinding or moving the handle
+reborrows must have enclosing or equal lexical scopes. A reference may be
+returned only through an explicit `<- parameter>` contract; see
+[reference and slice returns](ref_and_slice_returns.md). It does not use
+condition/value correlation to prove paths impossible. Temporary borrows may
+remain live through their entire expression. Rebinding or moving the handle
 used to address a pending indirect assignment is rejected.
 
 ## Disjoint structure fields

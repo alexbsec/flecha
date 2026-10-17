@@ -313,7 +313,10 @@ priority; it does not depend on the system allocator.
 ## Later, separately scoped features
 
 - Safe heap owners and allocator-aware collections that can supply references.
-- Borrowed-result lifetime contracts and support for more precise lifetimes.
+- More precise multi-source and heap-owner lifetime contracts. Single-source
+  borrowed reference/slice results and immediately destructured flat
+  multi-results are implemented by `feat/ref-and-slice-returns`; see
+  [reference and slice returns](ref_and_slice_returns.md).
 - Flow-aware stringv origins, then delayed view initialization if sound.
 - Any explicit migration of existing strings to move semantics.
 - Custom allocators, aggregate partial initialization/moves, pointer arithmetic,

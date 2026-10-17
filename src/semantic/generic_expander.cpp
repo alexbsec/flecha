@@ -1092,6 +1092,17 @@ class Expander {
                 for (std::size_t i = 0; i < destructure.Bindings().size();
                      ++i) {
                     const auto& binding = *destructure.Bindings()[i];
+                    if (binding.Name() == "_") continue;
+                    bool local = locals.back().contains(binding.Name());
+                    // Parameters and the outermost function body share one
+                    // semantic scope even though the syntax walker keeps a
+                    // frame for each.
+                    if (!local && locals.size() == 2)
+                        local = locals.front().contains(binding.Name());
+                    const bool declaration =
+                        binding.ExplicitType() != nullptr ||
+                        (destructure.IsInferred() && !local);
+                    if (!declaration) continue;
                     locals.back().insert(binding.Name());
                     if (binding.ExplicitType())
                         localTypes.back()[binding.Name()] = {

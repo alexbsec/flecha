@@ -112,8 +112,7 @@ class GraphBuilder final {
                     if (target == nullptr) continue;
                     const NodeId store = AddNode({next});
                     _graph.nodes[store].write = target;
-                    if (destructure.IsInferred() ||
-                        (*binding)->ExplicitType() != nullptr) {
+                    if (_model.DeclaredSymbol(**binding) != nullptr) {
                         _graph.nodes[store].reset = target;
                         _graph.symbolScopes.emplace(target, _scopes.back());
                     }
@@ -159,7 +158,7 @@ class GraphBuilder final {
                 _graph.nodes[exit].memoryReturn = &result;
                 return result.Value() == nullptr
                            ? exit
-                           : BuildEvaluation(*result.Value(), exit);
+                           : BuildEvaluation(*result.Value(), exit, &result);
             }
             case core::AstNodeKind::IfStatement: {
                 const auto& conditional =
@@ -258,10 +257,13 @@ class GraphBuilder final {
                             : BuildExpression(expression, branch);
     }
 
-    NodeId BuildEvaluation(const core::Expression& expression, NodeId next) {
+    NodeId BuildEvaluation(
+        const core::Expression& expression, NodeId next,
+        const core::ReturnStatement* borrowReturn = nullptr) {
         const NodeId body = BuildExpression(expression, next);
         const NodeId action = AddNode({body});
         _graph.nodes[action].evaluation = &expression;
+        _graph.nodes[action].borrowReturn = borrowReturn;
         return action;
     }
 

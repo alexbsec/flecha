@@ -435,7 +435,8 @@ class FunctionDeclaration final : public Declaration {
                         std::vector<std::unique_ptr<Parameter>> parameters,
                         std::unique_ptr<BlockStatement> body,
                         source::SourceRange nameRange = {},
-                        std::string owner = {})
+                        std::string owner = {}, std::string borrowSource = {},
+                        source::SourceRange borrowSourceRange = {})
         : Declaration(range),
           _owner(std::move(owner)),
           _modifiers(std::move(modifiers)),
@@ -443,7 +444,9 @@ class FunctionDeclaration final : public Declaration {
           _name(std::move(name)),
           _parameters(std::move(parameters)),
           _body(std::move(body)),
-          _nameRange(nameRange.Empty() ? range : nameRange) {}
+          _nameRange(nameRange.Empty() ? range : nameRange),
+          _borrowSource(std::move(borrowSource)),
+          _borrowSourceRange(borrowSourceRange) {}
 
     [[nodiscard]] AstNodeKind Kind() const override {
         return AstNodeKind::FunctionDeclaration;
@@ -476,6 +479,15 @@ class FunctionDeclaration final : public Declaration {
         return _parameters;
     }
     [[nodiscard]] const BlockStatement& Body() const { return *_body; }
+    [[nodiscard]] bool HasBorrowSource() const {
+        return !_borrowSource.empty();
+    }
+    [[nodiscard]] const std::string& BorrowSource() const {
+        return _borrowSource;
+    }
+    [[nodiscard]] const source::SourceRange& BorrowSourceRange() const {
+        return _borrowSourceRange;
+    }
 
    private:
     std::string _owner;
@@ -485,6 +497,8 @@ class FunctionDeclaration final : public Declaration {
     std::vector<std::unique_ptr<Parameter>> _parameters;
     std::unique_ptr<BlockStatement> _body;
     source::SourceRange _nameRange;
+    std::string _borrowSource;
+    source::SourceRange _borrowSourceRange;
 };
 
 struct Import final {

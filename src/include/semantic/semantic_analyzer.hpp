@@ -34,11 +34,13 @@ class SemanticAnalyzer final {
     void AnalyzeDestructure(const core::DestructureStatement& statement);
     SemanticType AnalyzeTuple(const core::TupleExpression& expression,
                               SemanticType expected);
-    void ValidateTupleType(SemanticType type, source::SourceRange range);
+    void ValidateTupleType(SemanticType type, source::SourceRange range,
+                           bool allowBorrowed = false);
     void ValidateArrayType(SemanticType type, source::SourceRange range);
     SemanticType PlaceType(const core::Expression& expression) const;
     void RequireUnsafe(source::SourceRange range);
-    SemanticType ResolveType(const core::TypeNode& type);
+    SemanticType ResolveType(const core::TypeNode& type,
+                             bool allowBorrowedTuple = false);
     SemanticType ResolveTypeSyntax(const core::TypeNode& type);
     void RegisterErrorTypes(const core::CompilationUnit& unit);
     void RegisterEnums(const core::CompilationUnit& unit);

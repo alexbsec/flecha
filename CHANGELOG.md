@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Language
+
+- Checked reference and slice results now declare their source parameter with
+  `<-`, for example `&const i32 view(&const i32 value) <- value`.
+- Borrowed-result contracts compose through methods, modules, generics, and
+  transitive calls. Flat tuples may return multiple borrowed values when they
+  are immediately destructured; overlapping mutable results are rejected.
+- Short tuple declarations now reuse writable variables from the same lexical
+  scope, so `value, err := call()` follows Go-style mixed declaration and
+  assignment semantics. At least one non-blank destination must be new.
+
 ## 0.1.1 - 2026-10-16
 
 Flecha 0.1.1 is a stabilization release for the first installable toolchain.

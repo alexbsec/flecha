@@ -148,6 +148,9 @@ joins. See [defer.md](defer.md) for capture and cleanup rules.
 Tuple element types are structural and recursive. Expected tuple types supply
 element contexts for literals. Destructuring resolves existing destinations
 before analyzing its right-hand side and introduces new bindings afterward.
+For `:=`, existing writable names in the current lexical scope are assignments;
+other non-blank names are declarations, and at least one declaration is
+required.
 The shared CFG evaluates the complete source before destination writes, with
 scope resets for declarations. Borrow checking treats each destination as a
 write to its owner. `FLECHA-S0039` and `FLECHA-S0040` diagnose unsupported tuple

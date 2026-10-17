@@ -60,6 +60,7 @@ enum class TokenType {
     Comma,
     Dot,
     Arrow,
+    LeftArrow,
     Scope,
     Colon,
     SemiColon,

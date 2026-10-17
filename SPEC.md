@@ -89,7 +89,7 @@ Statements are terminated with semicolons. Blocks are enclosed in braces.
 Flecha function declarations place modifiers first, followed by the return type, function name, parameters, and body:
 
 ```text
-[modifiers] ReturnType functionName(parameters) {
+[modifiers] ReturnType functionName(parameters) [<- borrowSource] {
     body
 }
 ```
@@ -108,6 +108,10 @@ i32 add(i32 left, i32 right) {
 unsafe void write_register(*volatile u32 address, u32 value) {
     *address = value;
     return;
+}
+
+&const i32 view(&const i32 value) <- value {
+    return value;
 }
 ```
 
@@ -530,9 +534,12 @@ control flow. `constref T` fixes the handle without making its target read-only;
 moving a fixed mutable handle is rejected.
 
 References require initializers and cannot contain `none` or `null`. References
-to shorter-lived storage cannot escape into outer bindings. Reference returns,
-raw/reference conversions, reference comparisons, direct references to strings
-or views, and nested reference storage are rejected in this first version.
+to shorter-lived storage cannot escape into outer bindings. A reference result
+must declare the checked-reference or checked-slice parameter that anchors it
+with `<- parameter`; every return is verified against that source and the loan
+is propagated into the caller. Raw/reference conversions, reference
+comparisons, direct references to strings or views, and nested reference
+storage are rejected in this first version.
 `&*T` borrows a raw-pointer slot; accessing the raw pointee still requires unsafe
 permission. See [checked references](docs/checked_references.md) for exact rules,
 limits, and diagnostics. Integer literals gain contextual integer types with
@@ -597,9 +604,13 @@ Slices neither allocate nor own their elements. Bounds are checked even in unsaf
 blocks. `len()`, indexing, `front()`, and `back()` are supported; endpoint methods
 are writable locations when elements are mutable. Mutable handles move, shared
 handles copy, and calls reborrow. Slice ranges take a shared reborrow rather than
-copying the backing elements. Slice returns and nested borrowed storage remain
-unsupported pending lifetime contracts. See [checked slices](docs/checked_slices.md)
-for exact rules, limitations, and diagnostics.
+copying the backing elements. Slice results use the same `<- parameter>`
+contract as reference results. A flat result tuple may contain multiple
+references or slices from that one source when it is immediately destructured;
+overlapping mutable results are rejected. Nested borrowed storage remains
+unsupported. See [checked slices](docs/checked_slices.md) and
+[reference and slice returns](docs/ref_and_slice_returns.md) for exact rules,
+limitations, and diagnostics.
 
 ### 13.4 Structures
 
@@ -794,7 +805,7 @@ The following decisions are intentionally not finalized:
 - re-exports, cyclic modules, and separately compiled module interfaces;
 - additional declaration forms, including whether to introduce `var`;
 - string literal representation and encoding;
-- lifetime contracts for returned slices, references, and other borrowed views;
+- multi-source, heap-owner, and other more general borrowed-result contracts;
 - union syntax;
 - general move semantics, partial moves, and cleanup for future owning types;
 - allocator interfaces;

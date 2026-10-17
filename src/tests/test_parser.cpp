@@ -123,6 +123,33 @@ TEST(ParserTests, ParsesTypedParametersAndBareReturn) {
     EXPECT_EQ(returnStatement.Value(), nullptr);
 }
 
+TEST(ParserTests, ParsesBorrowResultSourceAfterParameters) {
+    DiagnosticBag diagnostics;
+    auto unit = ParseSource(
+        "&const i32 identity(&const i32 value) <- value { return value; }",
+        diagnostics);
+
+    ASSERT_FALSE(diagnostics.HasErrors());
+    ASSERT_EQ(unit->Declarations().size(), 1);
+    const auto& function =
+        static_cast<const FunctionDeclaration&>(*unit->Declarations()[0]);
+    EXPECT_TRUE(function.HasBorrowSource());
+    EXPECT_EQ(function.BorrowSource(), "value");
+    EXPECT_EQ(function.BorrowSourceRange().start.offset, 41);
+    EXPECT_EQ(function.BorrowSourceRange().end.offset, 46);
+}
+
+TEST(ParserTests, RequiresBorrowSourceAfterLeftArrow) {
+    DiagnosticBag diagnostics;
+    (void)ParseSource("&i32 invalid(&i32 value) <- { return value; }",
+                      diagnostics);
+
+    EXPECT_TRUE(diagnostics.HasErrors());
+    ASSERT_FALSE(diagnostics.Diagnostics().empty());
+    EXPECT_EQ(diagnostics.Diagnostics().front().code,
+              DiagnosticCode::ExpectedToken);
+}
+
 TEST(ParserTests, ParsesExternDeclarationWithSemicolonAndModifiers) {
     DiagnosticBag diagnostics;
     auto unit = ParseSource(

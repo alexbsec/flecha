@@ -226,6 +226,7 @@ Token Tokenizer::NextToken() {
             }
             return makeToken(TokenType::Bang);
         case '<':
+            if (Match('-')) return makeToken(TokenType::LeftArrow);
             return makeToken(Match('=') ? TokenType::LessEqual
                                         : TokenType::Less);
         case '>':
