@@ -956,6 +956,7 @@ void SemanticAnalyzer::RegisterFunction(
             enumOwner = const_cast<EnumType*>(type->Type().Enum());
     }
     std::vector<SemanticType> parameterTypes;
+    std::vector<core::OwnershipContract> parameterContracts;
     bool receiver = false;
     for (const auto& parameter : function.Parameters()) {
         SemanticType type = ResolveType(parameter->Type());
@@ -978,6 +979,7 @@ void SemanticAnalyzer::RegisterFunction(
                        "to the owning structure or enum");
         }
         parameterTypes.push_back(type);
+        parameterContracts.push_back(parameter->Type().Contract());
     }
     const SemanticType returnType = ResolveType(function.ReturnType(), true);
     const bool hasBorrowedResult = HasBorrowedResult(returnType);
@@ -1140,7 +1142,7 @@ void SemanticAnalyzer::RegisterFunction(
             BuiltInFunction::None, function.IsUnsafe(), owner,
             function.HasModifier(core::FunctionModifier::Private), receiver,
             function.IsExtern(), function.IsExtern() ? function.Name() : "",
-            enumOwner, borrowSourceIndex),
+            enumOwner, borrowSourceIndex, std::move(parameterContracts)),
         function));
     if (symbol && function.HasModifier(core::FunctionModifier::Extern))
         _forbiddenZeroEffects.insert(symbol);
@@ -3298,10 +3300,18 @@ SemanticType SemanticAnalyzer::AnalyzeSlice(
                    bound->Range(), "slice bounds must have type 'usize'");
     }
     if (receiver.IsError()) return receiver;
-    if (!receiver.IsSequence()) {
+    const bool heap = receiver.Kind() == SemanticTypeKind::Pointer;
+    if (heap) {
+        RequireUnsafe(expression.Range());
+        if (!StorageSize(*receiver.Target()))
+            Report(diagnostics::DiagnosticCode::InvalidAllocation,
+                   expression.Range(),
+                   "raw slicing requires a pointer to a sized value type");
+    }
+    if (!receiver.IsSequence() && !heap) {
         Report(diagnostics::DiagnosticCode::NotIndexable,
                expression.Receiver().Range(),
-               "slicing requires a fixed array or slice");
+               "slicing requires a fixed array, slice, or raw pointer");
         return SemanticType::Error();
     }
     SemanticType element = *receiver.Target();

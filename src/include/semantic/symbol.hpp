@@ -72,7 +72,8 @@ class FunctionSymbol final : public Symbol {
                    bool isPrivate = false, bool hasReceiver = false,
                    bool isExtern = false, std::string linkName = {},
                    const EnumType* enumOwner = nullptr,
-                   std::optional<std::size_t> borrowSourceIndex = std::nullopt)
+                   std::optional<std::size_t> borrowSourceIndex = std::nullopt,
+                   std::vector<core::OwnershipContract> parameterContracts = {})
         : Symbol(SymbolKind::Function, std::move(name),
                  SemanticType(SemanticTypeKind::Function), declarationRange,
                  false),
@@ -86,7 +87,8 @@ class FunctionSymbol final : public Symbol {
           _hasReceiver(hasReceiver),
           _isExtern(isExtern),
           _linkName(linkName.empty() ? Name() : std::move(linkName)),
-          _borrowSourceIndex(borrowSourceIndex) {}
+          _borrowSourceIndex(borrowSourceIndex),
+          _parameterContracts(std::move(parameterContracts)) {}
 
     [[nodiscard]] SemanticType ReturnType() const { return _returnType; }
     [[nodiscard]] const std::vector<SemanticType>& ParameterTypes() const {
@@ -103,6 +105,12 @@ class FunctionSymbol final : public Symbol {
     [[nodiscard]] std::optional<std::size_t> BorrowSourceIndex() const {
         return _borrowSourceIndex;
     }
+    [[nodiscard]] core::OwnershipContract ParameterContract(
+        std::size_t index) const {
+        return index < _parameterContracts.size()
+                   ? _parameterContracts[index]
+                   : core::OwnershipContract::None;
+    }
     [[nodiscard]] BuiltInFunction BuiltIn() const { return _builtIn; }
 
    private:
@@ -117,6 +125,7 @@ class FunctionSymbol final : public Symbol {
     bool _isExtern;
     std::string _linkName;
     std::optional<std::size_t> _borrowSourceIndex;
+    std::vector<core::OwnershipContract> _parameterContracts;
 };
 
 struct EnumVariant final {

@@ -815,6 +815,16 @@ class BorrowChecker final {
                 for (std::size_t index = 0; index < call.Arguments().size();
                      ++index) {
                     Value value = Evaluate(*call.Arguments()[index]);
+                    const bool destroys =
+                        function != nullptr &&
+                        ((index == 0 &&
+                          (function->BuiltIn() == BuiltInFunction::Free ||
+                           function->BuiltIn() == BuiltInFunction::Take)) ||
+                         function->ParameterContract(index) ==
+                             core::OwnershipContract::Own);
+                    if (destroys)
+                        CheckAccess(Place(*call.Arguments()[index]), true,
+                                    call.Arguments()[index]->Range());
                     if (function != nullptr &&
                         function->BorrowSourceIndex() == index)
                         borrowSource = value;
@@ -881,6 +891,10 @@ class BorrowChecker final {
                     for (std::size_t i = 0; i < call.Arguments().size(); ++i) {
                         Value value = Evaluate(*call.Arguments()[i]);
                         const std::size_t parameter = i + offset;
+                        if (method->ParameterContract(parameter) ==
+                            core::OwnershipContract::Own)
+                            CheckAccess(Place(*call.Arguments()[i]), true,
+                                        call.Arguments()[i]->Range());
                         if (method->BorrowSourceIndex() == parameter)
                             borrowSource = value;
                         const auto type = method->ParameterTypes()[parameter];
