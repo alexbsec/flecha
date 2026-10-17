@@ -63,6 +63,20 @@ documentation, and Visual Studio Code and Neovim support.
 See [`docs/release_0_1.md`](docs/release_0_1.md) for the Linux, Windows, and
 macOS release gates.
 
+### Install editor support
+
+Each GitHub Release provides `flecha-language-VERSION.vsix` for Visual Studio
+Code. Install it on Linux, macOS, or Windows with:
+
+```sh
+code --install-extension flecha-language-VERSION.vsix
+```
+
+Compiler archives contain the Neovim plugin under
+`share/flecha/editors/neovim`. See the
+[`editor installation guide`](docs/editors.md) for Neovim commands, checksums,
+upgrades, uninstalling, and packaging the VS Code extension from a checkout.
+
 ### Check and build a program
 
 Flecha source files use the `.fl` extension. An executable entry module must define either `i32 main()` or `void main()`.
@@ -174,6 +188,7 @@ Useful focused targets include:
 ```sh
 make test-semantic       # Semantic and scope tests
 make test-neovim         # Neovim syntax/filetype integration
+make package-vscode      # Build and verify the installable VSIX
 make test-sanitizers     # AddressSanitizer and UBSan tests
 make llvm-poc            # Emit and execute LLVM IR; expects exit code 42
 make native-poc          # Build and execute a native example; expects 42
@@ -216,6 +231,7 @@ Makefile                Convenient build, test, and example targets
 - [`SPEC.md`](SPEC.md) — language goals, syntax, types, and current specification draft
 - [`docs/compiler.md`](docs/compiler.md) — compiler commands, outputs, and installed layout
 - [`docs/longbow.md`](docs/longbow.md) — project manifests, commands, and local dependencies
+- [`docs/editors.md`](docs/editors.md) — VS Code and Neovim installation and packaging
 - [`docs/release_0_1.md`](docs/release_0_1.md) — v0.1.0 platform contract and release gates
 - [`docs/release_0_1_1.md`](docs/release_0_1_1.md) — v0.1.1 stabilization scope and release condition
 - [`docs/toolchains.md`](docs/toolchains.md) — supported compiler, LLVM, linker, SDK, and CI versions
@@ -237,10 +253,10 @@ The documentation intentionally labels proposals and proof-of-concept functional
 
 Use the existing build and test targets when possible. C++ code follows the conventions in [`CODE_STYLE.md`](CODE_STYLE.md), and generated build directories should remain uncommitted. Before opening a change, run the relevant focused tests as well as `make test` when practical.
 
-Pull requests run unit and native tests, sanitizers, editor checks, and
-cross-platform package smoke tests. Publishing a GitHub Release with a matching
-semantic version tag such as `v0.1.0` builds and attaches the Linux, Windows,
-and macOS bundles automatically. See the
+Pull requests run unit and native tests, sanitizers, editor checks, VSIX
+packaging, and cross-platform package smoke tests. Publishing a GitHub Release
+with a matching semantic version tag such as `v0.1.0` builds and attaches the
+Linux, Windows, and macOS bundles plus the Visual Studio Code extension. See the
 [`v0.1.0 automation guide`](docs/release_0_1.md#automation).
 
 The working tree may contain experimental language work, so changes should preserve existing diagnostics, examples, and test fixtures unless the behavior change is intentional and documented.

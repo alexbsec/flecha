@@ -129,8 +129,27 @@ if(PLATFORM STREQUAL "macOS")
 elseif(PLATFORM STREQUAL "Linux")
     run_tool(libcVersion "Linux C runtime" ldd --version)
 elseif(PLATFORM STREQUAL "Windows")
+    get_filename_component(compilerBinDirectory "${CXX_COMPILER}" DIRECTORY)
+    get_filename_component(ucrtDirectory "${compilerBinDirectory}" DIRECTORY)
+    get_filename_component(msys2Root "${ucrtDirectory}" DIRECTORY)
+    set(pacmanExecutable "${msys2Root}/usr/bin/pacman.exe")
+    if(NOT EXISTS "${pacmanExecutable}")
+        message(FATAL_ERROR
+            "Could not locate MSYS2 pacman.exe from ${CXX_COMPILER}; expected "
+            "${pacmanExecutable}."
+        )
+    endif()
     run_tool(ucrtVersion "MSYS2 UCRT runtime"
-             msys2 -c "pacman -Q mingw-w64-ucrt-x86_64-crt")
+             "${pacmanExecutable}" -Q mingw-w64-ucrt-x86_64-crt)
+    run_tool(ucrtStartupObject "MSYS2 UCRT startup object"
+             "${CXX_COMPILER}" -print-file-name=crt2.o)
+    if(ucrtStartupObject STREQUAL "crt2.o" OR
+       NOT EXISTS "${ucrtStartupObject}")
+        message(FATAL_ERROR
+            "The verified MSYS2 UCRT64 compiler cannot locate crt2.o: "
+            "${ucrtStartupObject}"
+        )
+    endif()
 else()
     message(FATAL_ERROR "Unsupported PLATFORM '${PLATFORM}'")
 endif()

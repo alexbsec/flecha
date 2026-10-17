@@ -137,6 +137,10 @@ install(DIRECTORY editors/neovim/
 )
 install(DIRECTORY editors/vscode/
     DESTINATION ${CMAKE_INSTALL_DATADIR}/flecha/editors/vscode
+    PATTERN ".vscodeignore" EXCLUDE
+    PATTERN "node_modules" EXCLUDE
+    PATTERN "package-lock.json" EXCLUDE
+    PATTERN "*.vsix" EXCLUDE
 )
 install(FILES README.md CONTRIBUTING.md CODE_STYLE.md SPEC.md LICENSE
     DESTINATION ${CMAKE_INSTALL_DOCDIR}

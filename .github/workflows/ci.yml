@@ -37,6 +37,47 @@ jobs:
             esac
           fi
 
+  editor-package:
+    name: VS Code extension package
+    needs: contribution-policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+
+      - name: Install locked extension dependencies
+        run: npm ci --prefix editors/vscode --ignore-scripts
+
+      - name: Build VSIX
+        run: npm run --prefix editors/vscode package
+
+      - name: Verify VSIX installation contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          packages=(editors/vscode/flecha-language-*.vsix)
+          if [[ ${#packages[@]} -ne 1 ]]; then
+            echo "Expected one VSIX, found ${#packages[@]}" >&2
+            exit 1
+          fi
+          cmake \
+            "-DVSIX=$PWD/${packages[0]}" \
+            "-DEDITOR_ROOT=$PWD/editors/vscode" \
+            "-DOUTPUT_ROOT=$PWD/build-vsix-contents" \
+            -P cmake/verify_vsix.cmake
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: editors/vscode/flecha-language-*.vsix
+          if-no-files-found: error
+
   linux-tests:
     name: Linux tests and editor checks
     needs: contribution-policy
