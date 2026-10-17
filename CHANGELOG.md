@@ -1,0 +1,38 @@
+# Changelog
+
+## 0.1.1 - 2026-10-16
+
+Flecha 0.1.1 is a stabilization release for the first installable toolchain.
+It does not introduce a new language-feature wave.
+
+### Fixed and improved
+
+- Release archives are exercised by fresh downstream consumers on Linux
+  x86-64, Windows x86-64, macOS x86-64, and macOS arm64. Each test relocates
+  the unpacked installation before checking the compiler, native output,
+  Longbow workflows, and bundled dependencies.
+- Missing or unusable host linkers now produce structured diagnostics with the
+  attempted drivers, linker output, and platform-specific prerequisite hints.
+- Supported C/C++ compiler and LLVM ranges are enforced consistently by CMake,
+  CI, release builds, and documentation. Release jobs also verify the actual
+  linker, runtime or SDK, target, and Xcode versions.
+- Windows clean-install verification queries the MSYS2 UCRT64 runtime through
+  the installed `pacman.exe` path.
+
+### Distribution and documentation
+
+- GitHub Releases now include a validated `flecha-language-0.1.1.vsix` with the
+  platform archives and consolidated checksums.
+- Visual Studio Code and Neovim installation, upgrade, verification, and
+  removal workflows are documented.
+- The specification and implementation guides now distinguish shipped 0.1
+  behavior from remaining proposals, including the full LLVM backend, checked
+  references and slices, allocation analysis, ownership contracts, generics,
+  and current ABI and cross-compilation limits.
+
+### Installation requirements
+
+Release archives bundle their matching LLVM runtime and do not require LLVM
+development files. Native executable builds still require the documented host
+linker and platform SDK prerequisites in
+[`docs/toolchains.md`](docs/toolchains.md).

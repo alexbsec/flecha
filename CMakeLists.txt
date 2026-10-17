@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(Flecha VERSION 0.1.0 LANGUAGES C CXX)
+project(Flecha VERSION 0.1.1 LANGUAGES C CXX)
 
 include(cmake/check_compiler_version.cmake)
 include(CTest)
@@ -142,7 +142,7 @@ install(DIRECTORY editors/vscode/
     PATTERN "package-lock.json" EXCLUDE
     PATTERN "*.vsix" EXCLUDE
 )
-install(FILES README.md CONTRIBUTING.md CODE_STYLE.md SPEC.md LICENSE
+install(FILES README.md CHANGELOG.md CONTRIBUTING.md CODE_STYLE.md SPEC.md LICENSE
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
 )
 install(DIRECTORY docs/
